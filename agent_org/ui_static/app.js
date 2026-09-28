@@ -160,8 +160,18 @@ function roleCard(r) {
       s && h('span', { class: 'muted', style: { fontSize: '11px', marginLeft: '6px' } }, ago(s.updated_at))),
     s && s.task && h('div', { class: 'task' }, s.task),
     h('div', { class: 'meta' },
+      runningEl(r),
       h('span', { class: r.unread ? 'hot' : '' }, `${r.unread} unread`),
       h('span', {}, plural(r.locks.length, 'file'))));
+}
+
+function runningEl(r) {
+  if (!r.online) return h('span', { class: 'run off', title: 'No session of this role is running' }, 'not running');
+  if (r.online > 1) {
+    return h('span', { class: 'run dup', title: 'Several sessions share this role and split its messages. Close the extra tabs.' },
+      `${r.online} sessions!`);
+  }
+  return h('span', { class: 'run on', title: 'Its session is running' }, 'running');
 }
 
 // ---------- role drawer ----------
@@ -193,9 +203,10 @@ function renderDrawer() {
       h('div', { class: 'actions' },
         h('button', { class: 'primary', onclick: () => messageTo(r.name) }, 'Message'),
         S.state.launchable.includes(r.harness)
-          && h('button', { onclick: () => launchRoles([r.name]) }, 'Open terminal tab'),
+          && h('button', { onclick: () => openRoleTab(r) }, r.online ? 'Open another tab' : 'Open terminal tab'),
         r.tier && h('button', { class: 'danger', onclick: () => dismiss(r.name) }, 'Dismiss consultant')),
       h('dl', {},
+        h('dt', {}, 'Session'), h('dd', {}, runningEl(r)),
         h('dt', {}, 'Status'),
         h('dd', {}, s
           ? [h('span', { class: `state ${s.state}` }, s.state), s.task ? ` - ${s.task}` : '',
@@ -248,7 +259,7 @@ function renderFeed(scroll) {
   if (scroll === 'bottom') feed.scrollTop = feed.scrollHeight;
 }
 
-const KIND_LABEL = { instruction: 'instruction', report: 'report', help: 'help request' };
+const KIND_LABEL = { instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer' };
 
 function messageEl(m, compact = false) {
   const toMe = m.recipient === S.state.owner;
@@ -366,10 +377,17 @@ async function act(promise, done) {
   }
 }
 
-function launchRoles(roles) {
-  return act(api('/api/launch', { roles }), (r) =>
+function launchRoles(roles, force = false) {
+  return act(api('/api/launch', { roles, force }), (r) =>
     (r.opening.length ? `Opening: ${r.opening.join(', ')}` : 'Nothing to open.')
     + (r.skipped.length ? `\nSkipped: ${r.skipped.join('; ')}` : ''));
+}
+
+function openRoleTab(r) {
+  if (!r.online) return launchRoles([r.name]);
+  if (confirm(`${r.name} is already running. A second session would split its messages with the first.\n`
+    + 'Open another tab anyway? (Close the old tab first if it is stuck.)')) launchRoles([r.name], true);
+  return null;
 }
 
 function release(path) {
@@ -435,7 +453,7 @@ $('#mark-read').addEventListener('click', () => act(api('/api/inbox/read', {}), 
   return 'Marked as read.';
 }));
 $('#launch-all').addEventListener('click', () => {
-  if (confirm('Open a terminal tab for every role in team.yaml?')) launchRoles([]);
+  if (confirm('Open a terminal tab for every role in team.yaml that is not running yet?')) launchRoles([]);
 });
 $('#composer').addEventListener('submit', (e) => {
   e.preventDefault();

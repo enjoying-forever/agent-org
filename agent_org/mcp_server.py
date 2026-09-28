@@ -29,6 +29,7 @@ from .team import TeamError
 
 FALLBACK_PROTOCOL = "2025-06-18"
 DEFAULT_WAIT = 1800  # seconds; launchers raise each harness's tool timeout above this
+HEARTBEAT = 10  # seconds between presence check-ins; the hub counts a role as running for 30
 
 
 def _fmt_message(m: Message) -> str:
@@ -56,10 +57,13 @@ class Tools:
 
         self._add("my_role", "Show your role, duties, superior, team and the rules you work under.",
                   {}, [], lambda a: role_card(me))
+        self._add("team_status",
+                  "See the whole team: every role, who it reports to, what it is doing, and whether it is running.",
+                  {}, [], lambda a: self._team_status())
         self._add("send_message",
-                  "Send a message to your direct superior (a report) or to anyone below you (an instruction).",
-                  {"to": text, "text": text, "reply_to": reply}, ["to", "text"],
-                  lambda a: "Sent " + _fmt_message(me.send(a["to"], a["text"], a.get("reply_to"))))
+                  "Send a message to your direct superior (a report), a peer with the same superior, "
+                  "or anyone below you (an instruction).",
+                  {"to": text, "text": text, "reply_to": reply}, ["to", "text"], self._send)
         self._add("ask_help", "Ask your direct superior for help.",
                   {"question": text, "reply_to": reply}, ["question"],
                   lambda a: "Sent " + _fmt_message(me.ask_help(a["question"], a.get("reply_to"))))
@@ -73,7 +77,8 @@ class Tools:
                   {"state": {"type": "string", "enum": ["idle", "working", "waiting", "blocked", "done"]},
                    "task": text}, ["state"],
                   lambda a: self._status(a))
-        self._add("view", "Look at yourself or a role below you: status, locks and recent messages.",
+        self._add("view", "Look at a role: its status and locks, and its recent messages if it is you "
+                          "or below you.",
                   {"role": text}, ["role"], self._view)
         self._add("claim_file", "Take the write lock on a file before editing it. One writer per file.",
                   {"path": {"type": "string", "description": "path relative to the project folder"}},
@@ -117,9 +122,11 @@ class Tools:
 
     def _wait(self, args: dict[str, Any], cancelled: threading.Event | None = None) -> str:
         timeout = max(1, int(args.get("timeout_seconds") or DEFAULT_WAIT))
-        self.me.set_status("waiting", "")
+        before = self.me.store.get_status(self.me.name)
+        self.me.set_status("waiting", before.task if before else "")
         messages = self.me.wait_for_messages(timeout, stop=cancelled)
-        self.me.set_status("working" if messages else "idle", "")
+        if messages:
+            self.me.set_status("working", "")
         return _fmt_messages(messages, f"No messages in {timeout} seconds. Call wait_for_messages again.")
 
     def _summon(self, args: dict[str, Any]) -> str:
@@ -136,17 +143,53 @@ class Tools:
         s = self.me.set_status(args["state"], args.get("task") or "")
         return f"Status: {s.state}" + (f" - {s.task}" if s.task else "")
 
+    def _send(self, args: dict[str, Any]) -> str:
+        m = self.me.send(args["to"], args["text"], args.get("reply_to"))
+        text = "Sent " + _fmt_message(m)
+        if not self.me.store.online().get(m.recipient) and m.recipient != self.me.team.owner:
+            text += f"\n({m.recipient} is not running right now; it will get this when it starts.)"
+        return text
+
+    def _team_status(self) -> str:
+        lines = [f"{self.me.team.owner} (owner)"]
+        for row in self.me.overview():
+            s = row.status
+            state = f"{s.state}" + (f" - {s.task}" if s.task else "") if s else "not started"
+            running = "" if row.online else ", not running"
+            temp = f", consultant ({row.role.tier})" if row.role.is_consultant else ""
+            files = f", writing {row.locks} file(s)" if row.locks else ""
+            me = "  <- you" if row.name == self.me.name else ""
+            lines.append(f"{'  ' * (row.depth + 1)}{row.name} [{row.role.harness}{temp}{running}]: "
+                         f"{state}{files}{me}")
+        return "\n".join(lines)
+
     def _view(self, args: dict[str, Any]) -> str:
         v = self.me.view(args["role"])
-        lines = [f"{v.name}: superior {v.superior or '-'}, subordinates {', '.join(v.subordinates) or '-'}"]
+        lines = [f"{v.name}: superior {v.superior or '-'}, subordinates {', '.join(v.subordinates) or '-'}",
+                 "running" if v.online else "not running"]
         if v.status:
             lines.append(f"status: {v.status.state}" + (f" - {v.status.task}" if v.status.task else ""))
-        lines.append(f"unread messages: {v.unread}")
         lines.append(f"locks: {', '.join(x.path for x in v.locks) or '-'}")
-        if v.recent:
-            lines.append("recent messages:")
-            lines.append(_fmt_messages(v.recent, ""))
+        if v.limited:
+            lines.append("(Its messages are visible only to itself and the roles above it.)")
+        else:
+            lines.append(f"unread messages: {v.unread}")
+            if v.recent:
+                lines.append("recent messages:")
+                lines.append(_fmt_messages(v.recent, ""))
         return "\n".join(lines)
+
+    def _mail_notice(self) -> str:
+        """A line about messages that arrived since the agent was last told, if any."""
+        try:
+            new = self.me.store.unnoticed(self.me.name)
+        except HubError:
+            return ""
+        if not new:
+            return ""
+        senders = ", ".join(dict.fromkeys(m.sender for m in new))
+        return (f"\n\n[agent-org] {len(new)} new message(s) for you from {senders} "
+                f"({', '.join(f'#{m.id}' for m in new)}). Read them with read_inbox.")
 
     def call(self, name: str, args: dict[str, Any],
              cancelled: threading.Event | None = None) -> tuple[str, bool]:
@@ -156,11 +199,14 @@ class Tools:
         if name == "wait_for_messages":  # the one tool that must notice the caller giving up
             handler = lambda a: self._wait(a, cancelled)  # noqa: E731
         try:
-            return handler(args), False
+            text, is_error = handler(args), False
         except KeyError as e:
-            return f"Missing argument: {e.args[0]}", True
+            text, is_error = f"Missing argument: {e.args[0]}", True
         except HubError as e:
-            return f"Refused: {e}", True
+            text, is_error = f"Refused: {e}", True
+        if name not in ("read_inbox", "wait_for_messages"):
+            text += self._mail_notice()
+        return text, is_error
 
 
 class Server:
@@ -269,9 +315,23 @@ def main(argv: list[str] | None = None) -> int:
     except (TeamError, HubError) as e:
         print(f"agent-org: {e}", file=sys.stderr)
         return 2
+    # Check in while this session lives, so the team and the UI can see who is running.
+    pid, done = os.getpid(), threading.Event()
+    hub.store.check_in(pid, args.role)
+
+    def heartbeat() -> None:
+        while not done.wait(HEARTBEAT):
+            try:
+                hub.store.check_in(pid, args.role)
+            except Exception:  # noqa: BLE001 - a busy database must not kill the session
+                pass
+
+    threading.Thread(target=heartbeat, name="heartbeat", daemon=True).start()
     try:
         Server(me).serve()
     finally:
+        done.set()
+        hub.store.check_out(pid)
         hub.close()
     return 0
 

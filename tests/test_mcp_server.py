@@ -86,7 +86,7 @@ def test_initialize_echoes_protocol_and_gives_the_role_card(client):
     assert "Your superior: tech-lead" in result["instructions"]
 
 
-BASIC_TOOLS = {"my_role", "send_message", "ask_help", "read_inbox", "wait_for_messages",
+BASIC_TOOLS = {"my_role", "team_status", "send_message", "ask_help", "read_inbox", "wait_for_messages",
                "set_status", "view", "claim_file", "release_file", "list_locks", "hand_over_file"}
 
 
@@ -120,16 +120,48 @@ def test_summon_and_dismiss_through_tools(client, hub, opener):
                                               brief="probably the loop in tokenize()")
     assert not is_error and text.startswith("Summoned consultant-1 (high, codex) under worker-a")
     assert opener.opened == ["consultant-1"]
+    hub.session("worker-a").read_inbox()  # tech-lead's notice about the consultant
     text, is_error = client("worker-a").tool("dismiss_consultant", name="consultant-1")
     assert (text, is_error) == ("Dismissed consultant-1.", False)
 
 
-def test_role_card_lists_the_whole_subtree_for_managers(client):
-    text, is_error = client("leader").tool("my_role")
-    assert not is_error
-    assert "Your direct subordinates: tech-lead, researcher" in text
-    assert "Everyone below you: tech-lead, researcher, worker-a, worker-b" in text
-    assert "worker-b (antigravity, reports to tech-lead)" in text
+def test_role_card_shows_the_whole_team_to_everyone(client):
+    leader = client("leader").tool("my_role")[0]
+    assert "Your superior: you, the owner: a person who reads your messages in the agent-org UI" in leader
+    assert "Your direct subordinates: tech-lead, researcher" in leader
+    worker = client("worker-b").tool("my_role")[0]
+    assert "Your peers (same superior): worker-a" in worker
+    assert "    - worker-b (antigravity): -  <- you" in worker
+    assert "  - researcher (grok): -" in worker  # other branches are listed too
+    assert "text you write in your own session reaches nobody" in worker
+
+
+def test_team_status_tool(client, hub):
+    hub.session("worker-a").set_status("working", "login form")
+    hub.store.check_in(7, "worker-a")
+    text, _ = client("researcher").tool("team_status")
+    lines = text.splitlines()
+    assert lines[0] == "you (owner)"
+    assert "  leader [claude, not running]: not started" in lines
+    assert "      worker-a [codex]: working - login form" in lines
+    assert "    researcher [grok, not running]: not started  <- you" in lines
+
+
+def test_tool_results_mention_new_mail_once(client, hub):
+    worker = client("worker-a")
+    hub.session("tech-lead").send("worker-a", "please add tests")
+    text, _ = worker.tool("list_locks")
+    assert text.endswith("1 new message(s) for you from tech-lead (#1). Read them with read_inbox.")
+    assert worker.tool("list_locks")[0] == "No files are locked."  # told once
+    assert "please add tests" in worker.tool("read_inbox")[0]
+
+
+def test_sending_to_a_role_that_is_not_running_says_so(client, hub):
+    text, _ = client("tech-lead").tool("send_message", to="worker-a", text="hi")
+    assert text.endswith("(worker-a is not running right now; it will get this when it starts.)")
+    hub.store.check_in(9, "worker-b")
+    text, _ = client("tech-lead").tool("send_message", to="worker-b", text="hi")
+    assert "not running" not in text
 
 
 def test_tool_calls_follow_the_hub_rules(client, hub):

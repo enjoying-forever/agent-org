@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS locks (
     claimed_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS presence (
+    pid        INTEGER PRIMARY KEY,
+    role       TEXT NOT NULL,
+    started_at REAL NOT NULL,
+    last_seen  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notices (
+    role    TEXT PRIMARY KEY,
+    last_id INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS consultants (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     tier         TEXT NOT NULL,
@@ -279,6 +291,63 @@ class Store:
                 "SELECT * FROM locks WHERE owner = ? ORDER BY path", (owner,)
             ).fetchall()
         return [_lock(r) for r in rows]
+
+    # presence: every running agent's hub connection checks in while its session lives
+
+    @_locked
+    def check_in(self, pid: int, role: str) -> None:
+        now = time.time()
+        self._db.execute(
+            "INSERT INTO presence (pid, role, started_at, last_seen) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(pid) DO UPDATE SET role = excluded.role, last_seen = excluded.last_seen",
+            (pid, role, now, now),
+        )
+
+    @_locked
+    def check_out(self, pid: int) -> None:
+        self._db.execute("DELETE FROM presence WHERE pid = ?", (pid,))
+
+    @_locked
+    def online(self, within: float = 30) -> dict[str, int]:
+        """Roles with a live session, and how many sessions each has."""
+        rows = self._db.execute(
+            "SELECT role, COUNT(*) FROM presence WHERE last_seen > ? GROUP BY role",
+            (time.time() - within,),
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    # notices: the newest message each role has already been told about
+
+    @_locked
+    def unnoticed(self, role: str) -> list[Message]:
+        """Unread messages for `role` it hasn't been told about yet; marks them as told."""
+        with self._transaction() as db:
+            row = db.execute("SELECT last_id FROM notices WHERE role = ?", (role,)).fetchone()
+            rows = db.execute(
+                "SELECT * FROM messages WHERE recipient = ? AND read_at IS NULL AND id > ? ORDER BY id",
+                (role, row[0] if row else 0),
+            ).fetchall()
+            if rows:
+                db.execute(
+                    "INSERT INTO notices (role, last_id) VALUES (?, ?)"
+                    " ON CONFLICT(role) DO UPDATE SET last_id = excluded.last_id",
+                    (role, rows[-1]["id"]),
+                )
+        return [_message(r) for r in rows]
+
+    @_locked
+    def last_message(self, sender: str | None = None, recipient: str | None = None,
+                     kinds: tuple[str, ...] | None = None) -> Message | None:
+        query, args = "SELECT * FROM messages WHERE 1 = 1", []
+        if sender is not None:
+            query, args = query + " AND sender = ?", [*args, sender]
+        if recipient is not None:
+            query, args = query + " AND recipient = ?", [*args, recipient]
+        if kinds:
+            query += f" AND kind IN ({', '.join('?' * len(kinds))})"
+            args += list(kinds)
+        row = self._db.execute(query + " ORDER BY id DESC LIMIT 1", args).fetchone()
+        return _message(row) if row else None
 
     # consultants
 

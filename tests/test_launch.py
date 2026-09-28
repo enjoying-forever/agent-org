@@ -115,6 +115,55 @@ def test_consultant_tab_uses_its_tier(team_file):
     assert "temporary medium consultant" in (out / "role.md").read_text(encoding="utf-8")
 
 
+def test_claude_gets_the_hooks_through_settings(team_file):
+    out = run_dry(team_file, "leader") / "leader"
+    hooks = json.loads((out / "settings.json").read_text(encoding="utf-8"))["hooks"]
+    assert set(hooks) == {"Stop", "PostToolUse", "PreToolUse"}
+    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit"
+    stop = hooks["Stop"][0]["hooks"][0]
+    assert stop["command"].endswith('org_hook.py" stop') and stop["timeout"] > launch.STOP_WAIT
+    script = (out / "start.ps1").read_text(encoding="utf-8")
+    assert f"'--settings' '{out / 'settings.json'}'" in script
+
+
+def test_codex_gets_the_hooks_through_config_overrides(team_file, tmp_path):
+    hub = Hub.open(team_file)
+    try:
+        built = launch.codex_launch(hub, team_file.resolve(), "worker-a", tmp_path)
+    finally:
+        hub.close()
+    overrides = [built.args[i + 1] for i, a in enumerate(built.args) if a == "-c"]
+    hooks = {}
+    for override in overrides:
+        key, _, value = override.partition("=")
+        if key.startswith("hooks."):
+            hooks[key.removeprefix("hooks.")] = tomllib.loads(f"v = {value}")["v"]
+    assert set(hooks) == {"Stop", "PostToolUse", "PreToolUse"}
+    assert "matcher" not in hooks["PreToolUse"][0]  # pre-edit picks out edits itself
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith('org_hook.py" post-tool')
+
+
+def test_running_roles_are_not_started_twice(team_file, capsys):
+    hub = Hub.open(team_file)
+    hub.store.check_in(123, "worker-a")
+    try:
+        tabs, skipped = launch.prepare(hub, team_file.resolve(), ["leader", "worker-a"], owner_tab=False)
+        assert [t[t.index("--title") + 1] for t in tabs] == ["leader"]
+        assert skipped == ["worker-a: already running"]
+        tabs, skipped = launch.prepare(hub, team_file.resolve(), ["worker-a"], owner_tab=False, force=True)
+        assert len(tabs) == 1 and skipped == []
+    finally:
+        hub.close()
+
+
+def test_grok_hooks_install_into_the_home_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch.Path, "home", classmethod(lambda cls: tmp_path))
+    path = launch.install_grok_hooks()
+    assert path == tmp_path / ".grok" / "hooks" / "agent-org.json"
+    hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit"
+
+
 def test_unknown_roles_are_refused(team_file):
     assert launch.main(["--team", str(team_file), "--dry-run", "ghost"]) == 2
 

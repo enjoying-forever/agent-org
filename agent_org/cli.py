@@ -151,8 +151,12 @@ def _print_view(v: RoleView) -> None:
     if v.status:
         task = f" - {v.status.task}" if v.status.task else ""
         print(f"  status:       {v.status.state}{task} ({_fmt_time(v.status.updated_at)})")
-    print(f"  unread:       {v.unread}")
+    print(f"  session:      {'running' if v.online else 'not running'}")
     print(f"  locks:        {', '.join(lock.path for lock in v.locks) or '-'}")
+    if v.limited:
+        print("  (its messages are visible only to itself and the roles above it)")
+        return
+    print(f"  unread:       {v.unread}")
     if v.recent:
         print("  recent messages:")
         for m in v.recent:

@@ -19,6 +19,8 @@ from agent_org.store import Store
         ("tech-lead", "worker-a", "instruction"),  # to a direct subordinate
         ("leader", "worker-b", "instruction"),     # to a subordinate's subordinate
         ("you", "worker-a", "instruction"),        # the owner reaches everyone
+        ("worker-a", "worker-b", "peer"),          # same superior
+        ("tech-lead", "researcher", "peer"),
     ],
 )
 def test_allowed_messages(hub, sender, to, kind):
@@ -31,10 +33,8 @@ def test_allowed_messages(hub, sender, to, kind):
     [
         ("worker-a", "leader"),      # skipping a level upward
         ("worker-a", "you"),
-        ("worker-a", "worker-b"),    # sibling
-        ("worker-a", "researcher"),  # cousin
-        ("tech-lead", "researcher"),  # sibling of the superior's other branch
-        ("researcher", "worker-a"),  # not in researcher's subtree
+        ("worker-a", "researcher"),  # cousin: same depth, different superior
+        ("researcher", "worker-a"),  # not in researcher's subtree, not a peer
     ],
 )
 def test_forbidden_messages(hub, sender, to):
@@ -43,8 +43,10 @@ def test_forbidden_messages(hub, sender, to):
 
 
 def test_refusal_tells_the_agent_who_it_can_reach(hub):
-    with pytest.raises(PermissionDenied, match=r"You can message: leader, worker-a, worker-b\."):
-        hub.session("tech-lead").send("researcher", "hi")
+    with pytest.raises(PermissionDenied, match=r"You can message: tech-lead, worker-b\."):
+        hub.session("worker-a").send("researcher", "hi")
+    with pytest.raises(PermissionDenied, match=r"You can message: leader, tech-lead\."):
+        hub.session("researcher").send("worker-a", "hi")
 
 
 def test_cannot_message_self_or_strangers(hub):
@@ -130,9 +132,47 @@ def test_viewing_does_not_mark_messages_read(hub):
     "viewer, target",
     [("worker-a", "tech-lead"), ("worker-a", "worker-b"), ("tech-lead", "researcher"), ("researcher", "leader")],
 )
-def test_cannot_view_above_or_sideways(hub, viewer, target):
-    with pytest.raises(PermissionDenied, match="only look at yourself"):
-        hub.session(viewer).view(target)
+def test_anyone_sees_status_but_not_the_messages_of_roles_above_or_beside(hub, viewer, target):
+    hub.session(target).set_status("working", "secret plan")
+    hub.session("you").send(target, "private instruction")
+    view = hub.session(viewer).view(target)
+    assert view.limited and view.recent == []
+    assert (view.status.state, view.status.task) == ("working", "secret plan")
+
+
+def test_everyone_sees_the_whole_team(hub):
+    hub.session("worker-b").set_status("blocked", "waiting for the API")
+    hub.session("worker-a").claim("src/app.py")
+    hub.store.check_in(4242, "worker-a")
+    rows = hub.session("worker-b").overview()
+    assert [(r.name, r.depth) for r in rows] == [
+        ("leader", 0), ("tech-lead", 1), ("worker-a", 2), ("worker-b", 2), ("researcher", 1)]
+    worker_a = next(r for r in rows if r.name == "worker-a")
+    assert (worker_a.online, worker_a.locks) == (1, 1)
+    worker_b = next(r for r in rows if r.name == "worker-b")
+    assert (worker_b.status.state, worker_b.online) == ("blocked", 0)
+
+
+def test_presence_counts_live_sessions(hub):
+    store = hub.store
+    store.check_in(1, "worker-a")
+    store.check_in(2, "worker-a")
+    store.check_in(3, "leader")
+    assert store.online() == {"worker-a": 2, "leader": 1}
+    store.check_out(2)
+    assert store.online() == {"worker-a": 1, "leader": 1}
+    store._db.execute("UPDATE presence SET last_seen = last_seen - 60 WHERE pid = 3")  # a crashed session
+    assert store.online() == {"worker-a": 1}
+
+
+def test_unnoticed_messages_are_reported_once(hub):
+    hub.session("tech-lead").send("worker-a", "one")
+    assert [m.text for m in hub.store.unnoticed("worker-a")] == ["one"]
+    assert hub.store.unnoticed("worker-a") == []
+    hub.session("tech-lead").send("worker-a", "two")
+    assert [m.text for m in hub.store.unnoticed("worker-a")] == ["two"]
+    hub.session("worker-a").read_inbox()
+    assert hub.store.unnoticed("worker-a") == []
 
 
 def test_status_must_be_a_known_state(hub):

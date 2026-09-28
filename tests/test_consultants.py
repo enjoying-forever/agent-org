@@ -106,8 +106,10 @@ def test_consultant_talks_only_with_the_agent_it_helps(hub, summoned):
     # and everyone above can reach and look at it, like any role in their subtree
     assert hub.session("leader").send("consultant-1", "keep it short").kind == "instruction"
     assert hub.session("tech-lead").view("consultant-1").superior == "worker-a"
-    with pytest.raises(PermissionDenied):
-        hub.session("worker-b").view("consultant-1")
+    # worker-b sees it in the team, but not its messages, and cannot message it
+    assert hub.session("worker-b").view("consultant-1").limited
+    with pytest.raises(PermissionDenied, match="You can message: tech-lead, worker-a."):
+        hub.session("worker-b").send("consultant-1", "hi")
 
 
 def test_role_cards(hub, summoned):

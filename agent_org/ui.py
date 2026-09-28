@@ -122,6 +122,7 @@ class App:
         statuses = store.statuses()
         unread = store.unread_counts()
         locks = store.locks()
+        online = store.online()
         roles = []
         for name in [team.leader, *team.subtree_of(team.leader)]:
             r = team.roles[name]
@@ -134,6 +135,7 @@ class App:
                 "status": {"state": s.state, "task": s.task, "updated_at": s.updated_at} if s else None,
                 "unread": unread.get(name, 0),
                 "locks": [lock.path for lock in locks if lock.owner == name],
+                "online": online.get(name, 0),
             })
         return {
             "owner": team.owner,
@@ -178,17 +180,17 @@ class App:
         return {"messages": [_message(m) for m in self.me.read_inbox()]}
 
     def launch(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Open terminal tabs: the given roles, or every role in team.yaml."""
+        """Open terminal tabs: the given roles, or every role in team.yaml.
+
+        Roles that are already running are skipped unless `force` is set.
+        """
         team = self.hub.team
         names = body.get("roles") or list(self.hub.base_team.roles)
-        tabs, skipped = [], []
         for name in names:
             if name not in team.roles:
                 raise ApiError(f"'{name}' is not a role")
-            try:
-                tabs.append(launch.role_tab(self.hub, self.team_file, name))
-            except HubError as e:
-                skipped.append(f"{name}: {e}")
+        tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
+                                       force=bool(body.get("force")))
 
         def open_all() -> None:
             for tab in tabs:

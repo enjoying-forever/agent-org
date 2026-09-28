@@ -1,9 +1,11 @@
 """Role-bound access to the hub. Every rule of the chain of command is enforced here.
 
-- A role may message its direct superior (a report, or a request for help) and anyone
-  below it in the tree (an instruction). Nobody else: no skipping levels upward,
-  no talking to siblings or cousins.
-- A role may look at itself and anyone below it: status, recent messages, locks.
+- A role may message its direct superior (a report, or a request for help), its peers
+  (roles with the same superior), and anyone below it in the tree (an instruction).
+  Nobody else: no skipping levels upward, no talking to cousins. Consultants talk only
+  with the agent they help.
+- Everyone may see the whole tree and every role's status and locks. Only a role itself
+  and the roles above it may read its messages.
 - A file has at most one writer. A role may only claim files inside its write scope,
   and a lock can be released by its holder or by anyone above the holder. A holder
   can hand a lock to its direct superior or a direct subordinate.
@@ -48,8 +50,22 @@ class RoleView:
     subordinates: list[str]
     status: Status | None
     unread: int
-    recent: list[Message]
+    recent: list[Message]  # empty when `limited`
     locks: list[Lock]
+    online: int  # live sessions of this role
+    limited: bool  # True when the viewer is not above this role: no messages
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """One line of the team overview everyone can see."""
+
+    name: str
+    depth: int
+    role: Role
+    status: Status | None
+    online: int
+    locks: int
 
 
 Opener = Callable[[Role], None]  # opens a visible session for a newly summoned consultant
@@ -148,9 +164,19 @@ class RoleSession:
             kind = "report"
         elif team.is_above(self.name, to):
             kind = "instruction"
+        elif to in self._peers(team):
+            kind = "peer"
         else:
             raise PermissionDenied(f"you cannot message '{to}'. {self._reach(team)}")
         return self.store.add_message(self.name, to, kind, _text(text), self._check_reply(reply_to))
+
+    def _peers(self, team: Team) -> list[str]:
+        """Roles with the same superior. Consultants have no peers."""
+        me = team.roles.get(self.name)
+        if me is None or me.is_consultant:
+            return []
+        return [s for s in team.subordinates_of(me.superior)
+                if s != self.name and not team.roles[s].is_consultant]
 
     def ask_help(self, question: str, reply_to: int | None = None) -> Message:
         superior = self.superior
@@ -195,7 +221,7 @@ class RoleSession:
 
     def _reach(self, team: Team) -> str:
         superior = team.superior_of(self.name)
-        allowed = ([superior] if superior else []) + team.subtree_of(self.name)
+        allowed = ([superior] if superior else []) + self._peers(team) + team.subtree_of(self.name)
         if not allowed:
             return "You can message nobody."
         return "You can message: " + ", ".join(allowed) + "."
@@ -209,9 +235,11 @@ class RoleSession:
         return self.store.set_status(self.name, state, task.strip())
 
     def view(self, name: str, recent: int = 20) -> RoleView:
+        """Anyone's status and locks; their messages only for yourself and roles below you."""
         team = self.team
-        if name != self.name and not team.is_above(self.name, name):
-            raise PermissionDenied(f"you can only look at yourself and roles below you, not '{name}'")
+        if not team.is_member(name):
+            raise HubError(f"'{name}' is not in this team")
+        full = name == self.name or team.is_above(self.name, name)
         return RoleView(
             name=name,
             role=team.roles.get(name),
@@ -219,9 +247,30 @@ class RoleSession:
             subordinates=team.subordinates_of(name),
             status=self.store.get_status(name),
             unread=self.store.unread_count(name),
-            recent=self.store.messages_involving(name, recent),
+            recent=self.store.messages_involving(name, recent) if full else [],
             locks=self.store.locks(name),
+            online=self.store.online().get(name, 0),
+            limited=not full,
         )
+
+    def overview(self) -> list[Snapshot]:
+        """The whole tree with everyone's status, in tree order. Everyone may see this."""
+        team = self.team
+        statuses = self.store.statuses()
+        online = self.store.online()
+        locks: dict[str, int] = {}
+        for lock in self.store.locks():
+            locks[lock.owner] = locks.get(lock.owner, 0) + 1
+        rows: list[Snapshot] = []
+
+        def walk(name: str, depth: int) -> None:
+            for child in team.subordinates_of(name):
+                rows.append(Snapshot(child, depth, team.roles[child], statuses.get(child),
+                                     online.get(child, 0), locks.get(child, 0)))
+                walk(child, depth + 1)
+
+        walk(team.owner, 0)
+        return rows
 
     # file locks
 

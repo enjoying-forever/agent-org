@@ -127,6 +127,20 @@ def test_release_a_lock(server):
     assert server.ok("/api/state")["locks"] == []
 
 
+def test_state_shows_who_is_running(server):
+    server.app.hub.store.check_in(11, "tech-lead")
+    server.app.hub.store.check_in(12, "tech-lead")
+    online = {r["name"]: r["online"] for r in server.ok("/api/state")["roles"]}
+    assert online == {"leader": 0, "tech-lead": 2, "researcher": 0, "worker-a": 0, "worker-b": 0}
+
+
+def test_launch_skips_running_roles_unless_forced(server):
+    server.app.hub.store.check_in(21, "leader")
+    result = server.ok("/api/launch", {"roles": ["leader", "worker-a"]})
+    assert (result["opening"], result["skipped"]) == (["worker-a"], ["leader: already running"])
+    assert server.ok("/api/launch", {"roles": ["leader"], "force": True})["opening"] == ["leader"]
+
+
 def test_launch_opens_tabs_for_supported_roles(server):
     result = server.ok("/api/launch", {})
     assert result["opening"] == ["leader", "tech-lead", "worker-a", "researcher"]

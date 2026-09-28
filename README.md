@@ -12,10 +12,39 @@ file has one writer at a time.
 |---|---|
 | **Tree** | Every role names its `superior`. Exactly one role reports to you (the owner): the leader. |
 | **Up** | A role can report to, or ask help from, its **direct** superior only. |
-| **Down** | A role can instruct and look at anyone below it: its subordinates and theirs. |
-| **Sideways** | Siblings don't talk directly. They go through their shared superior. |
+| **Down** | A role can instruct anyone below it: its subordinates and theirs. |
+| **Peers** | Roles with the same superior can message each other. Other teams' members (cousins) can't. |
+| **Looking** | Everyone can see the whole tree and every role's status, files and whether it is running (`team_status`, `view`). A role's messages can be read only by itself and the roles above it. |
 | **Files** | A role can only lock files inside its `write_scope`. One writer per file. A lock is released by its holder or by anyone above the holder, and a holder can hand it to its direct superior or a direct subordinate. |
 | **Consultants** | See below. |
+
+## How messages reach a busy or idle agent
+
+Harnesses work in turns: when an agent ends its turn it sits at its prompt, and
+nothing wakes it. agent-org therefore adds hooks to each agent's harness:
+
+- **When the agent ends its turn**, the hook first hands over any unread messages.
+  With none waiting, it reminds the agent once of what it tends to forget (reporting
+  to its superior, releasing files it holds), then **waits for new messages** and
+  hands them over the moment they arrive. The agent's status shows `waiting`
+  meanwhile. To type into an agent's tab yourself while it waits, press Esc first.
+- **After every tool call**, it mentions messages that arrived while the agent was
+  busy (once each).
+- **Before every file edit**, the agent must hold the file's lock. Editing a free file
+  inside its write scope claims it automatically; a file someone else holds, or one
+  outside its scope, is refused with the reason.
+
+Claude Code gets these hooks through a per-role `--settings` file. Codex gets them
+through `-c` overrides; the first time, Codex shows **Hooks need review**: choose
+**Trust all and continue** (the commands are the same for every role, so once is
+enough). Grok only reads hooks from its global settings or a git root, so for Grok
+install them once with
+`python -m agent_org.launch --install-grok-hooks` (they do nothing outside agent-org
+tabs).
+
+Every agent's hub connection also checks in every 10 seconds, so the UI and the
+agents can tell who is **running**. Launching skips roles that are already running,
+because two sessions of one role would split its messages.
 
 ## Consultants
 
@@ -125,7 +154,8 @@ one yourself to restart a single agent.
 - [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
 - [x] Consultants: temporary helpers summoned for help requests, with file hand-over
 - [x] Web UI (moved up from step 5): org chart, messages, files, consultants, team editor
-- [~] Step 3: Grok works; Antigravity and message delivery into busy sessions still to do
-- [ ] Step 4: pre-edit hooks that enforce locks
+- [x] Step 3: Grok, plus hooks that deliver messages to busy and idle agents
+- [x] Step 4: pre-edit hooks that enforce locks
+- [ ] Antigravity
 
 Run the tests with `python -m pytest`.

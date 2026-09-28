@@ -21,10 +21,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .cards import SERVER_NAME, role_card
+from .hooks import STOP_WAIT
 from .hub import Hub, HubError, Opener
 from .team import Role, Team
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+HOOK_SCRIPT = PACKAGE_ROOT / "org_hook.py"
 WINDOW = "agent-org"
 WAIT_LIMIT = 3600  # seconds a single wait_for_messages call may take; harness tool timeouts are set to this
 TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4",
@@ -58,6 +60,39 @@ def mcp_server(team_file: Path | None = None, role: str | None = None) -> tuple[
     return sys.executable, args, {"PYTHONPATH": str(PACKAGE_ROOT)}
 
 
+def hook_command(event: str) -> str:
+    """The command a harness runs for one of our hooks. Quoted forward-slash paths work in every shell."""
+    return f'"{Path(sys.executable).as_posix()}" "{HOOK_SCRIPT.as_posix()}" {event}'
+
+
+def hook_table(edit_matcher: str | None) -> dict[str, list[dict[str, object]]]:
+    """Hooks in the Claude Code layout, which Codex and Grok share.
+
+    Stop hands new messages to an agent that ends its turn, PostToolUse mentions mail
+    that arrived meanwhile, and PreToolUse makes sure an edited file's lock is held.
+    """
+    pre: dict[str, object] = {"hooks": [{"type": "command", "command": hook_command("pre-edit"), "timeout": 30}]}
+    if edit_matcher:
+        pre["matcher"] = edit_matcher
+    return {
+        "Stop": [{"hooks": [{"type": "command", "command": hook_command("stop"), "timeout": STOP_WAIT + 300}]}],
+        "PostToolUse": [{"hooks": [{"type": "command", "command": hook_command("post-tool"), "timeout": 30}]}],
+        "PreToolUse": [pre],
+    }
+
+
+def install_grok_hooks() -> Path:
+    """Grok reads hooks only globally or at a git root, so ours go in ~/.grok/hooks.
+
+    Outside an agent-org tab (no AGENT_ORG_ROLE) every one of them does nothing.
+    """
+    path = Path.home() / ".grok" / "hooks" / "agent-org.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit")}, indent=2) + "\n",
+                    encoding="utf-8")
+    return path
+
+
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
     spec = hub.team.roles[role]
     card = out / "role.md"
@@ -67,8 +102,11 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
     config.write_text(json.dumps(
         {"mcpServers": {SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}},
         indent=2), encoding="utf-8")
+    settings = out / "settings.json"
+    settings.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit")}, indent=2),
+                        encoding="utf-8")
     cli = ["--mcp-config", str(config), "--allowedTools", f"mcp__{SERVER_NAME}",
-           "--append-system-prompt-file", str(card)]
+           "--append-system-prompt-file", str(card), "--settings", str(settings)]
     if spec.model:
         cli += ["--model", spec.model]
     if spec.effort:
@@ -94,6 +132,10 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
         "-c", f'{key}.default_tools_approval_mode="approve"',
         "-c", f"developer_instructions={toml(role_card(hub.session(role)))}",
     ]
+    # Codex asks you once to review and trust new hooks; the commands are the same for
+    # every role, so one "Trust all" covers them all.
+    for event, groups in hook_table(None).items():  # no matcher: pre-edit picks out edits itself
+        cli += ["-c", f"hooks.{event}={toml(groups)}"]
     if spec.model:
         cli += ["-m", spec.model]
     if spec.effort:
@@ -194,21 +236,30 @@ def role_tab(hub: Hub, team_file: Path, role: str) -> list[str]:
     return tab_command(title, TAB_COLORS[spec.harness], team.project_root, script)
 
 
-def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool) -> list[list[str]]:
-    """Write every start script and return the tab commands that would open them."""
+def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
+            force: bool = False) -> tuple[list[list[str]], list[str]]:
+    """Write the start scripts and return (tab commands to open, reasons for roles skipped).
+
+    A role that is already running is skipped unless `force`: a second session of the
+    same role would split its messages between the two.
+    """
     team = hub.team
-    tabs = []
+    online = hub.store.online()
+    tabs, skipped = [], []
     if owner_tab:
         script = team.database.parent / "launch" / team.owner / "start.ps1"
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text(owner_script(team, team_file), encoding="utf-8")
         tabs.append(tab_command(team.owner, TAB_COLORS["owner"], team.project_root, script))
     for role in roles:
+        if online.get(role) and not force:
+            skipped.append(f"{role}: already running")
+            continue
         try:
             tabs.append(role_tab(hub, team_file, role))
         except HubError as e:
-            print(f"skipping {role}: {e}", file=sys.stderr)
-    return tabs
+            skipped.append(f"{role}: {e}")
+    return tabs, skipped
 
 
 def open_tab(tab: list[str]) -> None:
@@ -238,8 +289,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("roles", nargs="*", help="roles to start (default: all)")
     parser.add_argument("--no-owner", action="store_true", help="do not open the owner's console tab")
     parser.add_argument("--dry-run", action="store_true", help="write the scripts but open nothing")
+    parser.add_argument("--force", action="store_true", help="also start roles that are already running")
+    parser.add_argument("--install-grok-hooks", action="store_true",
+                        help="install agent-org's hooks for Grok in ~/.grok/hooks, then exit")
     args = parser.parse_args(argv)
 
+    if args.install_grok_hooks:
+        print(f"installed {install_grok_hooks()}")
+        return 0
     team_file = Path(args.team).resolve()
     hub = Hub.open(team_file)  # also creates the database before any agent connects
     try:
@@ -247,9 +304,12 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             print(f"not roles in this team: {', '.join(unknown)}", file=sys.stderr)
             return 2
-        tabs = prepare(hub, team_file, args.roles or list(hub.base_team.roles), not args.no_owner)
+        tabs, skipped = prepare(hub, team_file, args.roles or list(hub.base_team.roles),
+                                not args.no_owner, args.force)
     finally:
         hub.close()
+    for reason in skipped:
+        print(f"skipping {reason}", file=sys.stderr)
 
     if args.dry_run:
         for tab in tabs:
