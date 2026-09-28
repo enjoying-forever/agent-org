@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cards import role_card
-from .hub import Hub, HubError, RoleSession
+from .hub import BROADCAST, Hub, HubError, RoleSession
 from .launch import tab_opener
 from .store import Lock, Message
 from .team import TeamError
@@ -62,8 +62,25 @@ class Tools:
                   {}, [], lambda a: self._team_status())
         self._add("send_message",
                   "Send a message to your direct superior (a report), a peer with the same superior, "
-                  "or anyone below you (an instruction).",
-                  {"to": text, "text": text, "reply_to": reply}, ["to", "text"], self._send)
+                  "anyone below you (an instruction), or answer anyone who wrote to you (with reply_to). "
+                  "to='@team' writes to all your direct subordinates, to='@all' to everyone below you. "
+                  "Send only what the receiver needs to act on: every message wakes them.",
+                  {"to": text, "text": text, "reply_to": reply,
+                   "urgent": {"type": "boolean", "description": "only for messages going down: "
+                              "interrupts the receiver's current work"}},
+                  ["to", "text"], self._send)
+        self._add("list_tasks", "Your open tasks, and the tasks you gave that are not finished yet.",
+                  {}, [], lambda a: self._list_tasks())
+        self._add("finish_task",
+                  "Close a task assigned to you: outcome 'done' with the result, or 'blocked' with what "
+                  "you need. The person who assigned it is told. Every task must be closed this way.",
+                  {"task_id": {"type": "integer"}, "result": text,
+                   "outcome": {"type": "string", "enum": ["done", "blocked"]}},
+                  ["task_id", "result"], self._finish)
+        self._add("save_notes",
+                  "Save your working notes (replacing the previous ones): what you know, decided and are "
+                  "doing. If your session is ever replaced, the new one starts from these notes.",
+                  {"text": text}, ["text"], lambda a: (me.save_notes(a["text"]), "Notes saved.")[1])
         self._add("ask_help", "Ask your direct superior for help.",
                   {"question": text, "reply_to": reply}, ["question"],
                   lambda a: "Sent " + _fmt_message(me.ask_help(a["question"], a.get("reply_to"))))
@@ -95,7 +112,18 @@ class Tools:
         team = me.team
         role = team.roles.get(me.name)
         if role is not None and role.is_consultant:
-            return  # consultants neither summon nor dismiss
+            return  # consultants neither assign work, summon nor dismiss
+        if any(not team.roles[s].is_consultant for s in team.subordinates_of(me.name)):
+            self._add("assign_task",
+                      "Give work to someone below you: one clear, self-contained task. They must close it "
+                      "with finish_task, and you get the result. part_of: the id of your own task this is "
+                      "a piece of.",
+                      {"to": text, "title": {"type": "string", "description": "one line"},
+                       "details": {"type": "string", "description": "everything they need to do it"},
+                       "part_of": {"type": "integer"}},
+                      ["to", "title"], self._assign)
+            self._add("cancel_task", "Withdraw a task you gave (or one below you) that is no longer needed.",
+                      {"task_id": {"type": "integer"}, "reason": text}, ["task_id"], self._cancel)
         if team.can_summon(me.name):
             tiers = "; ".join(f"{t.describe()}: {t.use_for}" if t.use_for else t.describe()
                               for t in team.tiers.values())
@@ -144,11 +172,39 @@ class Tools:
         return f"Status: {s.state}" + (f" - {s.task}" if s.task else "")
 
     def _send(self, args: dict[str, Any]) -> str:
-        m = self.me.send(args["to"], args["text"], args.get("reply_to"))
-        text = "Sent " + _fmt_message(m)
+        to, urgent = args["to"], bool(args.get("urgent"))
+        if to in BROADCAST:
+            sent = self.me.broadcast(to, args["text"], urgent)
+            return f"Sent to {', '.join(m.recipient for m in sent)}."
+        m = self.me.send(to, args["text"], args.get("reply_to"), urgent)
+        text = f"Sent #{m.id} ({m.kind}) to {m.recipient}."
         if not self.me.store.online().get(m.recipient) and m.recipient != self.me.team.owner:
-            text += f"\n({m.recipient} is not running right now; it will get this when it starts.)"
+            text += f" {m.recipient} is not running right now; it will get this when it starts."
         return text
+
+    def _assign(self, args: dict[str, Any]) -> str:
+        task = self.me.assign_task(args["to"], args["title"], args.get("details") or "",
+                                   args.get("part_of"))
+        return (f"Assigned task #{task.id} to {task.assignee}: {task.title}. You will get its result "
+                "when they call finish_task.")
+
+    def _finish(self, args: dict[str, Any]) -> str:
+        task = self.me.finish_task(int(args["task_id"]), args["result"], args.get("outcome") or "done")
+        return f"Task #{task.id} is {task.state}; {task.assigner} has been told."
+
+    def _cancel(self, args: dict[str, Any]) -> str:
+        task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
+        return f"Task #{task.id} is cancelled; {task.assignee} has been told."
+
+    def _list_tasks(self) -> str:
+        mine, given = self.me.my_tasks(), self.me.given_tasks()
+        lines = ["Your open tasks:" if mine else "You have no open tasks."]
+        lines += [f"  #{t.id} [{t.state}] from {t.assigner}: {t.title}" for t in mine]
+        if given:
+            lines.append("Tasks you gave that are not finished:")
+            lines += [f"  #{t.id} [{t.state}] to {t.assignee}: {t.title}"
+                      + (f" -- {t.result[:200]}" if t.state == "blocked" else "") for t in given]
+        return "\n".join(lines)
 
     def _team_status(self) -> str:
         lines = [f"{self.me.team.owner} (owner)"]
@@ -159,8 +215,9 @@ class Tools:
             temp = f", consultant ({row.role.tier})" if row.role.is_consultant else ""
             files = f", writing {row.locks} file(s)" if row.locks else ""
             me = "  <- you" if row.name == self.me.name else ""
-            lines.append(f"{'  ' * (row.depth + 1)}{row.name} [{row.role.harness}{temp}{running}]: "
-                         f"{state}{files}{me}")
+            indent = "  " * (row.depth + 1)
+            lines.append(f"{indent}{row.name} [{row.role.harness}{temp}{running}]: {state}{files}{me}")
+            lines += [f"{indent}    task #{t.id} [{t.state}] from {t.assigner}: {t.title}" for t in row.tasks]
         return "\n".join(lines)
 
     def _view(self, args: dict[str, Any]) -> str:
@@ -202,6 +259,8 @@ class Tools:
             text, is_error = handler(args), False
         except KeyError as e:
             text, is_error = f"Missing argument: {e.args[0]}", True
+        except (ValueError, TypeError) as e:
+            text, is_error = f"Bad argument: {e}", True
         except HubError as e:
             text, is_error = f"Refused: {e}", True
         if name not in ("read_inbox", "wait_for_messages"):

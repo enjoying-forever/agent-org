@@ -1,10 +1,13 @@
-"""Role cards: the text that tells an agent who it is and which rules it works under."""
+"""Role cards: the text that tells an agent who it is, the law it works under, and where it left off."""
 
 from __future__ import annotations
 
-from .hub import RoleSession
+import time
+
+from .hub import RoleSession, law_text
 
 SERVER_NAME = "org"
+RECENT = 12  # messages recalled in "where you left off"
 
 
 def role_card(me: RoleSession) -> str:
@@ -37,23 +40,20 @@ def role_card(me: RoleSession) -> str:
     lines.append(f"Files you may write: {scope or 'none - you do not edit files'}")
     lines += [
         "",
-        "Rules:",
-        f"- Talk to the team only through the '{SERVER_NAME}' tools. People only receive what you "
-        "send with send_message; text you write in your own session reaches nobody.",
-        f"- You may message your direct superior ({superior}), your peers, and anyone below you. "
-        "You cannot skip levels upward or message other teams' members.",
-        f"- Ask for help (ask_help) only from {superior}. Give subordinates clear, self-contained tasks.",
-        "- Anyone may see the team's status (team_status, view). Keep yours current with set_status.",
-        "- One writer per file: before editing a file you must hold its lock. Editing a free file in "
-        "your scope claims it for you (or call claim_file). If someone else holds it, do not edit it; "
-        f"ask {superior} or that peer. release_file each file when you are done with it, or "
-        "hand_over_file it to your superior or a subordinate.",
-        f"- When you finish a task, report the result to {superior} with send_message.",
+        f"THE MESSAGE LAW (the hub enforces it; you work through the '{SERVER_NAME}' tools):",
+        law_text(),
+        "",
+        "How to work:",
+        f"- People only receive what you send with the {SERVER_NAME} tools. Text you write in your own "
+        "session reaches nobody.",
+        "- Keep your status current with set_status, so everyone can see what you are doing.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "
-        "automatically. (You can also wait for them with wait_for_messages.)",
-        "- If your superior assigns you a consultant, it is your temporary subordinate: work "
-        "with it through send_message, hand_over_file it the files it should edit, and "
-        "dismiss_consultant it when the problem is solved.",
+        "automatically, and you are reminded of open tasks and unanswered questions.",
+        "- Save what you know with save_notes from time to time: if your session is ever replaced, "
+        "the new one starts from your notes.",
+        "- If your superior gives you a consultant, it is your temporary subordinate: work with it "
+        "through send_message, hand_over_file it the files it should edit, and dismiss_consultant "
+        "it when the problem is solved.",
         "- If you lose track of your role, call my_role.",
     ]
     if team.can_summon(me.name):
@@ -68,7 +68,38 @@ def role_card(me: RoleSession) -> str:
         for tier in team.tiers.values():
             use = f": {tier.use_for}" if tier.use_for else ""
             lines.append(f"  - {tier.describe()}{use}")
+    lines += where_you_left_off(me)
     return "\n".join(lines)
+
+
+def where_you_left_off(me: RoleSession) -> list[str]:
+    """What the hub remembers about this role, so even a brand-new session can carry on."""
+    lines: list[str] = []
+    notes = me.store.get_notes(me.name)
+    mine, given = me.my_tasks(), me.given_tasks()
+    held = [lock.path for lock in me.store.locks(me.name)]
+    recent = me.store.messages_involving(me.name, RECENT)
+    if not (notes or mine or given or held or recent):
+        return lines
+    lines += ["", "WHERE YOU LEFT OFF (kept by the hub between sessions):"]
+    if notes:
+        lines += ["Your notes:", notes]
+    if mine:
+        lines.append("Your open tasks:")
+        lines += [f"  #{t.id} [{t.state}] from {t.assigner}: {t.title}" for t in mine]
+    if given:
+        lines.append("Tasks you gave that are not finished:")
+        lines += [f"  #{t.id} [{t.state}] to {t.assignee}: {t.title}" for t in given]
+    if held:
+        lines.append(f"Files you hold: {', '.join(held)}")
+    if recent:
+        lines.append(f"Your last {len(recent)} messages (oldest first):")
+        for m in recent:
+            when = time.strftime("%m-%d %H:%M", time.localtime(m.sent_at))
+            text = " ".join(m.text.split())
+            text = text if len(text) <= 240 else text[:240] + "..."
+            lines.append(f"  #{m.id} {when} [{m.kind}] {m.sender} -> {m.recipient}: {text}")
+    return lines
 
 
 def _consultant_card(me: RoleSession) -> str:
@@ -83,13 +114,15 @@ def _consultant_card(me: RoleSession) -> str:
         f"Your superior: {helped} (the agent you help)",
         "",
         "Rules:",
-        f"- Talk to the team only through the '{SERVER_NAME}' tools. You can message only {helped}.",
+        f"- Talk to the team only through the '{SERVER_NAME}' tools. You can message only {helped} "
+        "(and answer anyone who writes to you).",
         "- Read any project file you need.",
         f"- You can edit only files {helped} hands to you with hand_over_file; list_locks shows "
         f"what you hold. When you are done with a file, hand_over_file it back to {helped} "
         "(release_file also returns it).",
         f"- Work with {helped} until the problem is solved, then tell it so with send_message. "
         f"{helped} dismisses you; after that your tools stop working and you should stop.",
+        "- Every message wakes its receiver: send only what they need, no 'thanks' or 'ok'.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "
-        "automatically. (You can also wait for them with wait_for_messages.)",
-    ])
+        "automatically.",
+    ] + where_you_left_off(me))

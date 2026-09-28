@@ -56,17 +56,34 @@ def block(reason: str) -> dict[str, Any]:
 
 
 def duties_left(me: RoleSession) -> list[str]:
-    """Things an agent usually forgets before it goes quiet."""
+    """What the message law still asks of an agent that is about to go quiet."""
     left = []
-    superior = me.superior
-    last_task = me.store.last_message(recipient=me.name, kinds=("instruction",))
-    last_report = me.store.last_message(sender=me.name, recipient=superior)
-    if last_task and (last_report is None or last_report.id < last_task.id):
+    for task in me.my_tasks():
+        if task.state == "open":
+            left.append(
+                f"Task #{task.id} from {task.assigner} ({task.title}) is still open. If it is finished, "
+                f"call finish_task({task.id}, result). If you cannot go on, call "
+                f"finish_task({task.id}, result, outcome=\"blocked\") and say what you need. If you "
+                "are still working on it or waiting for your own subtasks, carry on.")
+    for task in me.given_tasks():
+        if task.state == "blocked":
+            left.append(
+                f"Task #{task.id} you gave to {task.assignee} ({task.title}) is blocked: "
+                f"{task.result[:300]}. Help them, reassign it, or cancel_task({task.id}).")
+    for request in me.unanswered_help():
         left.append(
-            f"You have not reported to {superior} since {last_task.sender}'s message #{last_task.id}. "
-            f"If that work is finished, report the result with send_message(to=\"{superior}\"): "
-            f"{superior} only receives what you send with send_message, not what you write here. "
-            "If you are still working on it or waiting for others, ignore this.")
+            f"{request.sender} asked you for help (#{request.id}) and has no answer yet. Answer with "
+            f"send_message(to=\"{request.sender}\", reply_to={request.id}), pass it up with "
+            f"ask_help(..., reply_to={request.id}), or summon a consultant.")
+    superior = me.superior
+    last_word = me.store.last_message(sender=superior, recipient=me.name, kinds=("instruction", "reply"))
+    if superior and last_word:
+        answered = me.store.last_message(sender=me.name, recipient=superior)
+        if answered is None or answered.id < last_word.id:
+            left.append(
+                f"{superior}'s message #{last_word.id} has no answer from you. If it needs one, "
+                f"send it with send_message(to=\"{superior}\", reply_to={last_word.id}): "
+                f"{superior} only receives what you send, not what you write here.")
     held = [lock.path for lock in me.store.locks(me.name)]
     if held:
         left.append(
@@ -115,11 +132,19 @@ def on_post_tool(me: RoleSession, payload: dict[str, Any]):
     new = me.store.unnoticed(me.name)
     if not new:
         return None
-    senders = ", ".join(dict.fromkeys(m.sender for m in new))
-    ids = ", ".join(f"#{m.id}" for m in new)
-    text = (f"agent-org: {len(new)} new message(s) for you from {senders} ({ids}). "
-            "Read them with the org tool read_inbox at a good stopping point.")
-    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}
+    urgent = [m for m in new if m.urgent]
+    rest = [m for m in new if not m.urgent]
+    parts = []
+    if urgent:  # law 9: urgent messages interrupt the current work, in full
+        me.store.mark_read([m.id for m in urgent])
+        parts.append("agent-org: URGENT message(s) for you. Deal with them before you continue:\n\n"
+                     + fmt_messages(urgent))
+    if rest:
+        senders = ", ".join(dict.fromkeys(m.sender for m in rest))
+        parts.append(f"agent-org: {len(rest)} new message(s) for you from {senders} "
+                     f"({', '.join(f'#{m.id}' for m in rest)}). Read them with the org tool "
+                     "read_inbox at a good stopping point.")
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n\n".join(parts)}}
 
 
 # pre-edit
@@ -175,7 +200,19 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
     return None
 
 
-HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit}
+def remember_session(me: RoleSession, payload: dict[str, Any]) -> None:
+    """Note which conversation the harness is in, so a restarted team can resume it."""
+    session_id = field(payload, "session_id")
+    role = me.hub.team.roles.get(me.name)
+    if isinstance(session_id, str) and session_id and role is not None:
+        me.store.record_session_id(me.name, role.harness, session_id)
+
+
+def on_session(me: RoleSession, payload: dict[str, Any]):
+    return None  # remember_session already did the work
+
+
+HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit, "session": on_session}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,8 +229,11 @@ def main(argv: list[str] | None = None) -> int:
         hub = Hub.open(team_file)
     except Exception:  # noqa: BLE001 - a broken hub must never stop the agent's harness
         return 0
+    payload = payload if isinstance(payload, dict) else {}
     try:
-        out = HANDLERS[event](hub.session(role), payload if isinstance(payload, dict) else {})
+        me = hub.session(role)
+        remember_session(me, payload)
+        out = HANDLERS[event](me, payload)
     except HubError:
         return 0  # e.g. a dismissed consultant
     finally:

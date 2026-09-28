@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import tomllib
@@ -50,7 +51,8 @@ def test_claude_role_files(team_file):
     assert "$env:AGENT_ORG_ROLE = 'leader'" in script
     assert "$env:MCP_TOOL_TIMEOUT = '3600000'" in script
     assert "$env:DISABLE_AUTOUPDATER = '1'" in script  # agents must not update the shared install
-    assert "'--model' 'opus' '--effort' 'high' '--name' 'leader' 'You are the ''leader'' agent" in script
+    assert re.search(r"'--model' 'opus' '--effort' 'high' '--session-id' '[0-9a-f-]{36}' '--name' 'leader' "
+                     r"'You are the ''leader'' agent", script)
 
 
 def test_codex_script_passes_valid_toml(team_file, tmp_path):
@@ -111,14 +113,15 @@ def test_consultant_tab_uses_its_tier(team_file):
     assert tab[tab.index("--title") + 1] == "consultant-1 (medium)"
     out = team_file.parent / ".agent-org" / "launch" / "consultant-1"
     script = (out / "start.ps1").read_text(encoding="utf-8")
-    assert "'--model' 'claude-opus-5-5' '--effort' 'medium' '--name' 'consultant-1'" in script
+    assert re.search(r"'--model' 'claude-opus-5-5' '--effort' 'medium' '--session-id' '[0-9a-f-]{36}' "
+                     r"'--name' 'consultant-1'", script)
     assert "temporary medium consultant" in (out / "role.md").read_text(encoding="utf-8")
 
 
 def test_claude_gets_the_hooks_through_settings(team_file):
     out = run_dry(team_file, "leader") / "leader"
     hooks = json.loads((out / "settings.json").read_text(encoding="utf-8"))["hooks"]
-    assert set(hooks) == {"Stop", "PostToolUse", "PreToolUse"}
+    assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
     assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit"
     stop = hooks["Stop"][0]["hooks"][0]
     assert stop["command"].endswith('org_hook.py" stop') and stop["timeout"] > launch.STOP_WAIT
@@ -138,7 +141,7 @@ def test_codex_gets_the_hooks_through_config_overrides(team_file, tmp_path):
         key, _, value = override.partition("=")
         if key.startswith("hooks."):
             hooks[key.removeprefix("hooks.")] = tomllib.loads(f"v = {value}")["v"]
-    assert set(hooks) == {"Stop", "PostToolUse", "PreToolUse"}
+    assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
     assert "matcher" not in hooks["PreToolUse"][0]  # pre-edit picks out edits itself
     assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith('org_hook.py" post-tool')
 

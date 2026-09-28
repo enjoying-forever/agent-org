@@ -17,9 +17,11 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import sessions
 from .cards import SERVER_NAME, role_card
 from .hooks import STOP_WAIT
 from .hub import Hub, HubError, Opener
@@ -45,7 +47,28 @@ class Launch:
 
 def kickoff(role: str) -> str:
     return (f"You are the '{role}' agent in a team. Call the {SERVER_NAME} tool my_role to read "
-            "your role and the rules, then call wait_for_messages and act on what arrives.")
+            "your role, the message law and where you left off. Then carry on with your open tasks, "
+            "or end your turn: new messages will be delivered to you.")
+
+
+def resume_kickoff(role: str) -> str:
+    return (f"agent-org: the team was restarted and you are back as '{role}'. Your role or the team "
+            f"may have changed, so call the {SERVER_NAME} tool my_role first. Then read_inbox, check "
+            "list_tasks, and carry on where you left off.")
+
+
+def plan_session(hub: Hub, role: str, fresh: bool = False) -> tuple[str | None, str | None]:
+    """(conversation to resume, id for a new one) for a role about to start.
+
+    A role resumes its last conversation if its harness still has it, unless `fresh`.
+    Codex picks the id of a new conversation itself; the hooks record it later.
+    """
+    spec = hub.team.roles[role]
+    record = hub.store.get_session(role)
+    if (not fresh and record is not None and record.harness == spec.harness
+            and sessions.exists(spec.harness, record.session_id)):
+        return record.session_id, None
+    return None, (str(uuid.uuid4()) if spec.harness in sessions.CAN_CHOOSE_ID else None)
 
 
 def mcp_server(team_file: Path | None = None, role: str | None = None) -> tuple[str, list[str], dict[str, str]]:
@@ -75,6 +98,7 @@ def hook_table(edit_matcher: str | None) -> dict[str, list[dict[str, object]]]:
     if edit_matcher:
         pre["matcher"] = edit_matcher
     return {
+        "SessionStart": [{"hooks": [{"type": "command", "command": hook_command("session"), "timeout": 30}]}],
         "Stop": [{"hooks": [{"type": "command", "command": hook_command("stop"), "timeout": STOP_WAIT + 300}]}],
         "PostToolUse": [{"hooks": [{"type": "command", "command": hook_command("post-tool"), "timeout": 30}]}],
         "PreToolUse": [pre],
@@ -93,7 +117,8 @@ def install_grok_hooks() -> Path:
     return path
 
 
-def claude_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
+def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                  resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
     card = out / "role.md"
     card.write_text(role_card(hub.session(role)) + "\n", encoding="utf-8")
@@ -111,16 +136,21 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
         cli += ["--model", spec.model]
     if spec.effort:
         cli += ["--effort", spec.effort]
+    if resume:
+        cli += ["--resume", resume]
+    elif new_id:
+        cli += ["--session-id", new_id]
     # --mcp-config and --allowedTools take several values, so a plain option must
     # come between them and the prompt or they would swallow it.
-    cli += ["--name", role, kickoff(role)]
+    cli += ["--name", role, resume_kickoff(role) if resume else kickoff(role)]
     # Several agents share one Claude Code install; an update started by one tab can't
     # replace the program while the others run it, and leaves a broken install behind.
     env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1"}
     return Launch(role, "claude", "claude", cli, env)
 
 
-def codex_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
+def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                 resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
     command, args, env = mcp_server(team_file, role)
     key = f"mcp_servers.{SERVER_NAME}"
@@ -140,11 +170,14 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
         cli += ["-m", spec.model]
     if spec.effort:
         cli += ["-c", f"model_reasoning_effort={toml(spec.effort)}"]
+    if resume:  # codex resume [OPTIONS] SESSION_ID PROMPT
+        return Launch(role, "codex", "codex", ["resume", *cli, resume, resume_kickoff(role)])
     cli.append(kickoff(role))
     return Launch(role, "codex", "codex", cli)
 
 
-def grok_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
+def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
     # Grok loads MCP servers only from config files, so register one 'org' server in the
     # project's .grok/config.toml ("add" also updates it). The entry names no role: every
@@ -158,7 +191,11 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
         cli += ["-m", spec.model]
     if spec.effort:
         cli += ["--reasoning-effort", spec.effort]
-    cli.append(kickoff(role))
+    if resume:
+        cli += ["--resume", resume]
+    elif new_id:
+        cli += ["--session-id", new_id]
+    cli.append(resume_kickoff(role) if resume else kickoff(role))
     return Launch(role, "grok", "grok", cli, {"GROK_DISABLE_AUTOUPDATER": "1"}, setup=[register])
 
 
@@ -221,15 +258,21 @@ def tab_command(title: str, color: str, cwd: Path, script: Path) -> list[str]:
             "pwsh", "-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(script)]
 
 
-def role_tab(hub: Hub, team_file: Path, role: str) -> list[str]:
-    """Write one role's start script and return the tab command that opens it."""
+def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[str]:
+    """Write one role's start script and return the tab command that opens it.
+
+    The role resumes its last conversation when it can (see plan_session).
+    """
     team = hub.team
     spec = team.roles[role]
     if spec.harness not in BUILDERS:
         raise HubError(f"{spec.harness} is not supported yet")
     out = team.database.parent / "launch" / role
     out.mkdir(parents=True, exist_ok=True)
-    launch = BUILDERS[spec.harness](hub, team_file, role, out)
+    resume, new_id = plan_session(hub, role, fresh)
+    launch = BUILDERS[spec.harness](hub, team_file, role, out, resume, new_id)
+    if not resume:
+        hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
     script.write_text(role_script(launch, team, team_file), encoding="utf-8")
     title = f"{role} ({spec.tier})" if spec.is_consultant else role
@@ -237,7 +280,7 @@ def role_tab(hub: Hub, team_file: Path, role: str) -> list[str]:
 
 
 def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
-            force: bool = False) -> tuple[list[list[str]], list[str]]:
+            force: bool = False, fresh: bool = False) -> tuple[list[list[str]], list[str]]:
     """Write the start scripts and return (tab commands to open, reasons for roles skipped).
 
     A role that is already running is skipped unless `force`: a second session of the
@@ -256,7 +299,7 @@ def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
             skipped.append(f"{role}: already running")
             continue
         try:
-            tabs.append(role_tab(hub, team_file, role))
+            tabs.append(role_tab(hub, team_file, role, fresh))
         except HubError as e:
             skipped.append(f"{role}: {e}")
     return tabs, skipped
@@ -290,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-owner", action="store_true", help="do not open the owner's console tab")
     parser.add_argument("--dry-run", action="store_true", help="write the scripts but open nothing")
     parser.add_argument("--force", action="store_true", help="also start roles that are already running")
+    parser.add_argument("--fresh", action="store_true",
+                        help="start new conversations instead of resuming each role's last one")
     parser.add_argument("--install-grok-hooks", action="store_true",
                         help="install agent-org's hooks for Grok in ~/.grok/hooks, then exit")
     args = parser.parse_args(argv)
@@ -305,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"not roles in this team: {', '.join(unknown)}", file=sys.stderr)
             return 2
         tabs, skipped = prepare(hub, team_file, args.roles or list(hub.base_team.roles),
-                                not args.no_owner, args.force)
+                                not args.no_owner, args.force, args.fresh)
     finally:
         hub.close()
     for reason in skipped:

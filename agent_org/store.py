@@ -61,6 +61,35 @@ CREATE TABLE IF NOT EXISTS notices (
     last_id INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sessions (
+    role        TEXT PRIMARY KEY,
+    harness     TEXT NOT NULL,
+    session_id  TEXT,
+    launched_at REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    role       TEXT PRIMARY KEY,
+    text       TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    assigner   TEXT NOT NULL,
+    assignee   TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    details    TEXT NOT NULL,
+    state      TEXT NOT NULL,               -- open, done, blocked, cancelled
+    message_id INTEGER REFERENCES messages(id),
+    parent_id  INTEGER REFERENCES tasks(id),
+    result     TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(assignee, state);
+
 CREATE TABLE IF NOT EXISTS consultants (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     tier         TEXT NOT NULL,
@@ -88,6 +117,26 @@ class Message:
     text: str
     reply_to: int | None
     read_at: float | None
+    urgent: bool = False
+
+
+@dataclass(frozen=True)
+class Task:
+    id: int
+    assigner: str
+    assignee: str
+    title: str
+    details: str
+    state: str  # open, done, blocked, cancelled
+    message_id: int | None
+    parent_id: int | None
+    result: str
+    created_at: float
+    updated_at: float
+
+    @property
+    def is_open(self) -> bool:
+        return self.state in ("open", "blocked")
 
 
 @dataclass(frozen=True)
@@ -103,6 +152,16 @@ class Lock:
     path: str
     owner: str
     claimed_at: float
+
+
+@dataclass(frozen=True)
+class Session:
+    """The harness conversation a role last ran in, so a restart can resume it."""
+
+    role: str
+    harness: str
+    session_id: str | None
+    launched_at: float
 
 
 @dataclass(frozen=True)
@@ -144,6 +203,13 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
+        self._upgrade()
+
+    def _upgrade(self) -> None:
+        """Bring a database made by an earlier version up to date, keeping its contents."""
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(messages)")}
+        if "urgent" not in columns:
+            self._db.execute("ALTER TABLE messages ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0")
 
     @_locked
     def close(self) -> None:
@@ -163,16 +229,79 @@ class Store:
 
     @_locked
     def add_message(
-        self, sender: str, recipient: str, kind: str, text: str, reply_to: int | None = None
+        self, sender: str, recipient: str, kind: str, text: str, reply_to: int | None = None,
+        urgent: bool = False,
     ) -> Message:
         cur = self._db.execute(
-            "INSERT INTO messages (sent_at, sender, recipient, kind, text, reply_to)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (time.time(), sender, recipient, kind, text, reply_to),
+            "INSERT INTO messages (sent_at, sender, recipient, kind, text, reply_to, urgent)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (time.time(), sender, recipient, kind, text, reply_to, int(urgent)),
         )
         message = self.get_message(cur.lastrowid)
         assert message is not None
         return message
+
+    @_locked
+    def mark_read(self, ids: list[int]) -> None:
+        self._db.executemany("UPDATE messages SET read_at = ? WHERE id = ? AND read_at IS NULL",
+                             [(time.time(), i) for i in ids])
+
+    @_locked
+    def replies_to(self, message_id: int, sender: str | None = None) -> list[Message]:
+        query, args = "SELECT * FROM messages WHERE reply_to = ?", [message_id]
+        if sender is not None:
+            query, args = query + " AND sender = ?", [*args, sender]
+        return [_message(r) for r in self._db.execute(query + " ORDER BY id", args).fetchall()]
+
+    @_locked
+    def messages_to(self, recipient: str, kinds: tuple[str, ...], limit: int = 50) -> list[Message]:
+        rows = self._db.execute(
+            f"SELECT * FROM messages WHERE recipient = ? AND kind IN ({', '.join('?' * len(kinds))})"
+            " ORDER BY id DESC LIMIT ?", (recipient, *kinds, limit)).fetchall()
+        return [_message(r) for r in reversed(rows)]
+
+    # tasks
+
+    @_locked
+    def add_task(self, assigner: str, assignee: str, title: str, details: str,
+                 parent_id: int | None = None) -> Task:
+        now = time.time()
+        cur = self._db.execute(
+            "INSERT INTO tasks (assigner, assignee, title, details, state, parent_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
+            (assigner, assignee, title, details, parent_id, now, now))
+        task = self.get_task(cur.lastrowid)
+        assert task is not None
+        return task
+
+    @_locked
+    def update_task(self, task_id: int, **fields: object) -> Task:
+        allowed = {"state", "message_id", "result"}
+        assert set(fields) <= allowed, fields
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self._db.execute(f"UPDATE tasks SET {sets}, updated_at = ? WHERE id = ?",
+                         (*fields.values(), time.time(), task_id))
+        task = self.get_task(task_id)
+        assert task is not None
+        return task
+
+    @_locked
+    def get_task(self, task_id: int) -> Task | None:
+        row = self._db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return _task(row) if row else None
+
+    @_locked
+    def tasks(self, assignee: str | None = None, assigner: str | None = None,
+              open_only: bool = False, limit: int = 200) -> list[Task]:
+        query, args = "SELECT * FROM tasks WHERE 1 = 1", []
+        if assignee is not None:
+            query, args = query + " AND assignee = ?", [*args, assignee]
+        if assigner is not None:
+            query, args = query + " AND assigner = ?", [*args, assigner]
+        if open_only:
+            query += " AND state IN ('open', 'blocked')"
+        rows = self._db.execute(query + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
+        return [_task(r) for r in reversed(rows)]
 
     @_locked
     def get_message(self, message_id: int) -> Message | None:
@@ -316,6 +445,49 @@ class Store:
         ).fetchall()
         return {r[0]: r[1] for r in rows}
 
+    # sessions and notes: what lets a restarted team carry on where it stopped
+
+    @_locked
+    def start_session(self, role: str, harness: str, session_id: str | None) -> None:
+        """Record that `role` starts a new conversation (its id may only be known later)."""
+        now = time.time()
+        self._db.execute(
+            "INSERT INTO sessions (role, harness, session_id, launched_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(role) DO UPDATE SET harness = excluded.harness, session_id = excluded.session_id,"
+            " launched_at = excluded.launched_at, updated_at = excluded.updated_at",
+            (role, harness, session_id, now, now),
+        )
+
+    @_locked
+    def record_session_id(self, role: str, harness: str, session_id: str) -> None:
+        """What a hook saw the harness call the current conversation (Codex tells us only this way)."""
+        now = time.time()
+        self._db.execute(
+            "INSERT INTO sessions (role, harness, session_id, launched_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(role) DO UPDATE SET harness = excluded.harness, session_id = excluded.session_id,"
+            " updated_at = excluded.updated_at"
+            " WHERE sessions.session_id IS NOT excluded.session_id OR sessions.harness IS NOT excluded.harness",
+            (role, harness, session_id, now, now),
+        )
+
+    @_locked
+    def get_session(self, role: str) -> Session | None:
+        row = self._db.execute("SELECT * FROM sessions WHERE role = ?", (role,)).fetchone()
+        return Session(row["role"], row["harness"], row["session_id"], row["launched_at"]) if row else None
+
+    @_locked
+    def set_notes(self, role: str, text: str) -> None:
+        self._db.execute(
+            "INSERT INTO notes (role, text, updated_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(role) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+            (role, text, time.time()),
+        )
+
+    @_locked
+    def get_notes(self, role: str) -> str:
+        row = self._db.execute("SELECT text FROM notes WHERE role = ?", (role,)).fetchone()
+        return row[0] if row else ""
+
     # notices: the newest message each role has already been told about
 
     @_locked
@@ -424,8 +596,14 @@ def _consultant(row: sqlite3.Row) -> Consultant:
 def _message(row: sqlite3.Row) -> Message:
     return Message(
         row["id"], row["sent_at"], row["sender"], row["recipient"],
-        row["kind"], row["text"], row["reply_to"], row["read_at"],
+        row["kind"], row["text"], row["reply_to"], row["read_at"], bool(row["urgent"]),
     )
+
+
+def _task(row: sqlite3.Row) -> Task:
+    return Task(row["id"], row["assigner"], row["assignee"], row["title"], row["details"],
+                row["state"], row["message_id"], row["parent_id"], row["result"],
+                row["created_at"], row["updated_at"])
 
 
 def _lock(row: sqlite3.Row) -> Lock:

@@ -1,11 +1,14 @@
-"""Role-bound access to the hub. Every rule of the chain of command is enforced here.
+"""Role-bound access to the hub. The message law (see LAW) is enforced here.
 
-- A role may message its direct superior (a report, or a request for help), its peers
-  (roles with the same superior), and anyone below it in the tree (an instruction).
-  Nobody else: no skipping levels upward, no talking to cousins. Consultants talk only
-  with the agent they help.
-- Everyone may see the whole tree and every role's status and locks. Only a role itself
-  and the roles above it may read its messages.
+- Chain: a role may write to its direct superior (a report, or a request for help), its
+  peers (roles with the same superior), and anyone below it (an instruction). Nobody
+  else: no skipping levels upward, no writing to other teams. Consultants talk only with
+  the agent they help.
+- Replies: anyone may answer a message addressed to them, whoever sent it.
+- Tasks: work is assigned only downward, as tasks; the assignee closes every task with a
+  result (done or blocked), which goes back to whoever assigned it.
+- Everyone may see the whole tree, every role's status, tasks and locks. Only a role
+  itself and the roles above it may read its messages.
 - A file has at most one writer. A role may only claim files inside its write scope,
   and a lock can be released by its holder or by anyone above the holder. A holder
   can hand a lock to its direct superior or a direct subordinate.
@@ -24,10 +27,38 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from .store import Consultant, Lock, Message, Status, Store
+from .store import Consultant, Lock, Message, Status, Store, Task
 from .team import Role, Team
 
 STATES = ("idle", "working", "waiting", "blocked", "done")
+MAX_TEXT = 20_000  # characters per message; longer material belongs in a file
+BROADCAST = {"@team": "your direct subordinates", "@all": "everyone below you"}
+
+# The message law, as every agent and the owner read it.
+LAW = [
+    ("Chain of command", "Write to your direct superior, to your peers (same superior) and to "
+     "anyone below you. Don't skip levels upward or write to other teams."),
+    ("Answering is always allowed", "You may reply (reply_to) to any message sent to you, "
+     "whoever sent it."),
+    ("Work is given as tasks", "Give work only downward, with assign_task: one clear, "
+     "self-contained task each. Peers coordinate but never assign work to each other."),
+    ("Every task gets closed", "When a task is finished, call finish_task with the result: "
+     "done, or blocked with what you need. Whoever assigned it is told. Never drop a task silently."),
+    ("Help goes up one level", "ask_help goes to your direct superior, who must answer it, "
+     "pass it up, or summon a consultant."),
+    ("Say it once, say it all", "Every message wakes its receiver. Send only what they need to act "
+     "on: no 'thanks' or 'ok' messages. Put long material in a file and send its path."),
+    ("One writer per file", "You must hold a file's lock to edit it (editing a free file in your "
+     "scope takes it). Release files when you are done."),
+    ("Everyone sees the team", "Anyone can see every role's status, tasks and files "
+     "(team_status). Messages stay private to the sender, the receiver and their superiors."),
+    ("Urgent is rare", "Only messages going down may be urgent. They interrupt the receiver's "
+     "current work, so use them only to stop or redirect it."),
+]
+
+
+def law_text() -> str:
+    return "\n".join(f"{i}. {title}. {rule}" for i, (title, rule) in enumerate(LAW, 1))
 
 
 class HubError(Exception):
@@ -66,6 +97,7 @@ class Snapshot:
     status: Status | None
     online: int
     locks: int
+    tasks: list[Task]  # open or blocked tasks assigned to this role
 
 
 Opener = Callable[[Role], None]  # opens a visible session for a newly summoned consultant
@@ -154,21 +186,41 @@ class RoleSession:
 
     # messaging
 
-    def send(self, to: str, text: str, reply_to: int | None = None) -> Message:
+    def send(self, to: str, text: str, reply_to: int | None = None, urgent: bool = False) -> Message:
         team = self.team
+        if to in BROADCAST:
+            raise HubError(f"to write to {BROADCAST[to]}, use broadcast")
         if not team.is_member(to):
             raise PermissionDenied(f"'{to}' is not in this team")
         if to == self.name:
             raise PermissionDenied("you cannot message yourself")
+        original = self._check_reply(reply_to)
         if to == team.superior_of(self.name):
             kind = "report"
         elif team.is_above(self.name, to):
             kind = "instruction"
         elif to in self._peers(team):
             kind = "peer"
+        elif original is not None and original.sender == to and original.recipient == self.name:
+            kind = "reply"  # law 2: answering is always allowed
         else:
-            raise PermissionDenied(f"you cannot message '{to}'. {self._reach(team)}")
-        return self.store.add_message(self.name, to, kind, _text(text), self._check_reply(reply_to))
+            raise PermissionDenied(f"you cannot message '{to}'. {self._reach(team)} "
+                                   "(You may also reply to any message sent to you.)")
+        if urgent and kind != "instruction":
+            raise PermissionDenied("only messages to people below you may be urgent")
+        return self.store.add_message(self.name, to, kind, _text(text), reply_to, urgent)
+
+    def broadcast(self, scope: str, text: str, urgent: bool = False) -> list[Message]:
+        """One message to each of your direct subordinates (@team) or everyone below you (@all)."""
+        team = self.team
+        if scope not in BROADCAST:
+            raise HubError(f"broadcast to one of {', '.join(BROADCAST)}")
+        names = team.subordinates_of(self.name) if scope == "@team" else team.subtree_of(self.name)
+        names = [n for n in names if not team.roles[n].is_consultant]
+        if not names:
+            raise HubError("there is nobody below you to write to")
+        body = _text(text)
+        return [self.store.add_message(self.name, n, "instruction", body, None, urgent) for n in names]
 
     def _peers(self, team: Team) -> list[str]:
         """Roles with the same superior. Consultants have no peers."""
@@ -182,9 +234,86 @@ class RoleSession:
         superior = self.superior
         if superior is None:
             raise PermissionDenied("the owner has no superior to ask")
-        return self.store.add_message(
-            self.name, superior, "help", _text(question), self._check_reply(reply_to)
-        )
+        self._check_reply(reply_to)
+        return self.store.add_message(self.name, superior, "help", _text(question), reply_to)
+
+    def unanswered_help(self) -> list[Message]:
+        """Help requests sent to this role that it has neither answered nor sent a consultant for."""
+        helped = {c.help_id for c in self.store.active_consultants()}
+        return [m for m in self.store.messages_to(self.name, ("help",))
+                if m.id not in helped and not self.store.replies_to(m.id, sender=self.name)]
+
+    # tasks
+
+    def assign_task(self, to: str, title: str, details: str = "", part_of: int | None = None) -> Task:
+        """Give work to someone below you. Returns the new task; its assignee gets it as a message."""
+        team = self.team
+        if not team.is_member(to) or to == team.owner:
+            raise PermissionDenied(f"'{to}' is not a role in this team")
+        if not team.is_above(self.name, to):
+            peers = " Peers coordinate but don't assign work to each other." if to in self._peers(team) else ""
+            raise PermissionDenied(f"you can only assign tasks to people below you, not '{to}'.{peers}")
+        title = _text(title).splitlines()[0][:200]
+        if part_of is not None:
+            parent = self.store.get_task(part_of)
+            if parent is None or parent.assignee != self.name:
+                raise PermissionDenied(f"task #{part_of} is not one of your tasks")
+        task = self.store.add_task(self.name, to, title, details.strip(), part_of)
+        body = f"Task #{task.id}: {title}" + (f"\n\n{details.strip()}" if details.strip() else "")
+        body += f"\n\n(When it is finished, call finish_task({task.id}, result).)"
+        message = self.store.add_message(self.name, to, "task", body[:MAX_TEXT])
+        return self.store.update_task(task.id, message_id=message.id)
+
+    def finish_task(self, task_id: int, result: str, outcome: str = "done") -> Task:
+        """Close one of your tasks: done, or blocked (you need something to carry on)."""
+        self.team  # noqa: B018 - refuses a dismissed consultant
+        task = self.store.get_task(task_id)
+        if task is None or task.assignee != self.name:
+            raise PermissionDenied(f"task #{task_id} is not assigned to you")
+        if outcome not in ("done", "blocked"):
+            raise HubError("outcome must be 'done' or 'blocked'")
+        if not task.is_open:
+            raise HubError(f"task #{task_id} is already {task.state}")
+        result = _text(result)
+        task = self.store.update_task(task_id, state=outcome, result=result)
+        head = "finished" if outcome == "done" else "is BLOCKED"
+        self.store.add_message(self.name, task.assigner, "result",
+                               f"Task #{task.id} {head}: {task.title}\n\n{result}", task.message_id)
+        return task
+
+    def cancel_task(self, task_id: int, reason: str = "") -> Task:
+        """Withdraw a task: its assigner, or anyone above its assignee, may do this."""
+        team = self.team
+        task = self.store.get_task(task_id)
+        if task is None:
+            raise HubError(f"there is no task #{task_id}")
+        if task.assigner != self.name and not team.is_above(self.name, task.assignee):
+            raise PermissionDenied(f"only {task.assigner} or someone above {task.assignee} can cancel task #{task_id}")
+        if not task.is_open:
+            raise HubError(f"task #{task_id} is already {task.state}")
+        task = self.store.update_task(task_id, state="cancelled", result=reason.strip())
+        why = f" Reason: {reason.strip()}" if reason.strip() else ""
+        self.store.add_message(self.name, task.assignee, "instruction",
+                               f"Task #{task.id} ({task.title}) is cancelled; stop working on it.{why}",
+                               task.message_id)
+        return task
+
+    def my_tasks(self) -> list[Task]:
+        """Open tasks assigned to you."""
+        return self.store.tasks(assignee=self.name, open_only=True)
+
+    def given_tasks(self) -> list[Task]:
+        """Tasks you assigned that are still open or blocked."""
+        return self.store.tasks(assigner=self.name, open_only=True)
+
+    # memory
+
+    def save_notes(self, text: str) -> None:
+        """Your notes for your next session: what you know and are doing. Replaces the old notes."""
+        self.team  # noqa: B018
+        if len(text) > MAX_TEXT:
+            raise HubError(f"notes are limited to {MAX_TEXT} characters")
+        self.store.set_notes(self.name, text.strip())
 
     def read_inbox(self) -> list[Message]:
         self.team  # noqa: B018 - refuses a dismissed consultant
@@ -211,13 +340,13 @@ class RoleSession:
             else:
                 time.sleep(delay)
 
-    def _check_reply(self, reply_to: int | None) -> int | None:
+    def _check_reply(self, reply_to: int | None) -> Message | None:
         if reply_to is None:
             return None
         original = self.store.get_message(reply_to)
         if original is None or self.name not in (original.sender, original.recipient):
             raise PermissionDenied(f"message #{reply_to} is not one of yours")
-        return reply_to
+        return original
 
     def _reach(self, team: Team) -> str:
         superior = team.superior_of(self.name)
@@ -261,12 +390,15 @@ class RoleSession:
         locks: dict[str, int] = {}
         for lock in self.store.locks():
             locks[lock.owner] = locks.get(lock.owner, 0) + 1
+        tasks: dict[str, list[Task]] = {}
+        for task in self.store.tasks(open_only=True):
+            tasks.setdefault(task.assignee, []).append(task)
         rows: list[Snapshot] = []
 
         def walk(name: str, depth: int) -> None:
             for child in team.subordinates_of(name):
                 rows.append(Snapshot(child, depth, team.roles[child], statuses.get(child),
-                                     online.get(child, 0), locks.get(child, 0)))
+                                     online.get(child, 0), locks.get(child, 0), tasks.get(child, [])))
                 walk(child, depth + 1)
 
         walk(team.owner, 0)
@@ -408,4 +540,7 @@ def _text(text: str) -> str:
     text = text.strip()
     if not text:
         raise HubError("message is empty")
+    if len(text) > MAX_TEXT:
+        raise HubError(f"message is {len(text)} characters; the limit is {MAX_TEXT}. Put long "
+                       "material in a file and send its path instead.")
     return text

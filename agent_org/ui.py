@@ -190,7 +190,7 @@ class App:
             if name not in team.roles:
                 raise ApiError(f"'{name}' is not a role")
         tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
-                                       force=bool(body.get("force")))
+                                       force=bool(body.get("force")), fresh=bool(body.get("fresh")))
 
         def open_all() -> None:
             for tab in tabs:

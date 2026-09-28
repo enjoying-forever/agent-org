@@ -34,10 +34,10 @@ def test_stop_reminds_to_report_before_going_quiet(hub):
     worker.read_inbox()
     out = hooks.on_stop(worker, {"stop_hook_active": False}, wait=0.1, poll=0.05)
     assert out["decision"] == "block"
-    assert "You have not reported to tech-lead since tech-lead's message #1" in out["reason"]
+    assert "tech-lead's message #1 has no answer from you" in out["reason"]
     worker.send("tech-lead", "login form done")
     out = hooks.on_stop(worker, {"stop_hook_active": False}, wait=0.1, poll=0.05)
-    assert "reported" not in out["reason"]  # nothing owed now: straight to waiting
+    assert "no answer" not in out["reason"]  # nothing owed now: straight to waiting
 
 
 def test_stop_reminds_to_release_files(hub):
