@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -68,7 +69,9 @@ LAW = [
     ("Everyone sees the team", "Anyone can see every role's status, tasks and files "
      "(team_status). Messages stay private to the sender, the receiver and their superiors."),
     ("Silence is a problem", "A task that shows no progress gets a reminder, then its assigner "
-     "is told. Report a blocker as soon as you hit it instead of waiting."),
+     "is told. Report a blocker as soon as you hit it instead of waiting. When an agent is out of "
+     "its usage limit, whoever gave its tasks moves them (reassign_task) to someone who can work, "
+     "preferably on another subscription, or lets them wait for the reset."),
     ("Urgent is rare", "Only messages going down may be urgent. They interrupt the receiver's "
      "current work, so use them only to stop or redirect it."),
 ]
@@ -115,6 +118,7 @@ class Snapshot:
     online: int
     locks: int
     tasks: list[Task]  # unfinished tasks assigned to this role
+    stuck: str = ""    # why it cannot work right now (usage limit, API error), if it can't
 
 
 Opener = Callable[[Role], None]  # opens a visible session for a newly summoned consultant
@@ -191,15 +195,29 @@ class Hub:
     def event(self, kind: str, role: str, text: str, task_id: int | None = None) -> None:
         self.store.add_event(kind, role, text, task_id)
 
+    def stuck(self) -> dict[str, dict]:
+        """Agents that cannot work right now, as the watchdog last saw them: role -> kind, text, at, until."""
+        try:
+            found = json.loads(self.store.get_setting("stuck") or "{}")
+        except ValueError:
+            return {}
+        return found if isinstance(found, dict) else {}
+
+    def set_stuck(self, found: dict[str, dict]) -> None:
+        text = json.dumps(found, sort_keys=True)
+        if text != (self.store.get_setting("stuck") or "{}"):
+            self.store.set_setting("stuck", text)
+
     def satisfied(self, task_id: int) -> bool:
         dep = self.store.get_task(task_id)
         return dep is not None and dep.state in ("done", "accepted")
 
-    def deliver_task(self, task: Task) -> Task:
+    def deliver_task(self, task: Task, preface: str = "") -> Task:
         """Hand a task to its assignee as a message."""
-        lines = [f"Task #{task.id}: {task.title}"]
+        lines = [preface, ""] if preface else []
+        lines += [f"Task #{task.id}: {task.title}"]
         if task.priority != 2:
-            lines[0] += f"  [{PRIORITIES.get(task.priority, task.priority)} priority]"
+            lines[-1] += f"  [{PRIORITIES.get(task.priority, task.priority)} priority]"
         if task.details:
             lines += ["", task.details]
         if task.done_when:
@@ -520,6 +538,68 @@ class RoleSession:
         self.hub.stall_dependents(task)
         return task
 
+    def reassign_task(self, task_id: int, to: str, reason: str = "") -> Task:
+        """Move an unfinished task to someone else - say, because its assignee is out of its usage limit.
+
+        Its assigner, or anyone above its assignee, may do this; the new assignee must be below
+        both the mover and the assigner. Leases the old assignee holds on the task's files move
+        with it, and the new assignee is told what was done so far.
+        """
+        team = self.team
+        task = self.store.get_task(task_id)
+        if task is None:
+            raise HubError(f"there is no task #{task_id}")
+        if task.assigner != self.name and not team.is_above(self.name, task.assignee):
+            raise PermissionDenied(f"only {task.assigner} or someone above {task.assignee} can move task #{task_id}")
+        if task.state not in ACTIVE:
+            raise HubError(f"task #{task_id} is {task.state}; only an unfinished task can be moved")
+        if not team.is_member(to) or to == team.owner:
+            raise PermissionDenied(f"'{to}' is not a role in this team")
+        if to == task.assignee:
+            raise HubError(f"task #{task_id} is already {to}'s")
+        receiver = team.roles[to]
+        if receiver.is_consultant:
+            raise PermissionDenied(f"{to} is a consultant; it helps with a problem but does not take tasks")
+        if not (team.is_above(self.name, to) and (task.assigner == team.owner or team.is_above(task.assigner, to))):
+            raise PermissionDenied(f"{to} must be below both you and {task.assigner}, who gave task #{task_id}")
+        before = task.assignee
+        files = self.store.task_files(task_id)
+        moved, freed = [], []
+        for f in files:
+            try:
+                lock = self.store.covering(self.hub.lock_key(f)[0])
+            except PermissionDenied:
+                continue
+            if lock is None or lock.owner != before or lock.path in moved + freed:
+                continue
+            key = self.hub.lock_key(lock.path)[0]
+            if self._in_scope(team, to, lock.path) and self.store.transfer(key, before, to):
+                moved.append(lock.path)
+            else:
+                self.store.release(key)
+                freed.append(lock.path)
+        why = reason.strip()
+        task = self.store.update_task(task_id, assignee=to, started_at=None, nudged_at=None)
+        if task.state != "waiting":
+            notes = [f"This task was {before}'s and is now yours" + (f": {why}" if why else ".")]
+            if task.result:
+                notes.append(f"{before}'s last word on it: {task.result[:1500]}")
+            if files:
+                notes.append(f"Files it changed so far: {', '.join(files)}.")
+            if moved:
+                notes.append(f"You now hold its leases on: {', '.join(moved)}.")
+            notes.append(f"Its whole history: task_details({task.id}).")
+            task = self.hub.deliver_task(task, "\n".join(notes))
+        if before in team.roles:
+            self.store.add_message(self.name, before, "instruction",
+                                   f"Task #{task.id} ({task.title}) was moved to {to}; stop working on it."
+                                   + (f" Reason: {why}" if why else "")
+                                   + (f" Your leases on {', '.join(moved + freed)} went with it." if moved or freed else ""),
+                                   None, False, task.id)
+        self.hub.event("task", self.name, f"moved #{task.id} from {before} to {to}" + (f": {why}" if why else ""),
+                       task.id)
+        return task
+
     def task_details(self, task_id: int) -> tuple[Task, list[Message]]:
         """A task and its whole thread, for anyone who may see it (assigner, assignee, above them)."""
         team = self.team
@@ -595,12 +675,14 @@ class RoleSession:
         tasks: dict[str, list[Task]] = {}
         for task in self.store.tasks(open_only=True):
             tasks.setdefault(task.assignee, []).append(task)
+        stuck = {name: describe_stuck(info) for name, info in self.hub.stuck().items()}
         rows: list[Snapshot] = []
 
         def walk(name: str, depth: int) -> None:
             for child in team.subordinates_of(name):
                 rows.append(Snapshot(child, depth, team.roles[child], statuses.get(child),
-                                     online.get(child, 0), locks.get(child, 0), tasks.get(child, [])))
+                                     online.get(child, 0), locks.get(child, 0), tasks.get(child, []),
+                                     stuck.get(child, "")))
                 walk(child, depth + 1)
 
         walk(team.owner, 0)
@@ -767,6 +849,19 @@ class RoleSession:
                                    f"I dismissed {name}.{back}")
         self.hub.event("consultant", self.name, f"dismissed {name}")
         return role, returned
+
+
+def describe_stuck(info: dict) -> str:
+    """'out of its usage limit until 19:20' or 'stopped by an API error'."""
+    if info.get("kind") == "limit":
+        until = info.get("until")
+        if not until:
+            return "out of its usage limit"
+        if until <= time.time():
+            return "its usage limit has reset; it needs a restart"
+        fmt = "%H:%M" if until - time.time() < 20 * 3600 else "%b %d %H:%M"
+        return f"out of its usage limit until {time.strftime(fmt, time.localtime(until))}"
+    return f"stopped by an API error: {str(info.get('text', ''))[:120]}"
 
 
 def _text(text: str) -> str:

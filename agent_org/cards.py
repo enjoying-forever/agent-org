@@ -55,6 +55,9 @@ def role_card(me: RoleSession) -> str:
         *([
             "- Give work as tasks with a done_when, and split big work into several tasks; after= makes a "
             "task wait for others. Review each result (review_task) before building on it.",
+            "- Each program runs on its own subscription. When the hub tells you a subordinate is out of "
+            "its usage limit, move its urgent tasks with reassign_task to someone free - preferably on "
+            "another program - and let the rest wait for the reset.",
         ] if subs else []),
         "- Messages from 'hub' are the system's own reminders: a quiet task, an expired file lease, a "
         "question passed up to you. Act on them.",

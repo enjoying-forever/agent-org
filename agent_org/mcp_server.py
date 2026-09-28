@@ -147,6 +147,13 @@ class Tools:
                       ["task_id", "accept"], self._review)
             self._add("cancel_task", "Withdraw a task you gave (or one below you) that is no longer needed.",
                       {"task_id": {"type": "integer"}, "reason": text}, ["task_id"], self._cancel)
+            self._add("reassign_task",
+                      "Move an unfinished task you gave (or one below you) to another agent below you - for "
+                      "example when its assignee is out of its usage limit. Prefer an agent on a different "
+                      "program (see team_status). Its file leases and history go with it.",
+                      {"task_id": {"type": "integer"}, "to": text,
+                       "reason": {"type": "string", "description": "why it moves; the new assignee reads this"}},
+                      ["task_id", "to"], self._reassign)
         if team.can_summon(me.name):
             tiers = "; ".join(f"{t.describe()}: {t.use_for}" if t.use_for else t.describe()
                               for t in team.tiers.values())
@@ -241,6 +248,10 @@ class Tools:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
         return f"Task #{task.id} is cancelled; {task.assignee} has been told."
 
+    def _reassign(self, args: dict[str, Any]) -> str:
+        task = self.me.reassign_task(int(args["task_id"]), args["to"], args.get("reason") or "")
+        return f"Task #{task.id} is now {task.assignee}'s ({task.state}); both have been told."
+
     def _list_tasks(self) -> str:
         mine, queued, given = self.me.my_tasks(), self.me.queued_tasks(), self.me.given_tasks()
         lines = ["Your tasks:" if mine else "You have no tasks to do."]
@@ -264,9 +275,10 @@ class Tools:
             running = "" if row.online else ", not running"
             temp = f", consultant ({row.role.tier})" if row.role.is_consultant else ""
             files = f", writing {row.locks} file(s)" if row.locks else ""
+            stuck = f" -- {row.stuck.upper()}" if row.stuck else ""
             me = "  <- you" if row.name == self.me.name else ""
             indent = "  " * (row.depth + 1)
-            lines.append(f"{indent}{row.name} [{row.role.harness}{temp}{running}]: {state}{files}{me}")
+            lines.append(f"{indent}{row.name} [{row.role.harness}{temp}{running}]: {state}{files}{stuck}{me}")
             lines += [f"{indent}    task #{t.id} [{t.state}] from {t.assigner}: {t.title}" for t in row.tasks]
         return "\n".join(lines)
 

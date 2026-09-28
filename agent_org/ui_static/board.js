@@ -93,11 +93,67 @@ async function openTask(id) {
         h('button', { onclick: () => review(t, false, feedback.value) }, 'Send back'))),
     h('div', { class: 'actions' },
       h('button', { onclick: () => { $('#task-dialog').close(); composeTo(t.assignee, 'message'); } }, `Message ${t.assignee}`),
+      !closed && t.state !== 'done' && moveControl(t),
       !closed && h('button', { class: 'danger', onclick: () => cancelTask(t) }, 'Cancel task')),
     h('h3', {}, `Conversation (${d.thread.length})`),
     d.thread.length ? d.thread.map((m) => messageEl(m, true)) : h('div', { class: 'muted' }, 'No messages yet.'));
   if (!$('#task-dialog').open) $('#task-dialog').showModal();
   loadChanges(t.id);
+}
+
+// ---------- moving tasks (when an agent is out of its usage limit) ----------
+
+/** Who could take `t` over: below whoever gave it; not stuck, other programs and idle agents first. */
+function moveCandidates(t) {
+  const from = findRole(t.assignee);
+  const below = t.assigner === S.state.owner ? S.state.roles : subtreeOf(t.assigner);
+  const rank = (r) => [r.stuck ? 1 : 0, r.harness === from?.harness ? 1 : 0, r.open_tasks];
+  return below.filter((r) => r.name !== t.assignee && !r.tier).sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || a.name.localeCompare(b.name);
+  });
+}
+
+function moveControl(t, after) {
+  const options = moveCandidates(t);
+  if (!options.length) return null;
+  const pick = h('select', { title: 'Who takes it over' }, options.map((r) => h('option', { value: r.name },
+    `${r.name} (${r.harness}${r.stuck ? ', stuck' : ''}, ${plural(r.open_tasks, 'task')})`)));
+  return h('span', { class: 'move' },
+    h('button', { onclick: () => moveTask(t, pick.value, after) }, 'Move to'), pick);
+}
+
+async function moveTask(t, to, after) {
+  const stuck = findRole(t.assignee)?.stuck;
+  const reason = prompt(`Move #${t.id} (${t.title}) from ${t.assignee} to ${to}?
+
+Why (${to} reads this):`,
+    stuck ? `${t.assignee} is ${stuck.describe}.` : '');
+  if (reason === null) return;
+  if (await act(api('/api/reassign', { task_id: t.id, to, reason }), () => `#${t.id} is now ${to}'s.`)) {
+    if (after) after(); else openTask(t.id);
+  }
+}
+
+/** Every unfinished task of one agent, each with its own Move control. */
+async function openMoveTasks(name) {
+  await refresh();
+  const r = findRole(name);
+  const tasks = S.state.tasks.filter((t) => t.assignee === name && ['waiting', 'open', 'working', 'blocked'].includes(t.state));
+  fill($('#task-body'),
+    h('header', { class: 'task-head' },
+      h('h2', {}, `Move ${name}'s tasks`),
+      h('button', { class: 'small', onclick: () => $('#task-dialog').close() }, '✕')),
+    r?.stuck && h('p', {}, `${name} is ${r.stuck.describe}. Move what should not wait to someone free - preferably `
+      + 'on another program, which runs on a different subscription. The new agent gets the task, its history and '
+      + `the files ${name} was writing for it.`),
+    tasks.length
+      ? tasks.map((t) => h('div', { class: 'move-row' },
+        h('button', { class: 'link', onclick: () => openTask(t.id) }, `#${t.id} ${t.title}`),
+        h('span', { class: `tstate ${t.state}` }, t.state),
+        moveControl(t, () => openMoveTasks(name)) || h('span', { class: 'muted small' }, 'nobody else can take it')))
+      : h('div', { class: 'muted' }, 'Nothing left to move.'));
+  if (!$('#task-dialog').open) $('#task-dialog').showModal();
 }
 
 async function loadChanges(id) {
@@ -183,7 +239,7 @@ $('#board-role').addEventListener('change', renderBoard);
 
 // ---------- problems ----------
 
-const PROBLEM_ICON = { stopped: '⏸', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
+const PROBLEM_ICON = { stopped: '⏸', stuck: '⟳', limit: '⌛', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
 
 function renderProblems() {
   const list = S.state.problems;
@@ -209,6 +265,8 @@ function problemAction(p) {
     });
   }
   if (p.action === 'review') return btn('Review', () => openTask(p.task_id));
+  if (p.action === 'restart') return btn('Restart', () => restartRole(p.role));
+  if (p.action === 'reassign') return btn('Move its tasks', () => openMoveTasks(p.role));
   if (p.action === 'open-task') return btn('Open', () => openTask(p.task_id));
   return null;
 }

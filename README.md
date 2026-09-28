@@ -82,7 +82,9 @@ what they still owe.
 10. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
     Messages stay private to the sender, the receiver and their superiors.
 11. **Silence is a problem.** A task with no progress gets a reminder, then its assigner
-    is told. Blockers are reported as soon as they are hit.
+    is told. Blockers are reported as soon as they are hit. When an agent runs out of
+    its usage limit, whoever gave it tasks moves them to someone who can work -
+    preferably on another subscription - or lets them wait for the reset.
 12. **Urgent is rare.** Only messages going down may be urgent; they interrupt the
     receiver's current work.
 
@@ -149,6 +151,23 @@ These are set in *Edit team*, under the team's name.
   the number of running agents (and your subscription use) down; the others wait for a
   free place.
 
+## When a subscription runs out
+
+Each program runs on its own subscription, so when one is used up the others can carry
+the work.
+
+- agent-org reads each agent's conversation file and notices when Claude Code or Codex
+  stopped on its usage limit (and when the limit resets), or on another API error.
+- The agent's card says so ("out of its usage limit until 19:20"). It is not started
+  again before the reset, and whoever gave it tasks is told who else is free - agents on
+  other programs first. They, or you with **Move its tasks**, move each task with
+  everything done so far: its conversation, the files it changed and the leases on them.
+- After the reset, or a few minutes after any other API error, an agent still idle at its
+  prompt gets a **Restart** button. With *Start agents automatically* on, it is restarted
+  by itself on the same conversation and carries on.
+- Grok and Antigravity don't record their limits where agent-org can read them yet;
+  restart those agents from their card.
+
 ## Troubleshooting
 
 - **The Setup check shows a ✗:** it says what to run. The most common: Grok not signed
@@ -189,7 +208,8 @@ How it fits together:
   process, upgraded in place when the format grows).
 - `watchdog.py` - nudges, escalations, expired leases and the problems list
   (`python -m agent_org.watchdog --team team.yaml` runs it without the UI).
-- `usage.py` - token use per agent, from each harness's session files.
+- `usage.py` - token use per agent, and whether its last turn ended on a usage limit
+  or an API error, from each harness's session files.
 - `mcp_server.py` - the `org` tools each agent gets (standard-library MCP over stdio).
 - `hooks.py` / `org_hook.py` - the hooks each harness runs: deliver mail, remind of
   duties, guard edits, record the conversation id.

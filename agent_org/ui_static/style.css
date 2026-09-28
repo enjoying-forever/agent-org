@@ -431,7 +431,7 @@ dialog.wide { width: min(760px, calc(100vw - 32px)); }
 .problem { display: flex; gap: 9px; align-items: center; font-size: 13px; }
 .picon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); flex-shrink: 0; font-size: 12px; }
 .problem.question .picon, .problem.review .picon { background: var(--accent-soft); color: var(--accent); }
-.problem.stopped .picon, .problem.stalled .picon, .problem.blocked .picon, .problem.loop .picon, .problem.duplicate .picon {
+.problem.stopped .picon, .problem.stuck .picon, .problem.stalled .picon, .problem.blocked .picon, .problem.loop .picon, .problem.duplicate .picon {
   background: color-mix(in srgb, var(--danger) 15%, var(--panel)); color: var(--danger); }
 .ptext { flex: 1; }
 
@@ -460,3 +460,13 @@ dialog.wide { width: min(760px, calc(100vw - 32px)); }
 .diff .d-file { font-weight: 700; color: var(--text); }
 @media (prefers-color-scheme: dark) { .diff .d-add { color: #6fdc8c; } .diff .d-del { color: #ff8b80; } }
 .history-off { display: flex; gap: 10px; align-items: center; }
+
+/* agents that cannot work right now */
+.stuck-badge { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 10px; font-size: 11.5px;
+  background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.stuck-badge.limit { background: color-mix(in srgb, var(--help) 16%, transparent); color: var(--help); }
+.move { display: inline-flex; gap: 4px; align-items: center; }
+.move select { width: auto; max-width: 260px; }
+.move-row { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.move-row > button.link { flex: 1; text-align: left; }
+.problem.limit .picon { background: color-mix(in srgb, var(--help) 16%, var(--panel)); color: var(--help); }

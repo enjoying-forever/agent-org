@@ -20,9 +20,11 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from . import usage
 from .hub import Hub, HubError, RoleSession
 from .store import Message
 
@@ -110,7 +112,19 @@ def deliver(me: RoleSession, messages: list[Message]) -> dict[str, Any]:
                  + fmt_messages(messages))
 
 
+def out_of_usage(me: RoleSession, payload: dict[str, Any]) -> bool:
+    """True if this conversation just ran into its subscription's usage limit."""
+    role = me.hub.team.roles.get(me.name)
+    session_id = field(payload, "session_id") or payload.get("conversationId")
+    if role is None or not isinstance(session_id, str):
+        return False
+    s = usage.stuck(role.harness, session_id)
+    return s is not None and s.kind == "limit" and (s.until or 0) > time.time()
+
+
 def on_stop(me: RoleSession, payload: dict[str, Any], wait: float | None = None, poll: float = 1.0):
+    if out_of_usage(me, payload):
+        return None  # a new turn would fail at once and use up its mail; it is restarted after the reset
     # Mail first: an agent can't finish work it hasn't read yet.
     waiting = me.read_inbox()
     if waiting:

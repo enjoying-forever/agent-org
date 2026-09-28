@@ -342,3 +342,59 @@ def test_autostart_starts_agents_that_have_work(server):
     assert "started automatically: it has work waiting" in events
     server.app._autostart(hub, watchdog.patrol(hub))  # not again straight away
     assert len(server.opened_tabs) == 1
+
+
+def test_move_a_task_and_restart_an_agent(server, monkeypatch):
+    hub = server.app.hub
+    task = server.ok("/api/task", {"to": "leader", "title": "Build it"})
+    moved = server.ok("/api/reassign", {"task_id": task["id"], "to": "researcher", "reason": "leader is out of usage"})
+    assert moved["assignee"] == "researcher"
+    stopped = []
+    monkeypatch.setattr(launch, "stop_role", lambda hub, role: stopped.append(role) or 1)
+    out = server.ok("/api/restart", {"role": "researcher"})
+    assert stopped == ["researcher"] and out["opening"] == ["researcher"]
+    assert "restarted by the owner" in [e.text for e in hub.store.events_after(0)]
+
+
+def test_state_shows_why_an_agent_is_stuck(server):
+    import time as _time
+    server.app.hub.set_stuck({"worker-a": {"kind": "limit", "text": "hit your limit", "at": _time.time(),
+                                           "until": _time.time() + 3600}})
+    role = next(r for r in server.ok("/api/state")["roles"] if r["name"] == "worker-a")
+    assert role["stuck"]["kind"] == "limit" and role["stuck"]["describe"].startswith("out of its usage limit until")
+
+
+def test_autostart_restarts_an_agent_stuck_on_an_error(server, monkeypatch):
+    import time as _time
+    from agent_org import usage, watchdog
+    hub = server.app.hub
+    hub.base_team = Team.from_dict({**yaml.safe_load(server.team_file.read_text(encoding="utf-8")),
+                                    "autostart": True}, base_dir=server.team_file.parent)
+    server.ok("/api/task", {"to": "leader", "title": "Build it"})
+    hub.store.record_session_id("leader", "claude", "sid-leader")
+    hub.store.check_in(4242, "leader")
+    monkeypatch.setattr(usage, "stuck", lambda harness, sid: usage.Stuck("error", "API Error: 529", _time.time() - 600, None))
+    stopped = []
+    monkeypatch.setattr(launch, "stop_role", lambda hub, role: stopped.append(role) or hub.store.check_out(4242) or 1)
+    server.app._autostart(hub, watchdog.patrol(hub))
+    assert stopped == ["leader"]
+    assert [t[t.index("--title") + 1] for t in server.opened_tabs] == ["leader"]
+    assert "restarted automatically: it was stuck with work waiting" in [e.text for e in hub.store.events_after(0)]
+
+
+def test_autostart_does_not_keep_restarting_an_agent_that_will_not_stop(server, monkeypatch):
+    import time as _time
+    from agent_org import usage, watchdog
+    hub = server.app.hub
+    hub.base_team = Team.from_dict({**yaml.safe_load(server.team_file.read_text(encoding="utf-8")),
+                                    "autostart": True}, base_dir=server.team_file.parent)
+    server.ok("/api/task", {"to": "leader", "title": "Build it"})
+    hub.store.record_session_id("leader", "claude", "sid-leader")
+    hub.store.check_in(4242, "leader")
+    monkeypatch.setattr(usage, "stuck", lambda harness, sid: usage.Stuck("error", "API Error: 529", _time.time() - 600, None))
+    stopped = []
+    monkeypatch.setattr(launch, "stop_role", lambda hub, role: stopped.append(role) or 0)  # nothing stops
+    server.app._autostart(hub, watchdog.patrol(hub))
+    server.app._autostart(hub, watchdog.patrol(hub))
+    assert stopped == ["leader"] and server.opened_tabs == []
+    assert "could not be restarted automatically: its program did not stop" in [e.text for e in hub.store.events_after(0)]

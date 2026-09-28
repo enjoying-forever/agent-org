@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 from . import doctor, gitops, launch, templates, usage, watchdog
-from .hub import LAW, Hub, HubError
+from .hub import LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
 
@@ -186,20 +186,28 @@ class App:
                 print(f"watchdog: {e}", file=sys.stderr)
 
     def _autostart(self, hub: Hub, problems: list[watchdog.Problem]) -> None:
-        """Start agents that have work but are not running (Gas Town's 'sling'), within the cap."""
+        """Start agents that have work but are not running (Gas Town's 'sling'), within the cap,
+        and restart agents left idle at their prompt by a usage limit that has reset or an API error."""
         now = time.time()
         for p in problems:
-            if p.kind != "stopped" or now - self._autostarted.get(p.role, 0) < AUTOSTART_GAP:
+            if p.kind not in ("stopped", "stuck") or now - self._autostarted.get(p.role, 0) < AUTOSTART_GAP:
                 continue
             if hub.team.roles[p.role].harness not in launch.BUILDERS:
                 continue
+            if p.kind == "stuck":
+                launch.stop_role(hub, p.role)
+                if hub.store.online().get(p.role):  # its program did not stop: leave it for a while
+                    self._autostarted[p.role] = now
+                    hub.event("agent", p.role, "could not be restarted automatically: its program did not stop")
+                    continue
             tabs, _ = launch.prepare(hub, self.team_file, [p.role], owner_tab=False,
                                      limit=hub.base_team.settings.max_running)
             if not tabs:
                 continue  # at the cap: it waits for a free place
             self._autostarted[p.role] = now
             launch.open_tab(tabs[0])
-            hub.event("agent", p.role, f"started automatically: it has work waiting")
+            hub.event("agent", p.role, "restarted automatically: it was stuck with work waiting" if p.kind == "stuck"
+                      else "started automatically: it has work waiting")
 
     def history(self) -> bool:
         """Whether the project keeps git history (cached: it runs git)."""
@@ -334,6 +342,7 @@ class App:
         locks = store.locks()
         online = store.online()
         open_tasks = store.tasks(open_only=True)
+        stuck = self.hub.stuck()
         roles = []
         for name in [team.leader, *team.subtree_of(team.leader)]:
             r = team.roles[name]
@@ -351,6 +360,7 @@ class App:
                 "notes": store.get_notes(name),
                 "resumes": self._resumes(name, r.harness),
                 "usage": self._usage(name, r.harness),
+                "stuck": ({**stuck[name], "describe": describe_stuck(stuck[name])} if name in stuck else None),
             })
         recent_tasks = store.tasks(limit=60)
         return {
@@ -424,6 +434,19 @@ class App:
 
     def cancel_task(self, body: dict[str, Any]) -> dict[str, Any]:
         return _task(self.me.cancel_task(int(body["task_id"]), body.get("reason") or ""))
+
+    def reassign(self, body: dict[str, Any]) -> dict[str, Any]:
+        return _task(self.me.reassign_task(int(body["task_id"]), _str(body, "to"), body.get("reason") or ""))
+
+    def restart(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Stop a role's agent and start it again on the same conversation (after a limit or an error)."""
+        role = _str(body, "role")
+        if role not in self.hub.team.roles:
+            raise ApiError(f"'{role}' is not a role")
+        stopped = launch.stop_role(self.hub, role)
+        result = self.launch({"roles": [role]})
+        self.hub.event("agent", role, "restarted by the owner")
+        return {"stopped": stopped, **result}
 
     def summon(self, body: dict[str, Any]) -> dict[str, Any]:
         role = self.me.summon_consultant(int(body["help_id"]), _str(body, "tier"), body.get("brief") or "")
@@ -518,6 +541,7 @@ POST_ROUTES = {
     "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
     "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,
     "/api/team": App.save_team, "/api/review": App.review, "/api/history": App.enable_history,
+    "/api/reassign": App.reassign, "/api/restart": App.restart,
 }
 
 

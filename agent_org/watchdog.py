@@ -12,6 +12,10 @@ person's attention, for the UI's Problems list.
 - An agent that is not running but has work, two sessions of one role, and two
   agents trading messages in a loop are listed as problems.
 - Questions, reviews and blocked tasks waiting for the owner are listed too.
+- An agent out of its subscription's usage limit is not started (it would only fail);
+  whoever gave it tasks is told once, with who else is free to take them. When the
+  limit resets - or RETRY_AFTER after any other API error - an agent still sitting at
+  its prompt is listed to be restarted, which the UI does by itself with autostart on.
 """
 
 from __future__ import annotations
@@ -21,21 +25,24 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 
-from .hub import HUB, Hub
+from . import usage
+from .hub import HUB, Hub, describe_stuck
+from .store import Task
 
 STALL = 20 * 60        # seconds without progress before a working task is nudged
 HELP_WAIT = 15 * 60    # seconds a question may wait before it is passed up
 LOOP_WINDOW = 10 * 60  # seconds over which message traffic between two roles is counted
 LOOP_LIMIT = 16        # messages between two roles in LOOP_WINDOW that look like a loop
 QUIET = 6 * 3600       # after escalating a stalled task, stay quiet about it this long
+RETRY_AFTER = 3 * 60   # seconds an agent may sit on an API error before it is restarted
 
 
 @dataclass
 class Problem:
-    kind: str          # stopped, stalled, question, review, blocked, loop, duplicate
+    kind: str          # stopped, limit, stuck, stalled, question, review, blocked, loop, duplicate
     role: str          # who it is about
     text: str          # what a person should know
-    action: str = ""   # what the UI offers: start, stop, answer, review, open-task
+    action: str = ""   # what the UI offers: start, stop, restart, reassign, answer, review, open-task
     task_id: int | None = None
     message_id: int | None = None
 
@@ -56,6 +63,31 @@ def minutes(seconds: float) -> str:
     return f"{m} minute{'s' if m != 1 else ''}" if m < 120 else f"{m // 60} hours"
 
 
+def stuck_agents(hub: Hub) -> dict[str, usage.Stuck]:
+    """Agents whose conversation ended on an API error (a usage limit, most often)."""
+    found = {}
+    activity = hub.store.activity()
+    for name, role in hub.team.roles.items():
+        record = hub.store.get_session(name)
+        if record is None or record.harness != role.harness:
+            continue
+        s = usage.stuck(role.harness, record.session_id)
+        if s is not None and activity.get(name, 0) <= s.at:  # it has not worked since
+            found[name] = s
+    return found
+
+
+def free_agents(hub: Hub, below: str, instead_of: str, stuck: dict[str, usage.Stuck],
+                open_tasks: list[Task]) -> list[str]:
+    """Who below `below` could take over from `instead_of`: not stuck, other programs and idle ones first."""
+    team = hub.team
+    harness = team.roles[instead_of].harness
+    load = {n: sum(1 for t in open_tasks if t.assignee == n) for n in team.roles}
+    names = [n for n, r in team.roles.items()
+             if n != instead_of and n not in stuck and not r.is_consultant and team.is_above(below, n)]
+    return sorted(names, key=lambda n: (team.roles[n].harness == harness, load[n], n))
+
+
 def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem]:
     now = time.time() if now is None else now
     store, team = hub.store, hub.team
@@ -63,6 +95,9 @@ def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem
     online = store.online()
     activity = store.activity()
     problems: list[Problem] = []
+    stuck = stuck_agents(hub)
+    if act:
+        hub.set_stuck({n: s.to_dict() for n, s in stuck.items()})
 
     if act:  # leases whose holder went quiet
         for lock in store.expire():
@@ -75,6 +110,17 @@ def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem
     for name in team.roles:
         mine = [t for t in open_tasks if t.assignee == name and t.state in ("open", "working", "blocked")]
         reviews = [t for t in open_tasks if t.assigner == name and t.state == "done"]
+        s = stuck.get(name)
+        if s is not None and s.kind == "limit" and (s.until or 0) > now:
+            if mine or reviews:
+                problems.append(_limited(hub, name, s, mine, reviews, stuck, open_tasks, act))
+            continue  # starting it now would only fail again
+        if s is not None and online.get(name) and (mine or reviews or store.unread_count(name)) and (
+                s.kind == "limit" or now - s.at >= RETRY_AFTER):
+            why = "its usage limit has reset" if s.kind == "limit" else f"an API error ({s.text[:120]})"
+            problems.append(Problem("stuck", name, f"{name} stopped on {why} and sits idle at its prompt with "
+                                    "work waiting. Restart it to carry on.", "restart"))
+            continue
         if not online.get(name) and (mine or reviews):
             what = ", ".join([f"{len(mine)} task(s) to do"] * bool(mine) + [f"{len(reviews)} to review"] * bool(reviews))
             problems.append(Problem("stopped", name, f"{name} is not running but has {what}.", "start"))
@@ -83,7 +129,7 @@ def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem
                                     "messages. Stop it and start it again.", "stop"))
 
     for task in open_tasks:
-        if task.state != "working" or not online.get(task.assignee):
+        if task.state != "working" or not online.get(task.assignee) or task.assignee in stuck:
             continue
         busy_below = any(t.assigner == task.assignee and t.state in ("waiting", "open", "working", "blocked", "done")
                          for t in open_tasks)
@@ -164,6 +210,30 @@ def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem
                                   "going round in circles: step in and decide for them.")
             hub.event("watch", a, f"possible loop between {a} and {b}")
     return problems
+
+
+def _limited(hub: Hub, name: str, s: usage.Stuck, mine: list[Task], reviews: list[Task],
+             stuck: dict[str, usage.Stuck], open_tasks: list[Task], act: bool) -> Problem:
+    """An agent out of its usage limit with work: tell whoever gave it tasks (once), list it for the owner."""
+    team = hub.team
+    when = describe_stuck(s.to_dict())
+    parts = [f"{len(mine)} unfinished task(s)"] * bool(mine) + [f"{len(reviews)} result(s) to review"] * bool(reviews)
+    if act and hub.store.get_setting(f"watch:limit:{name}:{int(s.at)}") == "":
+        hub.store.set_setting(f"watch:limit:{name}:{int(s.at)}", str(int(time.time())))
+        hub.event("watch", name, f"{when}")
+        by_assigner: dict[str, list[Task]] = {}
+        for t in mine:
+            by_assigner.setdefault(t.assigner, []).append(t)
+        for assigner, tasks in by_assigner.items():
+            if assigner == team.owner or not team.is_member(assigner):
+                continue
+            free = free_agents(hub, assigner, name, stuck, open_tasks)[:3]
+            who = (" Free to take them: " + ", ".join(f"{n} ({team.roles[n].harness})" for n in free) + ".") if free else ""
+            hub.notice(assigner, f"{name} ({team.roles[name].harness}) is {when}. The task(s) you gave it cannot move "
+                                 f"until then: {', '.join(f'#{t.id} {t.title}' for t in tasks)}.{who} Move them with "
+                                 "reassign_task(task_id, to, reason), or let them wait for the reset.", tasks[0].id)
+    return Problem("limit", name, f"{name} is {when}, with {' and '.join(parts)}. Move its tasks to someone else, "
+                   "or let them wait.", "reassign")
 
 
 def main(argv: list[str] | None = None) -> int:

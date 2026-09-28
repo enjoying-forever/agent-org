@@ -169,6 +169,8 @@ function applyState(state) {
 }
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
+/** Everyone below `name`, at any depth. */
+const subtreeOf = (name) => rolesUnder(name).flatMap((r) => [r, ...subtreeOf(r.name)]);
 const findRole = (name) => S.state.roles.find((r) => r.name === name);
 
 // ---------- modes: welcome page or a team ----------
@@ -329,6 +331,7 @@ function roleCard(r) {
       h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'not started'),
       s && h('span', { class: 'muted', style: { fontSize: '11px', marginLeft: '6px' } }, ago(s.updated_at))),
     s && s.task && h('div', { class: 'task' }, s.task),
+    r.stuck && h('div', { class: `stuck-badge ${r.stuck.kind}`, title: r.stuck.text }, r.stuck.describe),
     h('div', { class: 'meta' },
       runningEl(r),
       r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'task')) : null,
@@ -392,14 +395,18 @@ function renderDrawer() {
       h('div', { class: 'actions' },
         !r.tier && h('button', { class: 'primary', onclick: () => { closeDrawer(); openNewTask(r.name); } }, 'Give a task'),
         h('button', { onclick: () => composeTo(r.name, 'message') }, 'Message'),
-        launchable && !r.online && h('button', { onclick: () => launchRoles([r.name]) },
+        launchable && !r.online && h('button', { onclick: () => startRole(r) },
           r.resumes ? 'Start (resume)' : 'Start'),
+        launchable && r.online > 0 && r.stuck && h('button', { class: 'primary', onclick: () => restartRole(r.name) }, 'Restart'),
+        r.stuck && r.open_tasks > 0 && h('button', { onclick: () => openMoveTasks(r.name) }, 'Move its tasks'),
         launchable && r.online > 0 && h('button', { class: 'danger', onclick: () => stopRoles(r.name) }, 'Stop'),
         launchable && h('button', { onclick: () => startFresh(r) }, 'Start fresh'),
         r.tier && h('button', { class: 'danger', onclick: () => dismiss(r.name) }, 'Dismiss consultant')),
       h('dl', {},
         h('dt', {}, 'Session'), h('dd', {}, runningEl(r), ' ',
           h('span', { class: 'muted' }, r.resumes ? '· next start resumes its conversation' : '· next start begins a new conversation')),
+        r.stuck && [h('dt', {}, 'Stuck'), h('dd', {}, h('span', { class: `stuck-badge ${r.stuck.kind}` }, r.stuck.describe),
+          r.stuck.kind === 'limit' && h('div', { class: 'muted small' }, r.stuck.text))],
         h('dt', {}, 'Status'),
         h('dd', {}, s
           ? [h('span', { class: `state ${s.state}` }, s.state), s.task ? ` - ${s.task}` : '',
@@ -634,6 +641,18 @@ function launchRoles(roles, force = false, fresh = false) {
   return act(api('/api/launch', { roles, force, fresh }), (r) =>
     (r.opening.length ? `Opening: ${r.opening.join(', ')}` : 'Nothing to open.')
     + (r.skipped.length ? `\nSkipped: ${r.skipped.join('; ')}` : ''));
+}
+
+function startRole(r) {
+  if (r.stuck?.kind === 'limit' && r.stuck.until > Date.now() / 1000
+    && !confirm(`${r.name} is ${r.stuck.describe}; it will fail again until then. Start it anyway?`)) return;
+  launchRoles([r.name]);
+}
+
+function restartRole(name) {
+  if (!confirm(`Restart ${name}? Its program is stopped and started again on the same conversation, `
+    + 'and it carries on with its work.')) return;
+  act(api('/api/restart', { role: name }), (r) => (r.opening.length ? `Restarting ${name}.` : `Could not start ${name}: ${r.skipped.join('; ')}`));
 }
 
 function stopRoles(role) {

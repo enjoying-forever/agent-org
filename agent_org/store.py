@@ -476,7 +476,8 @@ class Store:
 
     @_locked
     def update_task(self, task_id: int, **fields: object) -> Task:
-        allowed = {"state", "message_id", "result", "revisions", "nudged_at", "started_at", "checks", "commit_id"}
+        allowed = {"state", "message_id", "result", "revisions", "nudged_at", "started_at", "checks", "commit_id",
+                   "assignee"}
         assert set(fields) <= allowed, fields
         sets = ", ".join(f"{k} = ?" for k in fields)
         self._db.execute(f"UPDATE tasks SET {sets}, updated_at = ? WHERE id = ?",
