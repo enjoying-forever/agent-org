@@ -3,10 +3,11 @@
 # The tree: every role names its `superior`. Exactly one role reports to the
 # owner (you) - that role is the leader. Move a role by changing its superior.
 #
-# Communication rules (enforced by the hub):
-#   - a role can report to / ask help from its DIRECT superior only
+# Communication rules (enforced by the hub; the full law is in the README):
+#   - a role reports to / asks help from its DIRECT superior only
 #   - a role can instruct and look at anyone below it (its whole subtree)
-#   - siblings do not talk directly; they go through their shared superior
+#   - peers (same superior) may talk to coordinate, but never assign each other work
+#   - anyone may reply to a message sent to them
 #
 # Put strong, expensive models high in the tree (few, decision-heavy messages)
 # and cheaper, faster models at the leaves (bulk work).
@@ -15,6 +16,15 @@
 owner: you
 project_root: .            # the folder the agents work in, relative to this file
 # database: .agent-org/hub.db
+
+# autostart: true          # start an agent by itself when it has work (while the UI is open)
+# max_running: 3           # most agents running at once (0: no limit)
+# commit_on_accept: true   # with history on, commit each accepted task's files
+# checks:                  # must pass before a task can be closed as done
+#   - name: tests
+#     run: python -m pytest -q
+#     when: ["*.py"]       # only when the task changed matching files (default: always)
+#     timeout: 300         # seconds
 
 roles:
   leader:

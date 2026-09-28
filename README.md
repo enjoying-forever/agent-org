@@ -1,7 +1,7 @@
 # agent-org
 
-Run a team of AI agents - Claude Code, Codex and Grok - that work together like a
-small company. You set up who reports to whom; the leader plans, hands out tasks,
+Run a team of AI agents - Claude Code, Codex, Grok and Antigravity - that work
+together like a small company. You set up who reports to whom; the leader plans, hands out tasks,
 and reports back to you. Every agent runs in its own visible terminal tab, with the
 subscription you already have, and you watch and steer everything from one web page.
 
@@ -15,6 +15,8 @@ subscription you already have, and you watch and steer everything from one web p
 3. **Click *Launch team*.** Each agent opens in its own Windows Terminal tab.
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
+   - Antigravity needs you to have run `agy` once yourself and finished its Google
+     sign-in (including any account check it asks for).
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
    saying what you want, and fill in **Done when**: how anyone can check it is
    finished (for example "the page shows today's top 10 stories").
@@ -36,7 +38,8 @@ agent carries on where it stopped.
   *Reply* and *Summon consultant* buttons.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
-  "done" means, what it waits for, and to accept or send back a result.
+  "done" means, what it waits for, which files it changed (with the diff), whether the
+  checks passed, and to accept or send back a result.
 - **Needs attention:** at the top of the Team page, what needs you: agents that stopped
   with work left, stalled tasks, questions for you, results to review, message loops -
   each with a button to fix it.
@@ -46,7 +49,8 @@ agent carries on where it stopped.
 - **Usage:** how many tokens each agent's conversation used (and, for Codex, how much
   of your subscription limit), on its card and in its details.
 - **Edit team:** add and remove roles, choose the leader and each role's superior, the
-  program and model each role uses, what files it may write, and the consultant tiers.
+  program and model each role uses, what files it may write, the consultant tiers,
+  the checks, and whether agents start by themselves.
 - **The law:** the rules below. **Setup:** checks that the programs are ready.
 
 ## The message law
@@ -127,6 +131,24 @@ handed, and is dismissed when the problem is solved; its files go back to the ag
 it helped. Tiers are set in *Edit team* (for example *opus-medium*, *luna-high*,
 *opus-xhigh*), each with what it is good for and how many may run at once.
 
+## Checks, history and starting by themselves
+
+These are set in *Edit team*, under the team's name.
+
+- **Checks** are commands that must pass before a task can be closed as done - your
+  tests, a linter, a build. Each can be limited to certain files (`*.py`), so a task that
+  changed only documents does not run the tests. When a check fails, the agent gets its
+  output and the task stays in progress until it is fixed.
+- **History:** open any task on the Board and click *Turn on history* (once per
+  project). The project folder becomes its own git repository, each task shows exactly
+  what it changed, and **Accept & commit** saves one commit per accepted task, so any
+  task can be undone later with git. agent-org never commits into a larger repository
+  that merely contains the project folder: turning history on gives the folder its own.
+- **Start agents automatically:** while the page is open, an agent that has work
+  waiting but is not running is started for you. **At most N agents at once** keeps
+  the number of running agents (and your subscription use) down; the others wait for a
+  free place.
+
 ## Troubleshooting
 
 - **The Setup check shows a ✗:** it says what to run. The most common: Grok not signed
@@ -140,6 +162,11 @@ it helped. Tiers are set in *Edit team* (for example *opus-medium*, *luna-high*,
 - **Grok agents only see messages when they check:** click *Install Grok hooks* in the
   Setup check (Grok reads hooks only from its own settings; they do nothing outside
   agent-org tabs).
+- **An Antigravity tab asks you to verify your account, or stops at sign-in:** run
+  `agy` once in a normal terminal, finish the Google sign-in there, then start the
+  agent again.
+- **A task will not close as done:** a check failed. Its output is in the agent's tab
+  and in the task's *Checks* line on the Board; the agent is expected to fix it.
 
 ## For developers
 
@@ -168,9 +195,11 @@ How it fits together:
   duties, guard edits, record the conversation id.
 - `launch.py` - writes each role's start script (Claude Code: `--mcp-config`,
   `--settings`, `--append-system-prompt-file`; Codex: `-c` overrides; Grok: project
-  MCP config and `--rules`), resumes conversations (`sessions.py`), stops agents.
+  MCP config and `--rules`; Antigravity: a project plugin in
+  `.agents/plugins/agent-org/` with its MCP config and hooks), resumes conversations
+  (`sessions.py`), stops agents, and keeps to the team's running limit.
 - `cards.py` - the role card: the law, the team, and where the agent left off.
-- `ui.py` + `ui_static/` - the web page; `templates.py` - the starting teams;
-  `doctor.py` - the setup check.
-
-Antigravity is not supported yet.
+- `verify.py` - the team's checks; `gitops.py` - task diffs and one commit per
+  accepted task (only in a repository whose top folder is the project).
+- `ui.py` + `ui_static/` - the web page (also runs the watchdog and automatic starts);
+  `templates.py` - the starting teams; `doctor.py` - the setup check.
