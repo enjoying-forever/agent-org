@@ -139,8 +139,9 @@ These are set in *Edit team*, under the team's name.
 
 - **Checks** are commands that must pass before a task can be closed as done - your
   tests, a linter, a build. Each can be limited to certain files (`*.py`), so a task that
-  changed only documents does not run the tests. When a check fails, the agent gets its
-  output and the task stays in progress until it is fixed.
+  changed only documents does not run the tests. Agents see the checks in their role card
+  and in every task they get, so they run them before they finish. When a check fails,
+  the agent gets its command and output, and the task stays in progress until it passes.
 - **History:** open any task on the Board and click *Turn on history* (once per
   project). The project folder becomes its own git repository, each task shows exactly
   what it changed, and **Accept & commit** saves one commit per accepted task, so any

@@ -83,6 +83,22 @@ def test_a_failing_check_keeps_the_task_open(tmp_path):
     hub.close()
 
 
+def test_agents_see_the_checks_before_they_run_into_them(tmp_path):
+    fail = f'"{sys.executable}" -c "import sys; sys.exit(1)"'
+    hub = make_hub(tmp_path, checks=[{"name": "tests", "run": fail, "when": ["*.py"]}])
+    from agent_org.cards import role_card
+    assert f"tests: `{fail}` (when a task changes *.py)" in role_card(hub.session("tech-lead"))
+    task = hub.session("tech-lead").assign_task("worker-a", "Build it")
+    worker = hub.session("worker-a")
+    [given] = worker.read_inbox()
+    assert "the hub runs the team's checks" in given.text and fail in given.text
+    worker.claim("src/a.py")
+    with pytest.raises(HubError) as refused:
+        worker.finish_task(task.id, "built")
+    assert f"--- tests: `{fail}` (run in the project folder) ---" in str(refused.value)  # what to run to see why
+    hub.close()
+
+
 def test_passing_checks_are_recorded(tmp_path):
     ok = f'"{sys.executable}" -c "print(\'fine\')"'
     hub = make_hub(tmp_path, checks=[{"name": "tests", "run": ok}, {"name": "lint", "run": ok, "when": "*.js"}])

@@ -222,6 +222,9 @@ class Hub:
             lines += ["", task.details]
         if task.done_when:
             lines += ["", f"Done when: {task.done_when}"]
+        if self.base_team.checks:
+            lines += ["", "Before it can close as done, the hub runs the team's checks (run them yourself first):"]
+            lines += [f"- {verify.describe(c)}" for c in self.base_team.checks]
         if task.parent_id:
             lines += ["", f"(Part of task #{task.parent_id}.)"]
         lines += ["", f"When you finish, call finish_task({task.id}, result) - or right away with "
@@ -453,9 +456,11 @@ class RoleSession:
             checks = verify.summary(outcomes)
             if failed:
                 self.hub.event("check", self.name, f"#{task.id} checks failed: {checks}", task.id)
-                details = "\n\n".join(f"--- {o.name} ---\n{o.output}" for o in failed)
-                raise HubError(f"task #{task_id} is not done yet: {checks}.\n\n{details}\n\nFix it and "
-                               "finish_task again, or close it as blocked or failed and say why.")
+                details = "\n\n".join(f"--- {o.name}: `{o.command}` (run in the project folder) ---\n{o.output}"
+                                        for o in failed)
+                raise HubError(f"task #{task_id} is not done yet: {checks}.\n\n{details}\n\nRun the command "
+                               "yourself to see what it expects, fix it, and finish_task again - or close the "
+                               "task as blocked or failed and say why.")
         task = self.store.update_task(task_id, state=outcome, result=result, checks=checks)
         head = {"done": "is DONE - please review it", "blocked": "is BLOCKED", "failed": "FAILED",
                 "rejected": "was REJECTED"}[outcome]

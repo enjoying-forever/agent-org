@@ -29,6 +29,7 @@ class Outcome:
     name: str
     ok: bool
     output: str
+    command: str = ""
 
 
 def applies(check: CheckSpec, files: list[str]) -> bool:
@@ -46,12 +47,12 @@ def run(team: Team, files: list[str]) -> list[Outcome]:
         try:
             code, output = command(check.run, team.project_root, check.timeout)
         except OSError as e:
-            outcomes.append(Outcome(check.name, False, f"could not run: {e}"))
+            outcomes.append(Outcome(check.name, False, f"could not run: {e}", check.run))
             continue
         if code is None:
-            outcomes.append(Outcome(check.name, False, f"did not finish within {check.timeout} seconds"))
+            outcomes.append(Outcome(check.name, False, f"did not finish within {check.timeout} seconds", check.run))
         else:
-            outcomes.append(Outcome(check.name, code == 0, output.strip()[-TAIL:]))
+            outcomes.append(Outcome(check.name, code == 0, output.strip()[-TAIL:], check.run))
     return outcomes
 
 
@@ -81,6 +82,12 @@ def kill_tree(proc: subprocess.Popen) -> None:
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], stdin=subprocess.DEVNULL,
                        capture_output=True, timeout=30)
     proc.kill()
+
+
+def describe(check: CheckSpec) -> str:
+    """One line an agent can act on: the check's name, its command, and when it runs."""
+    when = f" (when a task changes {', '.join(check.when)})" if check.when else ""
+    return f"{check.name}: `{check.run}`{when}"
 
 
 def summary(outcomes: list[Outcome]) -> str:

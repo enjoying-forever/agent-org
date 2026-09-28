@@ -76,7 +76,7 @@ class Tools:
                   "Close a task assigned to you. outcome: 'done' (it meets its 'done when'; say what you did "
                   "and where), 'blocked' (say exactly what you need), 'failed' (say why), or 'rejected' (it "
                   "is not something you can or should do). Whoever assigned it is told. Every task must "
-                  "be closed this way.",
+                  "be closed this way. If the team has checks (see my_role), 'done' is refused until they pass.",
                   {"task_id": {"type": "integer"}, "result": text,
                    "outcome": {"type": "string", "enum": list(OUTCOMES)}},
                   ["task_id", "result"], self._finish)

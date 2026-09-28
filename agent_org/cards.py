@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from .hub import RoleSession, law_text
+from .verify import describe
 
 SERVER_NAME = "org"
 RECENT = 12  # messages recalled in "where you left off"
@@ -38,6 +39,10 @@ def role_card(me: RoleSession) -> str:
         lines.append(f"{'  ' * depth}- {name} ({r.harness}): {r.duties or '-'}{you}")
     scope = ", ".join(role.write_scope) if role else "everything"
     lines.append(f"Files you may write: {scope or 'none - you do not edit files'}")
+    if team.checks:
+        lines.append("The team's checks - finish_task(done) is refused until those that apply pass, so run "
+                     "them before you finish, and write tasks whose results can pass them:")
+        lines += [f"  - {describe(c)}" for c in team.checks]
     lines += [
         "",
         f"THE MESSAGE LAW (the hub enforces it; you work through the '{SERVER_NAME}' tools):",
