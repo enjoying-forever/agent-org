@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, launch, sessions, templates
+from . import doctor, launch, templates
 from .hub import LAW, Hub, HubError
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -200,6 +200,23 @@ class App:
         self._open(team_file)
         return {"team_file": str(self.team_file)}
 
+    def desktop_shortcut(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Put an 'agent-org' shortcut on the Windows desktop that opens this UI."""
+        starter = launch.PACKAGE_ROOT / "agent-org-ui.cmd"
+        script = (
+            "$s = (New-Object -ComObject WScript.Shell).CreateShortcut("
+            "[IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'agent-org.lnk')); "
+            f"$s.TargetPath = {launch.ps(str(starter))}; "
+            f"$s.WorkingDirectory = {launch.ps(str(starter.parent))}; "
+            "$s.Description = 'Run your team of AI agents'; $s.Save(); $s.FullName")
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if shell is None:
+            raise ApiError("PowerShell is needed to create the shortcut.")
+        r = subprocess.run([shell, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            raise ApiError(f"Could not create the shortcut: {r.stderr.strip()[:300]}")
+        return {"shortcut": r.stdout.strip()}
+
     def close_team(self, body: dict[str, Any]) -> dict[str, Any]:
         self.close()
         return {"open": False}
@@ -241,9 +258,9 @@ class App:
         record = self.hub.store.get_session(role)
         sid = record.session_id if record and record.harness == harness else None
         cached = self._resumable.get(role)
-        if cached and cached[0] == sid and time.time() - cached[2] < 30:
+        if cached and cached[0] == sid and time.time() - cached[2] < (30 if sid else 300):
             return cached[1]
-        found = sessions.exists(harness, sid)
+        found = launch.resumable_session(self.hub, role) is not None
         self._resumable[role] = (sid, found, time.time())
         return found
 
@@ -398,6 +415,7 @@ GET_ROUTES = {
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
     "/api/pick-folder": App.pick_folder, "/api/install-grok-hooks": App.install_grok_hooks,
+    "/api/desktop-shortcut": App.desktop_shortcut,
     "/api/send": App.send, "/api/task": App.assign, "/api/cancel-task": App.cancel_task,
     "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
     "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,

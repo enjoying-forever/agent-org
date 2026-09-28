@@ -64,11 +64,29 @@ def plan_session(hub: Hub, role: str, fresh: bool = False) -> tuple[str | None, 
     Codex picks the id of a new conversation itself; the hooks record it later.
     """
     spec = hub.team.roles[role]
-    record = hub.store.get_session(role)
-    if (not fresh and record is not None and record.harness == spec.harness
-            and sessions.exists(spec.harness, record.session_id)):
-        return record.session_id, None
+    if not fresh:
+        found = resumable_session(hub, role)
+        if found:
+            return found, None
     return None, (str(uuid.uuid4()) if spec.harness in sessions.CAN_CHOOSE_ID else None)
+
+
+def resumable_session(hub: Hub, role: str) -> str | None:
+    """The conversation `role` would resume, if its harness still has one.
+
+    Prefers the id on record; otherwise searches the harness's saved conversations for
+    this role's kickoff (a team from before ids were kept, or Codex before its hooks
+    were trusted) and records what it finds.
+    """
+    spec = hub.team.roles[role]
+    record = hub.store.get_session(role)
+    if record is not None and record.harness == spec.harness and sessions.exists(spec.harness, record.session_id):
+        return record.session_id
+    found = sessions.find(spec.harness, hub.base_team.project_root, role)
+    if found and sessions.exists(spec.harness, found):
+        hub.store.record_session_id(role, spec.harness, found)
+        return found
+    return None
 
 
 def mcp_server(team_file: Path | None = None, role: str | None = None) -> tuple[str, list[str], dict[str, str]]:

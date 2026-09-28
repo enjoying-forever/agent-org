@@ -222,6 +222,8 @@ $('#create-go').addEventListener('click', async () => {
   if (!folder) { toast('Choose the project folder first.', true); return; }
   await act(api('/api/create', { folder, template }), () => 'Team created. Check it in "Edit team", then Launch team.');
 });
+$('#shortcut-btn').addEventListener('click', () =>
+  act(api('/api/desktop-shortcut', {}), () => 'Shortcut added: double-click "agent-org" on your desktop next time.'));
 $('#switch-btn').addEventListener('click', async () => {
   if (typeof E !== 'undefined' && E.dirty && !confirm('Leave without saving your team changes?')) return;
   await act(api('/api/close', {}));
@@ -276,7 +278,9 @@ function renderGuide() {
   const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
   const steps = [
     { done: true, text: 'Check the team in "Edit team": who reports to whom, and which model each role uses.' },
-    { done: running, text: 'Click "Launch team". Each agent opens in its own terminal tab.' },
+    { done: running, text: 'Click "Launch team". Each agent opens in its own terminal tab. The first time, '
+      + 'say yes when Claude or Codex asks to trust the folder, and choose "Trust all and continue" when '
+      + 'Codex asks to review hooks.' },
     { done: talked, text: `Give ${st.leader} a task: switch the box at the bottom right to "Task".` },
   ];
   const g = $('#guide');

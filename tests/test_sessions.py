@@ -144,3 +144,61 @@ def test_session_hook_is_registered(team_file):
     command = launch.hook_table(None)["SessionStart"][0]["hooks"][0]["command"]
     assert command.endswith('org_hook.py" session')
     assert json.dumps(launch.hook_table("Edit"))  # serialisable for settings files
+
+
+# finding a conversation the hub never recorded
+
+
+def claude_folder(home, project_root):
+    import re
+    folder = home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(project_root))
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def test_an_unrecorded_claude_conversation_is_found_by_its_kickoff(team_file, fake_home):
+    import os
+
+    project = (team_file.parent / "project").resolve()
+    folder = claude_folder(fake_home, project)
+    old = "11111111-1111-4111-8111-111111111111"
+    new = "22222222-2222-4222-8222-222222222222"
+    other = "33333333-3333-4333-8333-333333333333"
+    (folder / f"{old}.jsonl").write_text(json.dumps({"text": launch.kickoff("leader")}) + "\n", encoding="utf-8")
+    (folder / f"{new}.jsonl").write_text(json.dumps({"text": launch.resume_kickoff("leader")}) + "\n", encoding="utf-8")
+    (folder / f"{other}.jsonl").write_text(json.dumps({"text": launch.kickoff("tech-lead")}) + "\n", encoding="utf-8")
+    os.utime(folder / f"{old}.jsonl", (1, 1))
+    assert sessions.find("claude", project, "leader") == new  # the newest one of this role
+    assert sessions.find("claude", project, "worker-a") is None
+    hub = Hub.open(team_file)
+    try:
+        assert launch.plan_session(hub, "leader") == (new, None)
+        assert hub.store.get_session("leader").session_id == new  # recorded from now on
+        resume, new_id = launch.plan_session(hub, "leader", fresh=True)
+        assert resume is None and new_id
+    finally:
+        hub.close()
+
+
+def test_codex_conversations_are_matched_by_folder_and_kickoff(team_file, fake_home):
+    project = (team_file.parent / "project").resolve()
+    day = fake_home / ".codex" / "sessions" / "2026" / "09" / "28"
+    day.mkdir(parents=True)
+    mine = "01a0e757-c923-7012-b57c-1bdbf15c3690"
+    elsewhere = "01a0e757-0000-7012-b57c-1bdbf15c3690"
+    for sid, cwd in ((mine, str(project)), (elsewhere, r"C:\other")):
+        lines = [json.dumps({"type": "session_meta", "payload": {"id": sid, "cwd": cwd}}),
+                 json.dumps({"type": "message", "text": launch.kickoff("worker-a")})]
+        (day / f"rollout-2026-09-28T17-28-05-{sid}.jsonl").write_text("\n".join(lines), encoding="utf-8")
+    assert sessions.find("codex", project, "worker-a") == mine
+
+
+def test_grok_conversations_are_found_in_the_folder_they_ran_in(team_file, fake_home):
+    from urllib.parse import quote
+
+    project = (team_file.parent / "project").resolve()
+    sid = "01a0e757-d1be-7231-8876-a306b504bc97"
+    chat = fake_home / ".grok" / "sessions" / quote(str(project), safe="") / sid / "chat_history.jsonl"
+    chat.parent.mkdir(parents=True)
+    chat.write_text(json.dumps({"content": launch.kickoff("researcher")}), encoding="utf-8")
+    assert sessions.find("grok", project, "researcher") == sid
