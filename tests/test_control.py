@@ -81,3 +81,14 @@ def test_grok_sign_in_and_hooks_are_checked(monkeypatch, tmp_path):
     assert names["Grok"].ok and not names["Grok sign-in"].ok
     assert names["Grok sign-in"].fix == "Run: grok login"
     assert not names["Grok message delivery"].ok
+
+
+def test_antigravity_sign_in_problem_is_explained(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "agy")
+    monkeypatch.setattr(doctor, "_agy_signin", (0.0, None))
+    monkeypatch.setattr(doctor, "run", lambda command, timeout=40: (0, "agy 1.2.7") if "--version" in command
+                        else (1, "Please verify your account in your browser to continue: https://..."))
+    checks = {c.name: c for c in doctor.check_antigravity({"antigravity"})}
+    assert checks["Antigravity"].ok and not checks["Antigravity sign-in"].ok
+    assert "finish the sign-in" in checks["Antigravity sign-in"].fix
+    assert doctor.check_antigravity(set())[0].needed is False  # not used: no sign-in test at all

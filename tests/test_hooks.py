@@ -222,3 +222,35 @@ def test_a_broken_team_file_never_blocks_the_harness(tmp_path):
     env = {"AGENT_ORG_TEAM": str(tmp_path / "missing.yaml"), "AGENT_ORG_ROLE": "worker-a"}
     result = run_hook("stop", {}, env, cwd=tmp_path)
     assert (result.returncode, result.stdout) == (0, b"")
+
+
+# Antigravity speaks its own hook dialect
+
+
+def test_antigravity_answers_are_translated():
+    assert hooks.for_antigravity("stop", {"decision": "block", "reason": "mail"}) == {"decision": "continue", "reason": "mail"}
+    denied = {"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "held"}}
+    assert hooks.for_antigravity("pre-edit", denied) == {"decision": "deny", "reason": "held"}
+    notice = {"hookSpecificOutput": {"additionalContext": "2 new messages"}}
+    assert hooks.for_antigravity("invocation", notice) == {"injectSteps": [{"ephemeralMessage": "2 new messages"}]}
+    assert hooks.for_antigravity("pre-edit", None) == {}  # always answer
+
+
+def test_antigravity_tool_calls_are_read(hub, team):
+    payload = {"toolCall": {"name": "write_to_file", "args": {"TargetFile": str(team.project_root / "src" / "a.py")}},
+               "conversationId": "0eee4d8d-dfcd-442e-a1f7-97d6c580cb62"}
+    assert hooks.edited_paths(payload) == [str(team.project_root / "src" / "a.py")]
+    out = hooks.on_pre_edit(hub.session("worker-b"), payload)  # worker-b may not write src/
+    assert "outside your write scope" in hooks.for_antigravity("pre-edit", out)["reason"]
+    hooks.remember_session(hub.session("worker-b"), payload)
+    assert hub.store.get_session("worker-b").session_id == "0eee4d8d-dfcd-442e-a1f7-97d6c580cb62"
+    assert hooks.edited_paths({"toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}}) == []
+
+
+def test_antigravity_hooks_always_answer_even_outside_a_tab(tmp_path):
+    result = run_hook("stop", {"executionNum": 1}, {}, cwd=tmp_path)
+    assert result.stdout == b""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AGENT_ORG_")}
+    r = subprocess.run([sys.executable, str(ROOT / "org_hook.py"), "invocation", "agy"], cwd=tmp_path, env=env,
+                       input=b"{}", capture_output=True, timeout=30)
+    assert r.stdout == b"{}"

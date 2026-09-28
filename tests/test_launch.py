@@ -90,10 +90,11 @@ def test_grok_registers_the_project_server_then_starts(team_file):
     assert start.endswith(launch.ps(launch.kickoff("researcher")))
 
 
-def test_unsupported_harnesses_are_skipped(team_file, capsys):
+def test_every_harness_is_launched(team_file, capsys):
     base = run_dry(team_file)
-    assert "skipping worker-b: antigravity" in capsys.readouterr().err
-    assert sorted(p.name for p in base.iterdir()) == ["leader", "researcher", "tech-lead", "worker-a", "you"]
+    assert "skipping" not in capsys.readouterr().err
+    assert sorted(p.name for p in base.iterdir()) == ["leader", "researcher", "tech-lead", "worker-a",
+                                                      "worker-b", "you"]
 
 
 def test_owner_console(team_file):
@@ -182,3 +183,35 @@ def test_generated_scripts_parse_in_powershell(team_file):
         )
         result = subprocess.run(["pwsh", "-NoProfile", "-Command", check], capture_output=True, text=True)
         assert result.returncode == 0, f"{script}: {result.stdout}{result.stderr}"
+
+
+def test_antigravity_gets_a_project_plugin_and_starts_interactively(team_file):
+    base = run_dry(team_file, "worker-b")  # worker-b runs on antigravity
+    plugin = team_file.parent / "project" / ".agents" / "plugins" / "agent-org"
+    assert json.loads((plugin / "plugin.json").read_text(encoding="utf-8")) == {"name": "agent-org"}
+    server = json.loads((plugin / "mcp_config.json").read_text(encoding="utf-8"))["mcpServers"]["org"]
+    assert server["args"] == ["-m", "agent_org.mcp_server"]  # the role comes from each tab
+    hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))["agent-org"]
+    assert set(hooks) == {"PreToolUse", "PreInvocation", "Stop"}
+    stop = hooks["Stop"][0]["command"]
+    assert stop.startswith('""') and stop.endswith('org_hook.py" stop agy"')  # cmd /c strips one pair
+    script = (base / "worker-b" / "start.ps1").read_text(encoding="utf-8")
+    assert "& 'agy' '--prompt-interactive' 'You are the ''worker-b'' agent" in script
+
+
+def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
+    from agent_org import sessions
+    monkeypatch.setattr(sessions, "home", lambda: tmp_path / "home")
+    sid = "0eee4d8d-dfcd-442e-a1f7-97d6c580cb62"
+    folder = tmp_path / "home" / ".gemini" / "antigravity-cli" / "conversations"
+    folder.mkdir(parents=True)
+    (folder / f"{sid}.db").write_bytes(b"...")
+    hub = Hub.open(team_file)
+    try:
+        hub.store.record_session_id("worker-b", "antigravity", sid)
+        tab = launch.role_tab(hub, team_file.resolve(), "worker-b")
+    finally:
+        hub.close()
+    script = (team_file.parent / ".agent-org" / "launch" / "worker-b" / "start.ps1").read_text(encoding="utf-8")
+    assert f"'--conversation' '{sid}' '--prompt-interactive' 'agent-org: the team was restarted" in script
+    assert tab

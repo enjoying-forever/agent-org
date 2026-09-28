@@ -217,7 +217,51 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "grok", "grok", cli, {"GROK_DISABLE_AUTOUPDATER": "1"}, setup=[register])
 
 
-BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch}
+def antigravity_plugin(project_root: Path) -> Path:
+    """Write agent-org's Antigravity plugin into the project: its MCP server and hooks.
+
+    Antigravity loads plugins from <project>/.agents/plugins/ once the folder is trusted.
+    The plugin names no role: each tab's server and hooks take it from AGENT_ORG_ROLE,
+    and outside agent-org tabs both do nothing. Its hooks run through `cmd /c`, which
+    strips one pair of outer quotes, so each command gets an extra pair.
+    """
+    folder = project_root / ".agents" / "plugins" / "agent-org"
+    folder.mkdir(parents=True, exist_ok=True)
+    command, args, env = mcp_server()
+    run = lambda event, timeout: {"type": "command", "command": f'"{hook_command(event)} agy"',  # noqa: E731
+                                  "timeout": timeout}
+    files = {
+        "plugin.json": {"name": "agent-org"},
+        "mcp_config.json": {"mcpServers": {SERVER_NAME: {"command": command, "args": args, "env": env}}},
+        "hooks.json": {"agent-org": {
+            "PreToolUse": [{"matcher": "*", "hooks": [run("pre-edit", 30)]}],
+            "PreInvocation": [run("invocation", 30)],
+            "Stop": [run("stop", STOP_WAIT + 300)],
+        }},
+    }
+    for name, content in files.items():
+        (folder / name).write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+    return folder
+
+
+def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                       resume: str | None = None, new_id: str | None = None) -> Launch:
+    spec = hub.team.roles[role]
+    antigravity_plugin(hub.base_team.project_root)
+    cli: list[str] = []
+    if spec.model:
+        cli += ["--model", spec.model]
+    if spec.effort:
+        cli += ["--effort", spec.effort]
+    if resume:
+        cli += ["--conversation", resume]
+    # Antigravity has no flag for extra instructions: the kickoff sends it to my_role.
+    cli += ["--prompt-interactive", resume_kickoff(role) if resume else kickoff(role)]
+    return Launch(role, "antigravity", "agy", cli)
+
+
+BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch,
+            "antigravity": antigravity_launch}
 
 
 def toml(value: object) -> str:

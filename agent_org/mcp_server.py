@@ -405,6 +405,35 @@ class Server:
             self.stdout.flush()
 
 
+def serve_idle(stdin, stdout) -> None:
+    """A tool-less MCP server for sessions that are not part of an agent-org team."""
+    for line in stdin:
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(msg, dict) or msg.get("id") is None:
+            continue
+        method = msg.get("method")
+        if method == "initialize":
+            requested = (msg.get("params") or {}).get("protocolVersion")
+            result: dict[str, Any] = {
+                "protocolVersion": requested if isinstance(requested, str) else FALLBACK_PROTOCOL,
+                "capabilities": {"tools": {}}, "serverInfo": {"name": "agent-org", "version": "0.2.0"},
+                "instructions": "This session is not part of an agent-org team, so the org tools are off."}
+        elif method == "tools/list":
+            result = {"tools": []}
+        elif method == "ping":
+            result = {}
+        else:
+            stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"],
+                                     "error": {"code": -32601, "message": f"method not found: {method}"}}) + "\n")
+            stdout.flush()
+            continue
+        stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\n")
+        stdout.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="agent-org MCP server for one role")
     # Harnesses whose MCP config is shared by every session in a folder (Grok) start the
@@ -412,12 +441,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--team", default=os.environ.get("AGENT_ORG_TEAM"))
     parser.add_argument("--role", default=os.environ.get("AGENT_ORG_ROLE"))
     args = parser.parse_args(argv)
-    if not args.team or not args.role:
-        print("agent-org: pass --team and --role, or set AGENT_ORG_TEAM and AGENT_ORG_ROLE", file=sys.stderr)
-        return 2
     # stdio carries UTF-8 JSON no matter what the Windows code page is
     sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # type: ignore[union-attr]
+    if not args.team or not args.role:
+        # Started by a harness outside an agent-org tab (a project-wide config such as
+        # Antigravity's plugin): offer no tools rather than fail loudly.
+        serve_idle(sys.stdin, sys.stdout)
+        return 0
     try:
         hub = Hub.open(args.team, opener=tab_opener(Path(args.team).resolve()))
         me = hub.session(args.role)

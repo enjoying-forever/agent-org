@@ -268,10 +268,16 @@ def test_role_can_come_from_the_environment(tmp_path):
     proc = subprocess.run([sys.executable, "-m", "agent_org.mcp_server"], cwd=ROOT, env=env,
                           input=json.dumps(request) + "\n", capture_output=True, text=True, timeout=20)
     assert "You are 'researcher'" in json.loads(proc.stdout.splitlines()[0])["result"]["instructions"]
+    # outside an agent-org tab (no role): a quiet server with no tools, not a failure
     env.pop("AGENT_ORG_ROLE")
+    listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
     proc = subprocess.run([sys.executable, "-m", "agent_org.mcp_server"], cwd=ROOT, env=env,
-                          input="", capture_output=True, text=True, timeout=20)
-    assert proc.returncode == 2 and "AGENT_ORG_ROLE" in proc.stderr
+                          input=json.dumps(request) + "\n" + json.dumps(listing) + "\n",
+                          capture_output=True, text=True, timeout=20)
+    replies = [json.loads(line) for line in proc.stdout.splitlines()]
+    assert proc.returncode == 0
+    assert "not part of an agent-org team" in replies[0]["result"]["instructions"]
+    assert replies[1]["result"] == {"tools": []}
 
 
 def test_bad_role_exits_with_a_message(tmp_path):

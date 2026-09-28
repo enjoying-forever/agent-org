@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -81,9 +82,37 @@ def check_grok(harnesses: set[str]) -> list[Check]:
     return checks
 
 
+_agy_signin: tuple[float, Check | None] = (0.0, None)
+
+
+def check_antigravity(harnesses: set[str]) -> list[Check]:
+    """Antigravity's CLI: installed, and - if the team uses it - signed in and verified.
+
+    The sign-in test asks for a one-word reply, so it runs at most every ten minutes.
+    """
+    global _agy_signin
+    c = check_program("Antigravity", "agy", "Install the Antigravity CLI (agy) from antigravity.google")
+    c.needed = "antigravity" in harnesses
+    checks = [c]
+    if c.ok and c.needed:
+        if time.time() - _agy_signin[0] > 600:
+            code, out = run([shutil.which("agy") or "agy", "-p", "Reply with the single word OK.",
+                             "--print-timeout", "60s"], timeout=90)
+            low = out.lower()
+            if "verify your account" in low or "sign in" in low or "login" in low and code != 0:
+                signin = Check("Antigravity sign-in", False, "Antigravity needs you to sign in or verify your "
+                               "Google account", "Open a terminal, run agy, and finish the sign-in in your browser.")
+            else:
+                signin = Check("Antigravity sign-in", True, "signed in") if code == 0 else None
+            _agy_signin = (time.time(), signin)
+        if _agy_signin[1] is not None:
+            checks.append(_agy_signin[1])
+    return checks
+
+
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:
     """All checks, in parallel. `harnesses`: the ones the open team uses (all if None)."""
-    used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}
+    used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}  # agy: only if used
     basics = [
         Check("Windows Terminal", shutil.which("wt") is not None,
               "found" if shutil.which("wt") else "not found",
@@ -92,8 +121,9 @@ def run_checks(harnesses: set[str] | None = None) -> list[Check]:
               "found" if shutil.which("pwsh") else "not found",
               "Install it: winget install Microsoft.PowerShell"),
     ]
-    with ThreadPoolExecutor(3) as pool:
+    with ThreadPoolExecutor(4) as pool:
         claude = pool.submit(check_claude, used)
         codex = pool.submit(check_codex, used)
         grok = pool.submit(check_grok, used)
-        return basics + [claude.result(), codex.result(), *grok.result()]
+        antigravity = pool.submit(check_antigravity, used)
+        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result()]

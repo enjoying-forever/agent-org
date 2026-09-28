@@ -34,6 +34,8 @@ def exists(harness: str, session_id: str | None) -> bool:
         return any((home() / ".codex" / "sessions").glob(f"*/*/*/rollout-*-{session_id}.jsonl"))
     if harness == "grok":
         return any(p.is_dir() for p in (home() / ".grok" / "sessions").glob(f"*/{session_id}"))
+    if harness == "antigravity":
+        return any((home() / ".gemini" / "antigravity-cli" / "conversations").glob(f"{session_id}.*"))
     return False
 
 
@@ -49,6 +51,9 @@ def find(harness: str, project_root: Path, role: str) -> str | None:
     or a Codex agent whose hooks were not trusted yet.
     """
     wanted = markers(role)
+    # Antigravity keeps every project's conversations together: also require this project's path.
+    places = ((str(project_root), str(project_root).replace("\\", "\\\\"), project_root.as_posix())
+              if harness == "antigravity" else ())
     best: tuple[float, str] | None = None
     for path, session_id in _candidates(harness, project_root):
         try:
@@ -59,7 +64,7 @@ def find(harness: str, project_root: Path, role: str) -> str | None:
                 head = f.read(SCAN_BYTES).decode("utf-8", errors="replace")
         except OSError:
             continue
-        if any(m in head for m in wanted):
+        if any(m in head for m in wanted) and (not places or any(p in head for p in places)):
             best = (mtime, session_id)
     return best[1] if best else None
 
@@ -75,6 +80,9 @@ def _candidates(harness: str, project_root: Path) -> Iterator[tuple[Path, str]]:
         folder = home() / ".grok" / "sessions" / quote(root, safe="")
         for path in folder.glob("*/chat_history.jsonl"):
             yield path, path.parent.name
+    elif harness == "antigravity":
+        for path in (home() / ".gemini" / "antigravity-cli" / "conversations").glob("*.*"):
+            yield path, path.stem
     elif harness == "codex":
         cutoff = time.time() - SCAN_DAYS * 86400
         for path in (home() / ".codex" / "sessions").glob("*/*/*/rollout-*.jsonl"):

@@ -28,8 +28,12 @@ from .store import Message
 
 STOP_WAIT = 1800  # seconds a Stop hook waits for messages before letting the agent go round again
 EDIT_TOOLS = {"edit", "write", "multiedit", "notebookedit", "apply_patch", "search_replace",
-              "write_file", "edit_file", "create_file", "str_replace_editor"}
-PATH_KEYS = ("file_path", "path", "notebook_path", "target_file", "filePath", "targetFile", "notebookPath")
+              "write_file", "edit_file", "create_file", "str_replace_editor",
+              # Antigravity
+              "write_to_file", "replace_file_content", "multi_replace_file_content", "code_action",
+              "file_change", "propose_code", "edit_notebook"}
+PATH_KEYS = ("file_path", "path", "notebook_path", "target_file", "filePath", "targetFile", "notebookPath",
+             "TargetFile", "AbsolutePath", "FilePath", "Path")
 PATCH_FILE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.M)
 HUB_DIR = ".agent-org"
 
@@ -160,10 +164,13 @@ def on_post_tool(me: RoleSession, payload: dict[str, Any]):
 
 
 def edited_paths(payload: dict[str, Any]) -> list[str]:
-    tool = str(field(payload, "tool_name") or "")
+    call = payload.get("toolCall")  # Antigravity: {"toolCall": {"name": ..., "args": {...}}}
+    if isinstance(call, dict):
+        tool, tool_input = str(call.get("name") or ""), call.get("args") or {}
+    else:
+        tool, tool_input = str(field(payload, "tool_name") or ""), field(payload, "tool_input") or {}
     if tool.rsplit("__", 1)[-1].lower() not in EDIT_TOOLS:
         return []
-    tool_input = field(payload, "tool_input") or {}
     if not isinstance(tool_input, dict):
         tool_input = {"input": tool_input}
     paths = [tool_input[k] for k in PATH_KEYS if isinstance(tool_input.get(k), str)]
@@ -213,7 +220,7 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
 
 def remember_session(me: RoleSession, payload: dict[str, Any]) -> None:
     """Note which conversation the harness is in, so a restarted team can resume it."""
-    session_id = field(payload, "session_id")
+    session_id = field(payload, "session_id") or payload.get("conversationId")
     role = me.hub.team.roles.get(me.name)
     if isinstance(session_id, str) and session_id and role is not None:
         me.store.record_session_id(me.name, role.harness, session_id)
@@ -223,33 +230,57 @@ def on_session(me: RoleSession, payload: dict[str, Any]):
     return None  # remember_session already did the work
 
 
-HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit, "session": on_session}
+HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit, "session": on_session,
+            "invocation": on_post_tool}
+
+
+def for_antigravity(event: str, out: dict[str, Any] | None) -> dict[str, Any]:
+    """Antigravity's hooks speak a different dialect: translate our answer, and always answer."""
+    if not out:
+        return {}
+    spec = out.get("hookSpecificOutput") or {}
+    if event == "stop" and out.get("decision") == "block":
+        return {"decision": "continue", "reason": out.get("reason", "")}
+    if event == "pre-edit" and spec.get("permissionDecision") == "deny":
+        return {"decision": "deny", "reason": spec.get("permissionDecisionReason", "")}
+    if event == "invocation" and spec.get("additionalContext"):
+        return {"injectSteps": [{"ephemeralMessage": spec["additionalContext"]}]}
+    return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     event = argv[0] if argv else ""
+    antigravity = "agy" in argv[1:]
     team_file, role = os.environ.get("AGENT_ORG_TEAM"), os.environ.get("AGENT_ORG_ROLE")
     if event not in HANDLERS or not team_file or not role:
+        if antigravity:
+            sys.stdout.write("{}")  # Antigravity expects an answer from every hook
         return 0
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
     except (ValueError, UnicodeDecodeError):
         payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    if antigravity and "stop_hook_active" not in payload:  # its Stop counts loops instead
+        payload["stop_hook_active"] = int(payload.get("executionNum") or 1) > 1
+    out = None
     try:
         hub = Hub.open(team_file)
     except Exception:  # noqa: BLE001 - a broken hub must never stop the agent's harness
-        return 0
-    payload = payload if isinstance(payload, dict) else {}
-    try:
-        me = hub.session(role)
-        remember_session(me, payload)
-        out = HANDLERS[event](me, payload)
-    except HubError:
-        return 0  # e.g. a dismissed consultant
-    finally:
-        hub.close()
-    if out:
+        hub = None
+    if hub is not None:
+        try:
+            me = hub.session(role)
+            remember_session(me, payload)
+            out = HANDLERS[event](me, payload)
+        except HubError:
+            out = None  # e.g. a dismissed consultant
+        finally:
+            hub.close()
+    if antigravity:
+        out = for_antigravity(event, out)
+    if out is not None and (out or antigravity):
         sys.stdout.write(json.dumps(out))  # ASCII-escaped, whatever the console code page
         sys.stdout.flush()
     return 0
