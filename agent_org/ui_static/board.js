@@ -49,7 +49,15 @@ function cardEl(t) {
     h('div', { class: 'tc-meta' },
       h('span', { class: `harness h-${harnessOf(t.assignee)}` }, t.assignee),
       h('span', { class: 'muted' }, `from ${t.assigner} · ${ago(t.created_at)}`)),
-    t.after.length ? h('div', { class: 'tc-after muted' }, `after #${t.after.join(', #')}`) : null);
+    t.after.length ? h('div', { class: 'tc-after muted' }, `after #${t.after.join(', #')}`) : null,
+    stuckOn(t) && h('div', { class: `stuck-badge ${stuckOn(t).kind}`, title: 'Its assignee cannot work right now' },
+      `${t.assignee} is ${stuckOn(t).describe}`));
+}
+
+/** Why an unfinished task's assignee cannot work right now, if it can't. */
+function stuckOn(t) {
+  if (!['open', 'working', 'blocked'].includes(t.state)) return null;
+  return findRole(t.assignee)?.stuck || null;
 }
 
 // ---------- one task ----------
@@ -241,8 +249,22 @@ $('#board-role').addEventListener('change', renderBoard);
 
 const PROBLEM_ICON = { stopped: '⏸', stuck: '⟳', limit: '⌛', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
 
+const NOTIFY_KINDS = ['limit', 'stuck', 'loop', 'duplicate'];  // the rest already arrive as messages
+
+/** A desktop notification when an agent runs out of usage, gets stuck, or loops - once each. */
+function notifyProblems(list) {
+  const fresh = list.filter((p) => NOTIFY_KINDS.includes(p.kind) && !S.problemsSeen?.has(`${p.kind}:${p.role}`));
+  const first = !S.problemsSeen;
+  S.problemsSeen = new Set(list.map((p) => `${p.kind}:${p.role}`));
+  if (first || !fresh.length || !document.hidden) return;  // not for what was there at load, or while you look
+  try {
+    if (Notification.permission === 'granted') new Notification('agent-org needs you', { body: fresh[0].text.slice(0, 180) });
+  } catch { /* notifications unavailable */ }
+}
+
 function renderProblems() {
   const list = S.state.problems;
+  notifyProblems(list);
   const box = $('#problems');
   box.hidden = !list.length;
   if (!list.length) return;
