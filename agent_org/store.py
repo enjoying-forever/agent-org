@@ -210,6 +210,9 @@ class Store:
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(messages)")}
         if "urgent" not in columns:
             self._db.execute("ALTER TABLE messages ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0")
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(presence)")}
+        if "ppid" not in columns:
+            self._db.execute("ALTER TABLE presence ADD COLUMN ppid INTEGER")
 
     @_locked
     def close(self) -> None:
@@ -424,13 +427,22 @@ class Store:
     # presence: every running agent's hub connection checks in while its session lives
 
     @_locked
-    def check_in(self, pid: int, role: str) -> None:
+    def check_in(self, pid: int, role: str, ppid: int | None = None) -> None:
+        """`pid` is the hub connection; `ppid` the harness that started it (what "stop" ends)."""
         now = time.time()
         self._db.execute(
-            "INSERT INTO presence (pid, role, started_at, last_seen) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(pid) DO UPDATE SET role = excluded.role, last_seen = excluded.last_seen",
-            (pid, role, now, now),
+            "INSERT INTO presence (pid, role, started_at, last_seen, ppid) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(pid) DO UPDATE SET role = excluded.role, last_seen = excluded.last_seen,"
+            " ppid = COALESCE(excluded.ppid, presence.ppid)",
+            (pid, role, now, now, ppid),
         )
+
+    @_locked
+    def sessions_of(self, role: str, within: float = 30) -> list[tuple[int, int | None]]:
+        """(hub connection pid, harness pid) of each live session of `role`."""
+        rows = self._db.execute("SELECT pid, ppid FROM presence WHERE role = ? AND last_seen > ?",
+                                (role, time.time() - within)).fetchall()
+        return [(r[0], r[1]) for r in rows]
 
     @_locked
     def check_out(self, pid: int) -> None:

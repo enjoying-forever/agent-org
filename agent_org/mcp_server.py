@@ -376,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     # Check in while this session lives, so the team and the UI can see who is running.
     pid, done = os.getpid(), threading.Event()
-    hub.store.check_in(pid, args.role)
+    hub.store.check_in(pid, args.role, os.getppid())
 
     def heartbeat() -> None:
         while not done.wait(HEARTBEAT):

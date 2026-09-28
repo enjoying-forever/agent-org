@@ -1,161 +1,140 @@
 # agent-org
 
-A chain of command for AI agents that each run in their own harness: Claude Code,
-Codex CLI, Grok Build and Antigravity. Every agent runs in a normal, visible
-terminal session. agent-org only connects them: it routes messages along the
-role tree you define, lets superiors look at their teams, and makes sure each
-file has one writer at a time.
+Run a team of AI agents - Claude Code, Codex and Grok - that work together like a
+small company. You set up who reports to whom; the leader plans, hands out tasks,
+and reports back to you. Every agent runs in its own visible terminal tab, with the
+subscription you already have, and you watch and steer everything from one web page.
 
-## The rules
+## Quick start
 
-| | |
-|---|---|
-| **Tree** | Every role names its `superior`. Exactly one role reports to you (the owner): the leader. |
-| **Up** | A role can report to, or ask help from, its **direct** superior only. |
-| **Down** | A role can instruct anyone below it: its subordinates and theirs. |
-| **Peers** | Roles with the same superior can message each other. Other teams' members (cousins) can't. |
-| **Looking** | Everyone can see the whole tree and every role's status, files and whether it is running (`team_status`, `view`). A role's messages can be read only by itself and the roles above it. |
-| **Files** | A role can only lock files inside its `write_scope`. One writer per file. A lock is released by its holder or by anyone above the holder, and a holder can hand it to its direct superior or a direct subordinate. |
-| **Consultants** | See below. |
+1. **Double-click `agent-org-ui.cmd`.** A page opens in your browser. (Keep the small
+   black window open while you use it.)
+2. **Create a team.** Choose the project folder the agents should work in, pick a
+   starting team (Solo, Leader and worker, or Full team) and click *Create team*.
+   The *Setup* check on the same page tells you if Claude, Codex or Grok needs fixing.
+3. **Click *Launch team*.** Each agent opens in its own Windows Terminal tab.
+   - The first time, Claude and Codex ask whether you trust the folder: say yes.
+   - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
+4. **Give the leader a task.** In the box at the bottom right, switch to **Task**,
+   write one line saying what you want, add details if needed, and click *Give task*.
 
-## How messages reach a busy or idle agent
+Then watch: the cards show who is working, waiting or blocked; messages and tasks
+appear live; the leader's result comes back to you as a message.
 
-Harnesses work in turns: when an agent ends its turn it sits at its prompt, and
-nothing wakes it. agent-org therefore adds hooks to each agent's harness:
+Next time, open the team from *Open a recent team*, click *Launch team*, and every
+agent carries on where it stopped.
 
-- **When the agent ends its turn**, the hook first hands over any unread messages.
-  With none waiting, it reminds the agent once of what it tends to forget (reporting
-  to its superior, releasing files it holds), then **waits for new messages** and
-  hands them over the moment they arrive. The agent's status shows `waiting`
-  meanwhile. To type into an agent's tab yourself while it waits, press Esc first.
-- **After every tool call**, it mentions messages that arrived while the agent was
-  busy (once each).
-- **Before every file edit**, the agent must hold the file's lock. Editing a free file
-  inside its write scope claims it automatically; a file someone else holds, or one
-  outside its scope, is refused with the reason.
+## What you see
 
-Claude Code gets these hooks through a per-role `--settings` file. Codex gets them
-through `-c` overrides; the first time, Codex shows **Hooks need review**: choose
-**Trust all and continue** (the commands are the same for every role, so once is
-enough). Grok only reads hooks from its global settings or a git root, so for Grok
-install them once with
-`python -m agent_org.launch --install-grok-hooks` (they do nothing outside agent-org
-tabs).
+- **Team:** the org chart. Each card shows the agent's model, what it is doing, whether
+  it is running, its open tasks, unread messages and the files it is writing. Click a
+  card to message it, give it a task, start or stop it, or read its notes.
+- **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
+  message urgent, or write to everyone at once. Questions the leader asks you have
+  *Reply* and *Summon consultant* buttons.
+- **Tasks:** every task, who gave it to whom, and how it ended (done or blocked, with
+  the result).
+- **Files:** who is writing which file right now.
+- **Edit team:** add and remove roles, choose the leader and each role's superior, the
+  program and model each role uses, what files it may write, and the consultant tiers.
+- **The law:** the rules below. **Setup:** checks that the programs are ready.
 
-Every agent's hub connection also checks in every 10 seconds, so the UI and the
-agents can tell who is **running**. Launching skips roles that are already running,
-because two sessions of one role would split its messages.
+## The message law
+
+Every agent works under these rules; the hub enforces them and reminds agents of
+what they still owe.
+
+1. **Chain of command.** Write to your direct superior, to your peers (same superior)
+   and to anyone below you. Don't skip levels upward or write to other teams.
+2. **Answering is always allowed.** You may reply to any message sent to you, whoever
+   sent it.
+3. **Work is given as tasks.** Work goes only downward, one clear, self-contained task
+   at a time. Peers coordinate but never assign work to each other.
+4. **Every task gets closed.** When a task is finished, its owner closes it with the
+   result - done, or blocked with what is needed. Whoever assigned it is told.
+5. **Help goes up one level.** A question goes to your direct superior, who must answer
+   it, pass it up, or summon a consultant.
+6. **Say it once, say it all.** Every message wakes its receiver: no "thanks" or "ok"
+   messages; long material goes in a file.
+7. **One writer per file.** An agent must hold a file's lock to edit it; editing a free
+   file in its scope takes the lock automatically.
+8. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
+   Messages stay private to the sender, the receiver and their superiors.
+9. **Urgent is rare.** Only messages going down may be urgent; they interrupt the
+   receiver's current work.
+
+How the rules are kept:
+
+- When an agent finishes a turn, a hook hands it any new messages, or reminds it of
+  open tasks, blocked tasks it gave, unanswered questions and files it still holds -
+  then waits and wakes it the moment a message arrives. You never have to nudge an
+  idle agent.
+- After every step it takes, a busy agent is told about new messages; urgent ones
+  interrupt it immediately.
+- Before every file edit, the hub checks the lock, so two agents never write the same
+  file.
+
+## Memory: agents remember across restarts
+
+- **Launch team** (or *Start* on a card) resumes each agent's last conversation, so
+  it remembers everything it was doing. It is told the team was restarted and picks
+  up its open tasks and messages.
+- If a conversation can no longer be resumed, the new session still starts from what
+  the hub kept: the agent's own notes, its open tasks, the files it holds and its
+  recent messages.
+- *Start fresh* on a card begins a new conversation on purpose (the hub's memory is
+  kept).
+- *Stop* ends an agent's program; its conversation is kept for the next start.
 
 ## Consultants
 
-When a subordinate asks for help, the superior who received the request judges how
-hard it is and can call `summon_consultant(help_id, tier, brief)`. The hub then:
+When a subordinate asks for help, its superior can summon a **consultant**: a
+temporary helper, placed under the agent that asked, running a stronger (or cheaper)
+model from a tier you configure. It opens in its own tab, edits only the files it is
+handed, and is dismissed when the problem is solved; its files go back to the agent
+it helped. Tiers are set in *Edit team* (for example *opus-medium*, *luna-high*,
+*opus-xhigh*), each with what it is good for and how many may run at once.
 
-1. adds a temporary role (`consultant-1`, `consultant-2`, ...) **under the agent that
-   asked**, running the tier's harness and model, in its own new tab;
-2. sends it the help request and the superior's brief, and tells the helped agent.
+## Troubleshooting
 
-The helped agent and its consultant work together like any superior and subordinate.
-A consultant can't claim files: it edits only the files the helped agent passes to it
-with `hand_over_file`, and hands them back (or `release_file`s them) when done. When
-the problem is solved, the helped agent or anyone above it calls
-`dismiss_consultant`. Every file the consultant still holds goes back to the helped
-agent, and the consultant's tools stop working. Consultants can't get consultants
-of their own.
+- **The Setup check shows a ✗:** it says what to run. The most common: Grok not signed
+  in (`grok login`), or a Claude Code update that did not finish (the check gives the
+  repair command).
+- **You want to type directly into an agent's tab:** while it waits for messages it is
+  busy; press **Esc** first. Or just send it a message from the page - that reaches it
+  immediately.
+- **A card says "2 sessions!":** the same role was started twice and the two split its
+  messages. Click *Stop* on the card, then *Start*.
+- **Grok agents only see messages when they check:** click *Install Grok hooks* in the
+  Setup check (Grok reads hooks only from its own settings; they do nothing outside
+  agent-org tabs).
 
-Tiers are set in `team.yaml` under `consultants:`, each with a harness, model,
-effort, a `use_for` line that the superior reads to pick a tier, and `max_active`,
-the most that can run at once.
+## For developers
 
-## Setup
-
-Run everything in the `formal` conda env from this folder.
-
-1. Copy `team.example.yaml` to `team.yaml` in the project the agents will work on,
-   and edit the tree, models and write scopes.
-2. Check it:
-
-   ```
-   python -m agent_org.cli --team path/to/team.yaml tree
-   ```
-
-## The UI
-
-Drag your `team.yaml` onto **`agent-org-ui.cmd`** (or run
-`agent-org-ui.cmd path\to\team.yaml`). A local web page opens in your browser:
-
-- **Team:** the org chart with each agent's model, live status, unread messages
-  and files. Consultants appear as dashed cards under the agent they help. Click a
-  card for details, to message it, reopen its terminal tab, release its files or
-  dismiss it. **Launch team** opens a terminal tab for every role.
-- **Messages:** the whole team's conversation, live, with filters. Write to any
-  role, reply, and answer help requests addressed to you, including **Summon
-  consultant**, which lets you pick a tier and write a brief.
-- **Files:** every file being written, and by whom.
-- **Edit team:** roles, leader ("Make leader"), superiors, harness, model, effort,
-  write scopes, duties and consultant tiers, with a live tree preview and checks.
-  Saving writes `team.yaml` (the old one is kept as `team.yaml.bak`).
-
-The UI listens on 127.0.0.1 only, and the page's link carries an access token.
-Keep the UI's window open while you use it; closing it stops the page, not the
-agents.
-
-## Launch the team from the command line
-
-```
-conda run -n formal --cwd E:\code\claude_own\agent-org python -m agent_org.launch --team path\to\team.yaml
-```
-
-This opens a Windows Terminal window named `agent-org`, with one tab for you and
-one per role (add role names to start only some; `--dry-run` writes the scripts
-without opening anything). Each role tab runs its real harness, connected to the
-hub through the `org` MCP server:
-
-- **Claude Code** gets the role card as an appended system prompt and the `org`
-  tools pre-approved.
-- **Codex** gets the role card as developer instructions and the `org` server
-  through `-c` overrides.
-- **Grok** gets the role card through `--rules` and the `org` tools pre-approved
-  with `--allow`. Grok only reads MCP servers from config files, so its start
-  script registers one `org` server in the project's `.grok/config.toml`; each
-  Grok tab's server takes its role from the tab's `AGENT_ORG_ROLE`. The first time
-  in a folder you haven't trusted, Grok asks you to trust it.
-- **Antigravity** is not supported yet.
-
-Every agent starts by calling `my_role`, then waits for messages. In your tab,
-give the leader its first task with `org send leader "..."`, and watch the other
-tabs. Messages addressed to you arrive in `org inbox`.
-
-The start scripts are in `.agent-org/launch/<role>/start.ps1`; you can rerun
-one yourself to restart a single agent.
-
-## Command line
-
-`--as ROLE` acts as that role; without it you act as the owner.
-`$AGENT_ORG_TEAM` and `$AGENT_ORG_ROLE` can stand in for `--team` and `--as`.
+Everything runs in the `formal` conda environment with only PyYAML beyond the standard
+library. From this folder:
 
 | Command | What it does |
 |---|---|
-| `tree` | Show the role tree |
-| `send TO TEXT [--reply-to N]` | Message your superior or anyone below you |
-| `help TEXT [--reply-to N]` | Ask your direct superior for help |
-| `inbox` / `wait [--timeout S]` | Read new messages, or wait for them |
-| `status STATE [TASK]` | Set your status: idle, working, waiting, blocked, done |
-| `view ROLE` | Look at yourself or a role below you |
-| `claim PATH` / `release PATH` / `locks` | File write locks |
-| `hand-over PATH TO` | Give a lock you hold to your superior or a direct subordinate |
-| `summon HELP_ID TIER [--brief TEXT]` | Attach a consultant to whoever sent you help request HELP_ID |
-| `dismiss NAME` | Dismiss a consultant working for you or below you |
-| `can-write PATH` | Exit 0 if you hold the lock on PATH (for pre-edit hooks) |
+| `python -m agent_org.ui [--team team.yaml]` | the web UI |
+| `python -m agent_org.launch --team team.yaml [roles] [--fresh] [--force] [--dry-run]` | open agent tabs from the command line |
+| `python -m agent_org.launch --install-grok-hooks` | install the hooks for Grok |
+| `python -m agent_org.cli --team team.yaml [--as ROLE] tree/send/inbox/view/claim/...` | the hub from the command line |
+| `python -m pytest` | the tests |
 
-## Status
+How it fits together:
 
-- [x] Step 1: hub core (role tree, rules, messages, status, file locks) with tests
-- [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
-- [x] Consultants: temporary helpers summoned for help requests, with file hand-over
-- [x] Web UI (moved up from step 5): org chart, messages, files, consultants, team editor
-- [x] Step 3: Grok, plus hooks that deliver messages to busy and idle agents
-- [x] Step 4: pre-edit hooks that enforce locks
-- [ ] Antigravity
+- `team.py` - the role tree and consultant tiers, from `team.yaml`.
+- `hub.py` - the message law, tasks, file locks and consultants, over `store.py` (one
+  SQLite file per team in `.agent-org/`, shared by every agent's process).
+- `mcp_server.py` - the `org` tools each agent gets (standard-library MCP over stdio).
+- `hooks.py` / `org_hook.py` - the hooks each harness runs: deliver mail, remind of
+  duties, guard edits, record the conversation id.
+- `launch.py` - writes each role's start script (Claude Code: `--mcp-config`,
+  `--settings`, `--append-system-prompt-file`; Codex: `-c` overrides; Grok: project
+  MCP config and `--rules`), resumes conversations (`sessions.py`), stops agents.
+- `cards.py` - the role card: the law, the team, and where the agent left off.
+- `ui.py` + `ui_static/` - the web page; `templates.py` - the starting teams;
+  `doctor.py` - the setup check.
 
-Run the tests with `python -m pytest`.
+Antigravity is not supported yet.

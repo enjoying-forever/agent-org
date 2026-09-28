@@ -9,20 +9,59 @@
 <body>
   <header class="bar">
     <div class="brand"><b>agent-org</b><span id="project" class="muted"></span></div>
-    <nav class="views">
+    <nav class="views" id="views" hidden>
       <button data-view="team" class="active">Team</button>
       <button data-view="editor">Edit team</button>
     </nav>
     <div class="spacer"></div>
-    <span id="conn" class="conn">connecting</span>
-    <button id="launch-all" class="primary">Launch team</button>
+    <span id="conn" class="conn" hidden>connecting</span>
+    <button id="law-btn" title="The rules every agent follows">The law</button>
+    <button id="checks-btn" title="Check that Claude, Codex and Grok are ready">Setup</button>
+    <button id="switch-btn" hidden title="Open or create another team">Switch team</button>
+    <button id="stop-all" hidden class="danger" title="Stop every running agent">Stop all</button>
+    <button id="launch-all" hidden class="primary" title="Start every agent that is not running">Launch team</button>
   </header>
 
-  <main id="view-team" class="team-view">
-    <section class="chart-pane"><ul id="chart" class="tree"></ul></section>
+  <!-- welcome: open or create a team -->
+  <main id="view-home" class="home" hidden>
+    <section class="home-col">
+      <h1>Welcome to agent-org</h1>
+      <p class="muted lead">Run a team of AI agents (Claude, Codex, Grok) that plan, split work, write code
+        and report back to you. Start by opening a team or creating one.</p>
+      <div class="card" id="recent-card">
+        <h2>Open a recent team</h2>
+        <div id="recent" class="list"></div>
+      </div>
+      <div class="card">
+        <h2>Open a team</h2>
+        <p>A folder that already has a <span class="mono">team.yaml</span>.</p>
+        <div class="row"><input id="open-path" placeholder="E:\projects\my-app"><button id="open-browse">Browse...</button><button id="open-go" class="primary">Open</button></div>
+      </div>
+    </section>
+    <section class="home-col">
+      <div class="card">
+        <h2>Create a new team</h2>
+        <p>Pick the project folder the agents will work in, then a starting team. You can change everything later.</p>
+        <label>Project folder<div class="row"><input id="create-path" placeholder="E:\projects\my-app"><button id="create-browse">Browse...</button></div></label>
+        <div id="templates" class="templates"></div>
+        <button id="create-go" class="primary">Create team</button>
+      </div>
+      <div class="card">
+        <h2>Setup check</h2>
+        <div id="home-checks" class="checks"><span class="muted">Checking...</span></div>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-team" class="team-view" hidden>
+    <section class="chart-pane">
+      <div id="guide" class="guide" hidden></div>
+      <ul id="chart" class="tree"></ul>
+    </section>
     <aside class="side">
       <div class="tabs">
         <button data-tab="messages" class="active">Messages <span id="inbox-badge" class="badge" hidden></span></button>
+        <button data-tab="tasks">Tasks <span id="tasks-count" class="muted"></span></button>
         <button data-tab="files">Files <span id="files-count" class="muted"></span></button>
       </div>
       <div id="tab-messages" class="tab">
@@ -30,7 +69,7 @@
           <div class="seg" id="filter-seg">
             <button data-filter="all" class="active">All</button>
             <button data-filter="me">To me</button>
-            <button data-filter="help">Help</button>
+            <button data-filter="work">Tasks &amp; help</button>
           </div>
           <select id="filter-role" title="Only messages sent by or to this role"></select>
           <button id="mark-read" class="small" hidden>Mark read</button>
@@ -38,12 +77,31 @@
         <div id="feed" class="feed"></div>
         <form id="composer" class="composer">
           <div class="row">
+            <div class="seg" id="mode-seg">
+              <button type="button" data-mode="message" class="active">Message</button>
+              <button type="button" data-mode="task">Task</button>
+            </div>
             <select id="to" title="Recipient"></select>
-            <span id="reply-chip" class="chip" hidden><span></span><button type="button" title="Not a reply">&times;</button></span>
           </div>
+          <span id="reply-chip" class="chip" hidden><span></span><button type="button" title="Not a reply">&times;</button></span>
+          <input id="task-title" placeholder="Task title: one line saying what to do" hidden>
           <textarea id="text" rows="3" placeholder="Write to your team... (Ctrl+Enter to send)"></textarea>
-          <div class="row"><span class="muted" style="flex:1;font-size:12px">You can message anyone.</span><button class="primary">Send</button></div>
+          <div class="row">
+            <label class="inline" id="urgent-wrap" title="Interrupts what they are doing. Use it only to stop or redirect work."><input type="checkbox" id="urgent"> urgent</label>
+            <span class="muted hint" id="composer-hint">Every message wakes its receiver: say it once, say it all.</span>
+            <button class="primary" id="send-btn">Send</button>
+          </div>
         </form>
+      </div>
+      <div id="tab-tasks" class="tab" hidden>
+        <div class="filters">
+          <div class="seg" id="task-seg">
+            <button data-tasks="open" class="active">Open</button>
+            <button data-tasks="all">All</button>
+          </div>
+          <span class="muted hint">Every task ends with a result: done or blocked.</span>
+        </div>
+        <div id="task-list" class="feed"></div>
       </div>
       <div id="tab-files" class="tab" hidden>
         <div class="feed" style="padding:0"><table class="locks"><thead><tr><th>File</th><th>Being written by</th><th>Since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
@@ -61,7 +119,7 @@
           <button id="revert">Revert</button>
           <button id="save" class="primary" style="flex:1">Save team.yaml</button>
         </div>
-        <span class="muted" style="font-size:12px">Running agents keep their old role until you open their tab again.</span>
+        <span class="muted" style="font-size:12px">Running agents learn about changes the next time they start.</span>
       </div>
     </aside>
   </main>
@@ -81,9 +139,18 @@
     </form>
   </dialog>
 
+  <dialog id="info">
+    <form method="dialog">
+      <h2 id="info-title"></h2>
+      <div id="info-body" class="info-body"></div>
+      <div class="dialog-actions"><button value="ok" class="primary">Close</button></div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" hidden></div>
   <div id="blocker" class="blocker" hidden></div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/editor.js"></script>
 </body>
 </html>

@@ -312,6 +312,35 @@ def open_tab(tab: list[str]) -> None:
     subprocess.run([wt, *tab[1:]], check=True)
 
 
+HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}
+
+
+def program_name(pid: int) -> str:
+    """The executable name of a running process ('' if there is none)."""
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    first = out.strip().splitlines()[0] if out.strip() else ""
+    return first.split('","')[0].strip('"').lower() if first.startswith('"') else ""
+
+
+def stop_role(hub: Hub, role: str) -> int:
+    """End every running session of `role` by stopping its harness program. Returns how many.
+
+    Only processes that are really a harness program are stopped, so a reused process id
+    can never take something else down. The tab stays open at a PowerShell prompt.
+    """
+    stopped = 0
+    for pid, ppid in hub.store.sessions_of(role):
+        if ppid and program_name(ppid) in HARNESS_PROGRAMS:
+            subprocess.run(["taskkill", "/PID", str(ppid), "/T", "/F"], capture_output=True, timeout=30)
+            stopped += 1
+        hub.store.check_out(pid)
+    return stopped
+
+
 def tab_opener(team_file: Path) -> Opener:
     """What the hub calls to show a newly summoned consultant in its own tab."""
 

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import threading
 import urllib.error
 import urllib.request
@@ -91,7 +92,7 @@ def test_state_lists_the_tree(server):
 
 
 def test_owner_messages_and_inbox(server):
-    sent = server.ok("/api/send", {"to": "worker-b", "text": "你好, please write tests"})
+    [sent] = server.ok("/api/send", {"to": "worker-b", "text": "你好, please write tests"})["sent"]
     assert (sent["sender"], sent["kind"]) == ("you", "instruction")
     server.app.hub.session("leader").send("you", "plan is ready")
     messages = server.ok("/api/messages?after=0")["messages"]
@@ -179,3 +180,90 @@ def test_model_output_parsers():
     assert ui._parse_agy("Fetching...\ngemini-3.8-flash-high\tGemini\nclaude-opus-4-6\tClaude\n") == [
         "gemini-3.8-flash-high", "claude-opus-4-6"]
     assert ui._parse_codex('{"models": [{"slug": "gpt-6-luna"}, {"id": "gpt-6-sol"}]}') == ["gpt-6-luna", "gpt-6-sol"]
+
+
+# the message law from the page
+
+
+def test_owner_gives_tasks_and_sees_them(server):
+    task = server.ok("/api/task", {"to": "leader", "title": "Build a todo app", "details": "CLI, JSON file"})
+    assert (task["assignee"], task["state"]) == ("leader", "open")
+    state = server.ok("/api/state")
+    assert [t["title"] for t in state["tasks"]] == ["Build a todo app"]
+    assert next(r for r in state["roles"] if r["name"] == "leader")["open_tasks"] == 1
+    server.app.hub.session("leader").finish_task(task["id"], "todo.py is ready")
+    result = server.ok("/api/messages?after=0")["messages"][-1]
+    assert (result["kind"], result["recipient"]) == ("result", "you")
+    cancel = server.ok("/api/task", {"to": "worker-a", "title": "Old idea"})
+    assert server.ok("/api/cancel-task", {"task_id": cancel["id"]})["state"] == "cancelled"
+
+
+def test_owner_writes_to_everyone_and_urgently(server):
+    sent = server.ok("/api/send", {"to": "@all", "text": "Stop for today"})["sent"]
+    assert sorted(m["recipient"] for m in sent) == ["leader", "researcher", "tech-lead", "worker-a", "worker-b"]
+    [urgent] = server.ok("/api/send", {"to": "worker-a", "text": "STOP", "urgent": True})["sent"]
+    assert urgent["urgent"] is True
+
+
+def test_the_law_is_served(server):
+    law = server.ok("/api/law")["law"]
+    assert law[0]["title"] == "Chain of command" and len(law) == 9
+
+
+def test_roles_show_notes_and_whether_they_resume(server):
+    server.app.hub.session("worker-a").save_notes("Using Flask")
+    role = next(r for r in server.ok("/api/state")["roles"] if r["name"] == "worker-a")
+    assert role["notes"] == "Using Flask" and role["resumes"] is False
+
+
+def test_stop_needs_a_role(server):
+    assert server.ok("/api/stop", {"role": "@all"}) == {"stopped": {}}  # nobody is running
+    assert server.request("/api/stop", {"role": "ghost"})[0] == 400
+
+
+# welcome page: opening and creating teams
+
+
+def test_welcome_mode_without_a_team(tmp_path, monkeypatch):
+    srv, app, token = ui.serve(None, 0, token="t", load_models=False)
+    try:
+        home = app.home()
+        assert home["open"] is False
+        assert [t["id"] for t in home["templates"]] == ["solo", "pair", "team"]
+        with pytest.raises(ui.ApiError, match=ui.NO_TEAM):
+            app.state()
+        folder = tmp_path / "my app"
+        created = app.create_team({"folder": str(folder), "template": "pair"})
+        assert Path(created["team_file"]) == (folder / "team.yaml").resolve()
+        assert [r["name"] for r in app.state()["roles"]] == ["leader", "worker"]
+        assert app.home()["recent"][0]["name"] == "my app"
+        with pytest.raises(ui.ApiError, match="already exists"):
+            app.create_team({"folder": str(folder), "template": "solo"})
+        app.close_team({})
+        app.open_team({"path": str(folder)})  # a folder with a team.yaml works too
+        assert app.team_file == (folder / "team.yaml").resolve()
+        with pytest.raises(ui.ApiError, match="no team.yaml"):
+            app.open_team({"path": str(tmp_path / "nowhere")})
+        with pytest.raises(ui.ApiError, match="full folder path"):
+            app.create_team({"folder": "relative", "template": "solo"})
+    finally:
+        srv.server_close()
+        app.close()
+
+
+def test_every_template_is_a_valid_team(tmp_path):
+    from agent_org import templates
+    from agent_org.team import Team
+
+    for key in templates.TEMPLATES:
+        team = Team.from_dict(templates.team_config(key), base_dir=tmp_path)
+        assert team.leader == "leader"
+
+
+def test_setup_checks_report_each_program(server, monkeypatch):
+    from agent_org import doctor
+
+    monkeypatch.setattr(doctor, "run_checks", lambda used: [
+        doctor.Check("Claude Code", True, "2.1.283"), doctor.Check("Grok", False, "not installed", "Install it")])
+    checks = server.ok("/api/checks?fresh=1")["checks"]
+    assert [(c["name"], c["ok"]) for c in checks] == [("Claude Code", True), ("Grok", False)]

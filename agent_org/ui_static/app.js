@@ -33,6 +33,8 @@ const TOKEN = (() => {
 })();
 if (new URLSearchParams(location.search).has('token')) history.replaceState(null, '', '/');
 
+class NoTeam extends Error {}
+
 async function api(path, body) {
   const post = body !== undefined;
   const res = await fetch(path, {
@@ -43,6 +45,7 @@ async function api(path, body) {
   let data = {};
   try { data = await res.json(); } catch { /* empty body */ }
   if (res.status === 403) showBlocker();
+  if (res.status === 412 && data.error === 'no_team') throw new NoTeam();
   if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
   return data;
 }
@@ -69,38 +72,65 @@ function toast(text, error = false) {
   t.className = 'toast' + (error ? ' error' : '');
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, error ? 7000 : 4000);
+  toastTimer = setTimeout(() => { t.hidden = true; }, error ? 8000 : 4500);
 }
 
 function showBlocker() {
   const b = $('#blocker');
   b.replaceChildren(h('div', {},
     h('h2', {}, 'This page needs its access link'),
-    h('p', { class: 'muted' }, 'Open the link printed in the agent-org UI window (it ends with ?token=...).')));
+    h('p', { class: 'muted' }, 'Open the link printed in the agent-org window (it ends with ?token=...).')));
   b.hidden = false;
+}
+
+function showInfo(title, ...body) {
+  $('#info-title').textContent = title;
+  $('#info-body').replaceChildren(...body);
+  $('#info').showModal();
+}
+
+async function act(promise, done) {
+  try {
+    const result = await promise;
+    if (done) toast(done(result));
+    refresh();
+    return result;
+  } catch (e) {
+    toast(e.message, true);
+    return null;
+  }
 }
 
 // ---------- state & polling ----------
 
 const S = {
-  state: null, stateKey: '', messages: [], lastId: 0,
+  state: null, stateKey: '', messages: [], lastId: 0, mode: null,
   filter: 'all', roleFilter: '', replyTo: null, selected: null, summonFor: null,
+  compose: 'message', taskFilter: 'open', notified: 0,
 };
 
 async function refresh() {
   try {
     const [state, fresh] = await Promise.all([api('/api/state'), api(`/api/messages?after=${S.lastId}`)]);
     setConn(true);
+    enterTeam();
     applyState(state);
     if (fresh.messages.length) addMessages(fresh.messages);
   } catch (e) {
-    setConn(false, e.message);
+    if (e instanceof NoTeam) enterHome();
+    else setConn(false, e.message);
   }
 }
 
 async function poll() {
-  await refresh();
-  setTimeout(poll, 1500);
+  if (S.mode === 'home') {
+    try {
+      if ((await api('/api/home')).open) await refresh();  // a team was opened elsewhere
+    } catch { /* retried next time */ }
+  } else {
+    await refresh();
+  }
+  setTimeout(poll, S.mode === 'home' ? 5000 : 1500);
 }
 
 function setConn(ok, why) {
@@ -119,6 +149,8 @@ function applyState(state) {
   $('#project').textContent = state.project_root;
   $('#project').title = `team file: ${state.team_file}`;
   renderChart();
+  renderGuide();
+  renderTasks();
   renderLocks();
   renderRecipients();
   renderRoleFilter();
@@ -129,6 +161,129 @@ function applyState(state) {
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
 const findRole = (name) => S.state.roles.find((r) => r.name === name);
+
+// ---------- modes: welcome page or a team ----------
+
+function enterTeam() {
+  if (S.mode === 'team') return;
+  S.mode = 'team';
+  $('#view-home').hidden = true;
+  for (const id of ['#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) $(id).hidden = false;
+  showView('team');
+}
+
+function enterHome() {
+  if (S.mode === 'home') return;
+  S.mode = 'home';
+  Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0 });
+  if (typeof E !== 'undefined') E.draft = null;
+  $('#drawer').hidden = true;
+  for (const id of ['#view-team', '#view-editor', '#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) {
+    $(id).hidden = true;
+  }
+  $('#project').textContent = '';
+  $('#view-home').hidden = false;
+  document.title = 'agent-org';
+  renderHome();
+}
+
+async function renderHome() {
+  let home;
+  try { home = await api('/api/home'); } catch (e) { toast(e.message, true); return; }
+  const recent = home.recent.filter((r) => r.exists);
+  $('#recent-card').hidden = !recent.length;
+  $('#recent').replaceChildren(...recent.map((r) => h('button', {
+    class: 'list-item', title: r.path, onclick: () => openTeam(r.path),
+  }, h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path))));
+  const chosen = document.querySelector('#templates input:checked')?.value || 'pair';
+  $('#templates').replaceChildren(...home.templates.map((t) => h('label', { class: 'tier' },
+    h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen }),
+    h('span', {}, h('b', {}, t.title), h('span', { class: 'muted' }, `  ${t.roles}`)),
+    h('small', {}, t.summary))));
+  renderChecks($('#home-checks'));
+}
+
+async function openTeam(path) {
+  if (!path.trim()) { toast('Type or browse to the folder first.', true); return; }
+  await act(api('/api/open', { path }));
+}
+
+async function browse(input, title) {
+  const r = await act(api('/api/pick-folder', { title }));
+  if (r && r.path) input.value = r.path;
+}
+
+$('#open-browse').addEventListener('click', () => browse($('#open-path'), 'Choose the folder that has team.yaml'));
+$('#create-browse').addEventListener('click', () => browse($('#create-path'), 'Choose the project folder'));
+$('#open-go').addEventListener('click', () => openTeam($('#open-path').value));
+$('#create-go').addEventListener('click', async () => {
+  const folder = $('#create-path').value.trim();
+  const template = document.querySelector('#templates input:checked')?.value;
+  if (!folder) { toast('Choose the project folder first.', true); return; }
+  await act(api('/api/create', { folder, template }), () => 'Team created. Check it in "Edit team", then Launch team.');
+});
+$('#switch-btn').addEventListener('click', async () => {
+  if (typeof E !== 'undefined' && E.dirty && !confirm('Leave without saving your team changes?')) return;
+  await act(api('/api/close', {}));
+});
+
+// ---------- setup checks ----------
+
+async function renderChecks(box, fresh = false) {
+  box.replaceChildren(h('span', { class: 'muted' }, 'Checking...'));
+  let checks;
+  try { ({ checks } = await api(`/api/checks${fresh ? '?fresh=1' : ''}`)); } catch (e) {
+    box.replaceChildren(h('span', { class: 'muted' }, e.message)); return;
+  }
+  box.replaceChildren(
+    ...checks.map((c) => h('div', { class: `check ${c.ok ? 'ok' : c.needed ? 'bad' : 'warn'}` },
+      h('span', { class: 'mark' }, c.ok ? '✓' : c.needed ? '✗' : '!'),
+      h('div', {},
+        h('b', {}, c.name), ' ', h('span', { class: 'muted' }, c.detail),
+        !c.ok && c.fix && h('div', { class: 'fix' }, c.fix),
+        !c.ok && c.name === 'Grok message delivery'
+          && h('button', { class: 'small', onclick: installGrokHooks }, 'Install Grok hooks')))),
+    h('button', { class: 'small', onclick: () => renderChecks(box, true) }, 'Check again'));
+}
+
+async function installGrokHooks() {
+  if (!confirm('Install agent-org hooks for Grok in your Grok settings folder (~/.grok/hooks)? '
+    + 'They only act inside agent-org tabs.')) return;
+  await act(api('/api/install-grok-hooks', {}), () => 'Grok hooks installed.');
+  renderChecks($('#home-checks'), true);
+}
+
+$('#checks-btn').addEventListener('click', () => {
+  const box = h('div', { class: 'checks' });
+  showInfo('Setup check', h('p', { class: 'muted' }, 'agent-org drives these programs. Anything marked ✗ needs fixing before the agents that use it can start.'), box);
+  renderChecks(box);
+});
+
+// ---------- the law ----------
+
+$('#law-btn').addEventListener('click', async () => {
+  const { law } = await api('/api/law');
+  showInfo('The message law',
+    h('p', { class: 'muted' }, 'Every agent works under these rules. The hub enforces them, and reminds agents of what they still owe.'),
+    h('ol', { class: 'law' }, law.map((l) => h('li', {}, h('b', {}, l.title), ' ', l.rule))));
+});
+
+// ---------- first-run guide ----------
+
+function renderGuide() {
+  const st = S.state;
+  const running = st.roles.some((r) => r.online);
+  const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
+  const steps = [
+    { done: true, text: 'Check the team in "Edit team": who reports to whom, and which model each role uses.' },
+    { done: running, text: 'Click "Launch team". Each agent opens in its own terminal tab.' },
+    { done: talked, text: `Give ${st.leader} a task: switch the box at the bottom right to "Task".` },
+  ];
+  const g = $('#guide');
+  g.hidden = steps.every((s) => s.done);
+  g.replaceChildren(h('b', {}, 'Getting started'),
+    h('ol', {}, steps.map((s) => h('li', { class: s.done ? 'done' : '' }, s.text))));
+}
 
 // ---------- org chart ----------
 
@@ -161,14 +316,15 @@ function roleCard(r) {
     s && s.task && h('div', { class: 'task' }, s.task),
     h('div', { class: 'meta' },
       runningEl(r),
+      r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'task')) : null,
       h('span', { class: r.unread ? 'hot' : '' }, `${r.unread} unread`),
-      h('span', {}, plural(r.locks.length, 'file'))));
+      r.locks.length ? h('span', {}, plural(r.locks.length, 'file')) : null));
 }
 
 function runningEl(r) {
   if (!r.online) return h('span', { class: 'run off', title: 'No session of this role is running' }, 'not running');
   if (r.online > 1) {
-    return h('span', { class: 'run dup', title: 'Several sessions share this role and split its messages. Close the extra tabs.' },
+    return h('span', { class: 'run dup', title: 'Several sessions share this role and split its messages. Stop it and start it again.' },
       `${r.online} sessions!`);
   }
   return h('span', { class: 'run on', title: 'Its session is running' }, 'running');
@@ -193,7 +349,9 @@ function renderDrawer() {
   if (!r) { closeDrawer(); return; } // a consultant that was dismissed
   const s = r.status;
   const recent = S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-30);
+  const tasks = S.state.tasks.filter((t) => t.assignee === r.name).slice(-10).reverse();
   const subs = rolesUnder(r.name).map((x) => x.name);
+  const launchable = S.state.launchable.includes(r.harness);
   $('#drawer').replaceChildren(
     h('header', {},
       h('span', { class: `harness h-${r.harness}` }, r.harness),
@@ -201,12 +359,16 @@ function renderDrawer() {
       h('button', { class: 'small', title: 'Close', onclick: closeDrawer }, '✕')),
     h('div', { class: 'body' },
       h('div', { class: 'actions' },
-        h('button', { class: 'primary', onclick: () => messageTo(r.name) }, 'Message'),
-        S.state.launchable.includes(r.harness)
-          && h('button', { onclick: () => openRoleTab(r) }, r.online ? 'Open another tab' : 'Open terminal tab'),
+        h('button', { class: 'primary', onclick: () => composeTo(r.name, 'task') }, 'Give a task'),
+        h('button', { onclick: () => composeTo(r.name, 'message') }, 'Message'),
+        launchable && !r.online && h('button', { onclick: () => launchRoles([r.name]) },
+          r.resumes ? 'Start (resume)' : 'Start'),
+        launchable && r.online > 0 && h('button', { class: 'danger', onclick: () => stopRoles(r.name) }, 'Stop'),
+        launchable && h('button', { onclick: () => startFresh(r) }, 'Start fresh'),
         r.tier && h('button', { class: 'danger', onclick: () => dismiss(r.name) }, 'Dismiss consultant')),
       h('dl', {},
-        h('dt', {}, 'Session'), h('dd', {}, runningEl(r)),
+        h('dt', {}, 'Session'), h('dd', {}, runningEl(r), ' ',
+          h('span', { class: 'muted' }, r.resumes ? '· next start resumes its conversation' : '· next start begins a new conversation')),
         h('dt', {}, 'Status'),
         h('dd', {}, s
           ? [h('span', { class: `state ${s.state}` }, s.state), s.task ? ` - ${s.task}` : '',
@@ -219,14 +381,23 @@ function renderDrawer() {
           ? [h('dt', {}, 'Consultant'), h('dd', {}, `${r.tier} tier, helping with #${r.help_id}`)]
           : [h('dt', {}, 'Write scope'), h('dd', { class: 'mono' }, r.write_scope.join(', ') || 'nothing')],
         r.duties && [h('dt', {}, 'Duties'), h('dd', {}, r.duties)]),
+      h('h3', {}, `Tasks (${r.open_tasks} open)`),
+      tasks.length ? tasks.map((t) => taskEl(t, true)) : h('div', { class: 'muted' }, 'No tasks yet.'),
       h('h3', {}, `Files (${r.locks.length})`),
       r.locks.length
         ? r.locks.map((p) => h('div', { class: 'lock-row' },
           h('span', { class: 'mono' }, p), h('button', { class: 'small', onclick: () => release(p) }, 'Release')))
         : h('div', { class: 'muted' }, 'Not writing any file.'),
+      r.notes && [h('h3', {}, 'Its notes'), h('div', { class: 'notes' }, r.notes)],
       h('h3', {}, 'Recent messages'),
       recent.length ? recent.map((m) => messageEl(m, true)) : h('div', { class: 'muted' }, 'No messages yet.')));
   $('#drawer').hidden = false;
+}
+
+function startFresh(r) {
+  if (!confirm(`Start ${r.name} with a new, empty conversation?\n\nIt keeps its notes, tasks and messages in the hub, `
+    + 'but forgets the conversation it had. Usually "Start" (resume) is what you want.')) return;
+  launchRoles([r.name], r.online > 0, true);
 }
 
 // ---------- messages ----------
@@ -238,13 +409,32 @@ function addMessages(list) {
     S.messages.push(m);
     S.lastId = Math.max(S.lastId, m.id);
   }
-  if (S.state) renderFeed(atBottom ? 'bottom' : null);
+  notifyOwner(list);
+  if (S.state) {
+    renderFeed(atBottom ? 'bottom' : null);
+    renderGuide();
+  }
   if (S.selected) renderDrawer();
+}
+
+function notifyOwner(list) {
+  const mine = list.filter((m) => m.recipient === S.state?.owner && !m.read && m.id > S.notified);
+  if (!mine.length) return;
+  const first = S.notified === 0;
+  S.notified = Math.max(...mine.map((m) => m.id));
+  if (first || !document.hidden) return; // don't ring for what was there at load, or while you are looking
+  try {
+    if (Notification.permission === 'granted') {
+      const m = mine[mine.length - 1];
+      new Notification(`agent-org: ${m.kind === 'help' ? 'question' : 'message'} from ${m.sender}`,
+        { body: m.text.slice(0, 180) });
+    }
+  } catch { /* notifications unavailable */ }
 }
 
 function visible(m) {
   if (S.filter === 'me' && m.recipient !== S.state.owner) return false;
-  if (S.filter === 'help' && m.kind !== 'help') return false;
+  if (S.filter === 'work' && !['task', 'result', 'help'].includes(m.kind)) return false;
   if (S.roleFilter && m.sender !== S.roleFilter && m.recipient !== S.roleFilter) return false;
   return true;
 }
@@ -259,16 +449,20 @@ function renderFeed(scroll) {
   if (scroll === 'bottom') feed.scrollTop = feed.scrollHeight;
 }
 
-const KIND_LABEL = { instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer' };
+const KIND_LABEL = {
+  instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer',
+  task: 'task', result: 'result', reply: 'reply',
+};
 
 function messageEl(m, compact = false) {
   const toMe = m.recipient === S.state.owner;
   const long = m.text.length > 600 || m.text.split('\n').length > 8;
   const text = h('div', { class: 'text' + (long ? ' clamped' : '') }, m.text);
-  const cls = ['msg', m.kind, toMe && 'to-me', toMe && !m.read && 'unread'];
+  const cls = ['msg', m.kind, toMe && 'to-me', toMe && !m.read && 'unread', m.urgent && 'urgent'];
   return h('div', { class: cls.filter(Boolean).join(' '), id: compact ? null : `m${m.id}` },
     h('div', { class: 'head' },
       h('span', { class: 'kind' }, KIND_LABEL[m.kind] || m.kind),
+      m.urgent && h('span', { class: 'urgent-tag' }, 'urgent'),
       h('b', {}, m.sender), '→', h('b', {}, m.recipient),
       m.reply_to && h('button', { class: 'link', onclick: () => jumpTo(m.reply_to) }, `re #${m.reply_to}`),
       h('span', { class: 'right' }, `#${m.id} · ${fmtTime(m.sent_at)}`)),
@@ -287,6 +481,7 @@ function messageEl(m, compact = false) {
 }
 
 function jumpTo(id) {
+  showTab('messages');
   setFilter('all');
   S.roleFilter = '';
   $('#filter-role').value = '';
@@ -316,9 +511,12 @@ function renderRoleFilter() {
 function renderRecipients() {
   const sel = $('#to');
   const keep = sel.value || S.state.leader;
-  sel.replaceChildren(...S.state.roles.map((r) =>
-    h('option', { value: r.name }, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader ? ' (leader)' : ''}`)));
-  sel.value = findRole(keep) ? keep : S.state.leader;
+  const task = S.compose === 'task';
+  sel.replaceChildren(
+    ...S.state.roles.filter((r) => !(task && r.tier)).map((r) =>
+      h('option', { value: r.name }, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader ? ' (leader)' : ''}`)),
+    !task && h('option', { value: '@all' }, 'To everyone'));
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : S.state.leader;
 }
 
 function renderInboxBadge() {
@@ -326,9 +524,38 @@ function renderInboxBadge() {
   $('#inbox-badge').textContent = n;
   $('#inbox-badge').hidden = !n;
   $('#mark-read').hidden = !n;
+  document.title = n ? `(${n}) agent-org` : 'agent-org';
+}
+
+function setCompose(mode) {
+  S.compose = mode;
+  for (const b of document.querySelectorAll('#mode-seg button')) b.classList.toggle('active', b.dataset.mode === mode);
+  const task = mode === 'task';
+  $('#task-title').hidden = !task;
+  $('#urgent-wrap').hidden = task;
+  $('#text').placeholder = task
+    ? 'Details: everything they need to do it (optional)'
+    : 'Write to your team... (Ctrl+Enter to send)';
+  $('#composer-hint').textContent = task
+    ? 'They must close it with a result: done or blocked.'
+    : 'Every message wakes its receiver: say it once, say it all.';
+  $('#send-btn').textContent = task ? 'Give task' : 'Send';
+  if (task) clearReply();
+  if (S.state) renderRecipients();
+}
+
+function composeTo(name, mode) {
+  closeDrawer();
+  showView('team');
+  showTab('messages');
+  clearReply();
+  setCompose(mode);
+  $('#to').value = name;
+  (mode === 'task' ? $('#task-title') : $('#text')).focus();
 }
 
 function replyTo(m) {
+  setCompose('message');
   S.replyTo = m.id;
   $('#to').value = m.sender;
   const chip = $('#reply-chip');
@@ -342,13 +569,40 @@ function clearReply() {
   $('#reply-chip').hidden = true;
 }
 
-function messageTo(name) {
-  closeDrawer();
-  showView('team');
-  showTab('messages');
-  clearReply();
-  $('#to').value = name;
-  $('#text').focus();
+// ---------- tasks ----------
+
+const STATE_LABEL = { open: 'open', blocked: 'blocked', done: 'done', cancelled: 'cancelled' };
+
+function taskEl(t, compact = false) {
+  const open = t.state === 'open' || t.state === 'blocked';
+  return h('div', { class: `taskc ${t.state}` },
+    h('div', { class: 'head' },
+      h('span', { class: `tstate ${t.state}` }, STATE_LABEL[t.state] || t.state),
+      h('b', {}, `#${t.id} ${t.title}`)),
+    h('div', { class: 'muted small' },
+      `${t.assigner} → ${t.assignee} · ${ago(t.created_at)}`, t.parent_id ? ` · part of #${t.parent_id}` : ''),
+    !compact && t.details && h('div', { class: 'text clamped-3' }, t.details),
+    t.result && h('div', { class: `result ${t.state}` }, t.result),
+    open && h('div', { class: 'acts' },
+      h('button', { class: 'small', onclick: () => cancelTask(t) }, 'Cancel')));
+}
+
+function renderTasks() {
+  const tasks = S.state.tasks;
+  const open = tasks.filter((t) => t.state === 'open' || t.state === 'blocked');
+  $('#tasks-count').textContent = open.length ? `(${open.length})` : '';
+  const shown = (S.taskFilter === 'open' ? open : tasks).slice().reverse();
+  $('#task-list').replaceChildren(...(shown.length
+    ? shown.map((t) => taskEl(t))
+    : [h('div', { class: 'empty' }, S.taskFilter === 'open'
+      ? 'No open tasks. Give one from the box on the Messages tab (switch it to "Task").'
+      : 'No tasks yet.')]));
+}
+
+function cancelTask(t) {
+  const reason = prompt(`Cancel task #${t.id} (${t.title})? ${t.assignee} will be told to stop.\n\nReason (optional):`, '');
+  if (reason === null) return;
+  act(api('/api/cancel-task', { task_id: t.id, reason }), () => `Task #${t.id} cancelled.`);
 }
 
 // ---------- files ----------
@@ -365,29 +619,20 @@ function renderLocks() {
 
 // ---------- actions ----------
 
-async function act(promise, done) {
-  try {
-    const result = await promise;
-    if (done) toast(done(result));
-    refresh();
-    return result;
-  } catch (e) {
-    toast(e.message, true);
-    return null;
-  }
-}
-
-function launchRoles(roles, force = false) {
-  return act(api('/api/launch', { roles, force }), (r) =>
+function launchRoles(roles, force = false, fresh = false) {
+  askNotifications();
+  return act(api('/api/launch', { roles, force, fresh }), (r) =>
     (r.opening.length ? `Opening: ${r.opening.join(', ')}` : 'Nothing to open.')
     + (r.skipped.length ? `\nSkipped: ${r.skipped.join('; ')}` : ''));
 }
 
-function openRoleTab(r) {
-  if (!r.online) return launchRoles([r.name]);
-  if (confirm(`${r.name} is already running. A second session would split its messages with the first.\n`
-    + 'Open another tab anyway? (Close the old tab first if it is stuck.)')) launchRoles([r.name], true);
-  return null;
+function stopRoles(role) {
+  const what = role === '@all' ? 'every running agent' : role;
+  if (!confirm(`Stop ${what}? Its conversation is kept: "Start" resumes it later.`)) return;
+  act(api('/api/stop', { role }), (r) => {
+    const n = Object.values(r.stopped).reduce((a, b) => a + b, 0);
+    return n ? `Stopped ${plural(n, 'agent')}.` : 'Nothing was running.';
+  });
 }
 
 function release(path) {
@@ -399,6 +644,12 @@ function dismiss(name) {
   if (!confirm(`Dismiss ${name}? Its files go back to the agent it helps.`)) return;
   act(api('/api/dismiss', { name }), (r) =>
     `Dismissed ${r.name}.` + (r.returned.length ? ` Files returned: ${r.returned.join(', ')}` : ''));
+}
+
+function askNotifications() {
+  try {
+    if (Notification.permission === 'default') Notification.requestPermission();
+  } catch { /* not supported */ }
 }
 
 function openSummon(m) {
@@ -433,18 +684,28 @@ function showView(v) {
   $('#view-team').hidden = v !== 'team';
   $('#view-editor').hidden = v !== 'editor';
   $('#launch-all').hidden = v !== 'team';
+  $('#stop-all').hidden = v !== 'team';
   if (v === 'editor') { closeDrawer(); if (!E.draft) loadEditor(); }
 }
 
 function showTab(t) {
   for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === t);
   $('#tab-messages').hidden = t !== 'messages';
+  $('#tab-tasks').hidden = t !== 'tasks';
   $('#tab-files').hidden = t !== 'files';
 }
 
 for (const b of document.querySelectorAll('.views button')) b.addEventListener('click', () => showView(b.dataset.view));
 for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
 for (const b of document.querySelectorAll('#filter-seg button')) b.addEventListener('click', () => setFilter(b.dataset.filter));
+for (const b of document.querySelectorAll('#mode-seg button')) b.addEventListener('click', () => setCompose(b.dataset.mode));
+for (const b of document.querySelectorAll('#task-seg button')) {
+  b.addEventListener('click', () => {
+    S.taskFilter = b.dataset.tasks;
+    for (const x of document.querySelectorAll('#task-seg button')) x.classList.toggle('active', x === b);
+    renderTasks();
+  });
+}
 $('#filter-role').addEventListener('change', (e) => { S.roleFilter = e.target.value; renderFeed('bottom'); });
 $('#reply-chip button').addEventListener('click', clearReply);
 $('#mark-read').addEventListener('click', () => act(api('/api/inbox/read', {}), () => {
@@ -453,14 +714,27 @@ $('#mark-read').addEventListener('click', () => act(api('/api/inbox/read', {}), 
   return 'Marked as read.';
 }));
 $('#launch-all').addEventListener('click', () => {
-  if (confirm('Open a terminal tab for every role in team.yaml that is not running yet?')) launchRoles([]);
+  if (confirm('Start every agent that is not running yet? Each resumes its last conversation.')) launchRoles([]);
 });
+$('#stop-all').addEventListener('click', () => stopRoles('@all'));
 $('#composer').addEventListener('submit', (e) => {
   e.preventDefault();
+  const to = $('#to').value;
   const text = $('#text').value.trim();
+  if (S.compose === 'task') {
+    const title = $('#task-title').value.trim();
+    if (!title) { toast('Give the task a one-line title.', true); return; }
+    act(api('/api/task', { to, title, details: text }).then((t) => {
+      $('#task-title').value = '';
+      $('#text').value = '';
+      return t;
+    }), (t) => `Task #${t.id} given to ${t.assignee}.`);
+    return;
+  }
   if (!text) return;
-  act(api('/api/send', { to: $('#to').value, text, reply_to: S.replyTo }).then((r) => {
+  act(api('/api/send', { to, text, reply_to: S.replyTo, urgent: $('#urgent').checked }).then((r) => {
     $('#text').value = '';
+    $('#urgent').checked = false;
     clearReply();
     return r;
   }));
@@ -469,276 +743,6 @@ $('#text').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#composer').requestSubmit();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#drawer').hidden) closeDrawer(); });
-
-// ---------- team editor ----------
-
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
-const E = { draft: null, meta: null, dirty: false };
-
-function toDraft(config) {
-  const { owner = 'you', project_root = '.', roles = {}, consultants = {}, ...extra } = config || {};
-  return {
-    owner: String(owner),
-    project_root: String(project_root),
-    extra,
-    roles: Object.entries(roles || {}).map(([name, r]) => ({
-      name, superior: r.superior ?? '', harness: r.harness ?? 'claude', model: r.model ?? '',
-      effort: r.effort ?? '', duties: r.duties ?? '', write_scope: (r.write_scope || []).join(', '),
-    })),
-    tiers: Object.entries(consultants || {}).map(([name, t]) => ({
-      name, harness: t.harness ?? 'claude', model: t.model ?? '', effort: t.effort ?? '',
-      max_active: t.max_active ?? 1, use_for: t.use_for ?? '',
-    })),
-  };
-}
-
-function fromDraft(d) {
-  const roles = {};
-  for (const r of d.roles) {
-    const spec = { superior: r.superior, harness: r.harness };
-    if (String(r.model).trim()) spec.model = String(r.model).trim();
-    if (String(r.effort).trim()) spec.effort = String(r.effort).trim();
-    if (r.duties.trim()) spec.duties = r.duties.trim();
-    spec.write_scope = r.write_scope.split(',').map((s) => s.trim()).filter(Boolean);
-    roles[r.name.trim()] = spec;
-  }
-  const config = { owner: d.owner.trim(), project_root: d.project_root.trim() || '.', ...d.extra, roles };
-  if (d.tiers.length) {
-    config.consultants = {};
-    for (const t of d.tiers) {
-      const spec = { harness: t.harness };
-      if (String(t.model).trim()) spec.model = String(t.model).trim();
-      if (String(t.effort).trim()) spec.effort = String(t.effort).trim();
-      spec.max_active = Number(t.max_active) || 1;
-      if (t.use_for.trim()) spec.use_for = t.use_for.trim();
-      config.consultants[t.name.trim()] = spec;
-    }
-  }
-  return config;
-}
-
-function validate(d) {
-  const errs = [];
-  if (!NAME_RE.test(d.owner)) errs.push('Your owner name must be a simple name, like "you".');
-  const names = d.roles.map((r) => r.name.trim());
-  names.forEach((n, i) => {
-    if (!NAME_RE.test(n)) errs.push(`Role name "${n}" can only use letters, digits, - and _.`);
-    else if (n.startsWith('consultant-')) errs.push(`"${n}": names starting with consultant- are kept for consultants.`);
-    else if (n === d.owner) errs.push(`"${n}" is your owner name; pick another role name.`);
-    else if (names.indexOf(n) !== i) errs.push(`Two roles are called "${n}".`);
-  });
-  for (const r of d.roles) {
-    if (r.superior !== d.owner && !names.includes(r.superior)) errs.push(`${r.name}: choose a superior.`);
-  }
-  const leaders = d.roles.filter((r) => r.superior === d.owner);
-  if (!d.roles.length) errs.push('Add at least one role.');
-  else if (leaders.length === 0) errs.push('Choose a leader: exactly one role must report to you.');
-  else if (leaders.length > 1) errs.push(`Only one role can report to you (the leader); now ${leaders.map((r) => r.name).join(', ')} do.`);
-  for (const r of d.roles) {
-    const seen = new Set([r.name]);
-    let cur = r.superior;
-    while (cur && cur !== d.owner) {
-      if (seen.has(cur)) { errs.push(`${r.name}: its chain of superiors goes round in a circle.`); break; }
-      seen.add(cur);
-      cur = d.roles.find((x) => x.name === cur)?.superior;
-    }
-  }
-  const tierNames = d.tiers.map((t) => t.name.trim());
-  tierNames.forEach((n, i) => {
-    if (!NAME_RE.test(n)) errs.push(`Consultant tier "${n}" can only use letters, digits, - and _.`);
-    else if (tierNames.indexOf(n) !== i) errs.push(`Two consultant tiers are called "${n}".`);
-  });
-  for (const t of d.tiers) {
-    if (!(Number(t.max_active) >= 1)) errs.push(`Tier ${t.name}: "at once" must be at least 1.`);
-  }
-  return [...new Set(errs)];
-}
-
-async function loadEditor() {
-  try {
-    const data = await api('/api/team');
-    E.meta = data;
-    E.draft = toDraft(data.config);
-    E.dirty = false;
-    renderEditor();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-function touch() {
-  E.dirty = true;
-  renderEditorSide();
-}
-
-/** A text input bound to obj[key]; editing it only refreshes the preview, so focus is kept. */
-function bound(obj, key, props = {}) {
-  return h('input', { value: obj[key], ...props, oninput: (e) => { obj[key] = e.target.value; touch(); } });
-}
-
-function harnessSelect(obj) {
-  return h('select', { onchange: (e) => { obj.harness = e.target.value; touch(); renderEditor(); } },
-    E.meta.harnesses.map((x) => h('option', { value: x, selected: x === obj.harness }, x)));
-}
-
-function datalists() {
-  const lists = [];
-  for (const hname of E.meta.harnesses) {
-    lists.push(h('datalist', { id: `models-${hname}` }, (E.meta.models[hname] || []).map((m) => h('option', { value: m }))));
-    lists.push(h('datalist', { id: `efforts-${hname}` }, (E.meta.efforts[hname] || []).map((m) => h('option', { value: m }))));
-  }
-  return lists;
-}
-
-function renderEditor() {
-  const d = E.draft;
-  const leader = d.roles.find((r) => r.superior === d.owner);
-  const roleCards = d.roles.map((r) => {
-    let before = r.name;
-    return h('div', { class: `card role-card h-${r.harness}` },
-      h('div', { class: 'title' },
-        h('span', { class: 'harness' }, r.harness),
-        h('b', {}, r.name || '(unnamed)'),
-        r === leader ? h('span', { class: 'tag' }, 'leader') : h('button', { class: 'small', onclick: () => makeLeader(r) }, 'Make leader'),
-        h('button', { class: 'small danger', onclick: () => removeRole(r) }, 'Remove')),
-      h('div', { class: 'grid' },
-        h('label', {}, 'Name', h('input', {
-          value: r.name,
-          oninput: (e) => { r.name = e.target.value; touch(); },
-          onchange: () => { renameRefs(before, r.name.trim()); before = r.name.trim(); renderEditor(); },
-        })),
-        h('label', {}, 'Reports to', h('select', { onchange: (e) => { r.superior = e.target.value; touch(); renderEditor(); } },
-          h('option', { value: d.owner, selected: r.superior === d.owner }, `${d.owner} (you)`),
-          d.roles.filter((x) => x !== r).map((x) => h('option', { value: x.name, selected: r.superior === x.name }, x.name)),
-          !d.roles.some((x) => x.name === r.superior) && r.superior !== d.owner
-            ? h('option', { value: '', selected: true }, 'choose...') : null)),
-        h('label', {}, 'Harness', harnessSelect(r)),
-        h('label', {}, 'Model', bound(r, 'model', { list: `models-${r.harness}`, placeholder: 'harness default' })),
-        h('label', {}, 'Effort', bound(r, 'effort', { list: `efforts-${r.harness}`, placeholder: 'default' })),
-        h('label', { class: 'wide' }, 'Files it may write (comma separated, * matches anything)',
-          bound(r, 'write_scope', { class: 'mono', placeholder: 'e.g. src/*, tests/*   (empty: edits nothing)' })),
-        h('label', { class: 'wide' }, 'Duties', h('textarea', {
-          rows: 2, value: r.duties, oninput: (e) => { r.duties = e.target.value; touch(); },
-        }))));
-  });
-  const tierCards = d.tiers.map((t) => h('div', { class: `card role-card h-${t.harness}` },
-    h('div', { class: 'title' },
-      h('span', { class: 'harness' }, t.harness), h('b', {}, t.name || '(unnamed)'),
-      h('button', { class: 'small danger', onclick: () => { d.tiers.splice(d.tiers.indexOf(t), 1); touch(); renderEditor(); } }, 'Remove')),
-    h('div', { class: 'grid' },
-      h('label', {}, 'Tier name', h('input', { value: t.name, oninput: (e) => { t.name = e.target.value; touch(); }, onchange: renderEditor })),
-      h('label', {}, 'Harness', harnessSelect(t)),
-      h('label', {}, 'Model', bound(t, 'model', { list: `models-${t.harness}`, placeholder: 'harness default' })),
-      h('label', {}, 'Effort', bound(t, 'effort', { list: `efforts-${t.harness}`, placeholder: 'default' })),
-      h('label', {}, 'At once (max)', bound(t, 'max_active', { type: 'number', min: 1 })),
-      h('label', { class: 'wide' }, 'Use it for (the superior reads this to choose a tier)', bound(t, 'use_for')))));
-
-  $('#editor').replaceChildren(
-    ...datalists(),
-    h('div', { class: 'card' },
-      h('h2', {}, 'Team'),
-      h('p', {}, `Saved to ${S.state?.team_file || 'team.yaml'}. Paths are relative to that file.`),
-      h('div', { class: 'grid' },
-        h('label', {}, 'Your name (the owner)', h('input', {
-          value: d.owner,
-          oninput: (e) => { const old = d.owner; d.owner = e.target.value; renameRefs(old, d.owner); touch(); },
-          onchange: renderEditor,
-        })),
-        h('label', { class: 'wide' }, 'Project folder the agents work in', bound(d, 'project_root', { class: 'mono' })))),
-    h('div', { class: 'section-head' },
-      h('h2', {}, `Roles (${d.roles.length})`),
-      h('button', { onclick: addRole }, '+ Add role')),
-    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
-      'Exactly one role reports to you: that is your leader. Use "Make leader" to switch. '
-      + 'Put strong models high in the tree and cheaper ones at the leaves.'),
-    ...roleCards,
-    h('div', { class: 'section-head' },
-      h('h2', {}, `Consultant tiers (${d.tiers.length})`),
-      h('button', { onclick: addTier }, '+ Add tier')),
-    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
-      'When a subordinate asks for help, its superior can summon one of these as a temporary helper.'),
-    ...tierCards);
-  renderEditorSide();
-}
-
-function renderEditorSide() {
-  const d = E.draft;
-  const errs = validate(d);
-  $('#errors').replaceChildren(...errs.map((e) => h('li', {}, e)));
-  $('#save').disabled = errs.length > 0 || !E.dirty;
-  $('#save').textContent = E.dirty ? 'Save team.yaml' : 'Saved';
-  const sub = (name, depth) => {
-    if (depth > 30) return null; // a cycle; the error list already says so
-    const kids = d.roles.filter((r) => r.superior === name);
-    return kids.length ? h('ul', {}, kids.map((r) => h('li', {},
-      h('div', { class: `node h-${r.harness}` },
-        h('div', { class: 'name' }, h('span', { class: 'nm' }, r.name || '?'), h('span', { class: 'harness' }, r.harness)),
-        h('div', { class: 'model' }, modelLine(r))),
-      sub(r.name, depth + 1)))) : null;
-  };
-  $('#preview').replaceChildren(h('li', {},
-    h('div', { class: 'node owner' }, h('div', { class: 'name', style: { justifyContent: 'center' } }, h('span', { class: 'nm' }, d.owner)),
-      h('div', { class: 'model' }, 'owner (you)')),
-    sub(d.owner, 0)));
-}
-
-function renameRefs(from, to) {
-  if (!from || from === to) return;
-  for (const r of E.draft.roles) if (r.superior === from) r.superior = to;
-}
-
-function makeLeader(r) {
-  const d = E.draft;
-  for (const other of d.roles) if (other !== r && other.superior === d.owner) other.superior = r.name;
-  r.superior = d.owner;
-  touch();
-  renderEditor();
-}
-
-function removeRole(r) {
-  const d = E.draft;
-  for (const other of d.roles) if (other.superior === r.name) other.superior = r.superior;
-  d.roles.splice(d.roles.indexOf(r), 1);
-  touch();
-  renderEditor();
-}
-
-function addRole() {
-  const d = E.draft;
-  let n = d.roles.length + 1;
-  while (d.roles.some((r) => r.name === `role-${n}`)) n += 1;
-  const leader = d.roles.find((r) => r.superior === d.owner);
-  d.roles.push({ name: `role-${n}`, superior: leader ? leader.name : d.owner, harness: 'codex',
-    model: '', effort: '', duties: '', write_scope: '' });
-  touch();
-  renderEditor();
-  $('#editor').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function addTier() {
-  const d = E.draft;
-  let n = d.tiers.length + 1;
-  while (d.tiers.some((t) => t.name === `tier-${n}`)) n += 1;
-  d.tiers.push({ name: `tier-${n}`, harness: 'claude', model: '', effort: '', max_active: 1, use_for: '' });
-  touch();
-  renderEditor();
-}
-
-$('#save').addEventListener('click', async () => {
-  try {
-    const r = await api('/api/team', { config: fromDraft(E.draft) });
-    E.dirty = false;
-    renderEditorSide();
-    toast(`Saved. The old version is in ${r.backup.split(/[\\/]/).pop()}.`);
-    refresh();
-  } catch (e) {
-    toast(e.message, true);
-  }
-});
-$('#revert').addEventListener('click', () => {
-  if (!E.dirty || confirm('Throw away your unsaved changes?')) loadEditor();
-});
-window.addEventListener('beforeunload', (e) => { if (E.dirty) e.preventDefault(); });
 
 // ---------- start ----------
 

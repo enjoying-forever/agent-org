@@ -1,10 +1,11 @@
-"""The owner's web UI: org chart, messages, file locks, consultants and the team editor.
+"""The owner's web UI: team, tasks, messages, files, consultants, the team editor and setup.
 
-    python -m agent_org.ui --team path/to/team.yaml [--port 8765] [--no-browser]
+    python -m agent_org.ui [--team path/to/team.yaml] [--port 8765] [--no-browser]
 
-It serves on 127.0.0.1 only and opens your browser. The page is opened with a
-token in its URL and every API call must carry it, so other programs on this
-machine (including the agents' shells) can't act as you through it.
+Without a team it opens on a welcome page, where you open or create one. It serves on
+127.0.0.1 only and opens your browser. The page is opened with a token in its URL and
+every API call must carry it, so other programs on this machine (including the agents'
+shells) can't act as you through it.
 """
 
 from __future__ import annotations
@@ -26,15 +27,16 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import launch
-from .hub import Hub, HubError
-from .store import Lock, Message
+from . import doctor, launch, sessions, templates
+from .hub import LAW, Hub, HubError
+from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
 
 STATIC = Path(__file__).resolve().parent / "ui_static"
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                  ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 MAX_BODY = 1_000_000
+NO_TEAM = "no_team"  # error the page answers by showing the welcome screen
 
 # Effort levels each harness accepts (suggestions in the editor; any text is allowed).
 EFFORTS = {
@@ -95,26 +97,155 @@ def _parse_agy(out: str) -> list[str]:
 
 def _message(m: Message) -> dict[str, Any]:
     return {"id": m.id, "sent_at": m.sent_at, "sender": m.sender, "recipient": m.recipient,
-            "kind": m.kind, "text": m.text, "reply_to": m.reply_to, "read": m.read_at is not None}
+            "kind": m.kind, "text": m.text, "reply_to": m.reply_to, "read": m.read_at is not None,
+            "urgent": m.urgent}
 
 
 def _lock(lock: Lock) -> dict[str, Any]:
     return {"path": lock.path, "owner": lock.owner, "claimed_at": lock.claimed_at}
 
 
+def _task(t: Task) -> dict[str, Any]:
+    return {"id": t.id, "assigner": t.assigner, "assignee": t.assignee, "title": t.title,
+            "details": t.details, "state": t.state, "result": t.result, "parent_id": t.parent_id,
+            "created_at": t.created_at, "updated_at": t.updated_at}
+
+
+def recent_file() -> Path:
+    return Path.home() / ".agent-org" / "recent.json"
+
+
+def load_recent() -> list[str]:
+    try:
+        data = json.loads(recent_file().read_text(encoding="utf-8"))
+        return [p for p in data if isinstance(p, str)]
+    except (OSError, ValueError):
+        return []
+
+
+def remember_recent(team_file: Path) -> None:
+    paths = [str(team_file)] + [p for p in load_recent() if Path(p) != team_file]
+    recent_file().parent.mkdir(parents=True, exist_ok=True)
+    recent_file().write_text(json.dumps(paths[:10], indent=2), encoding="utf-8")
+
+
 class App:
     """Everything the owner can do from the browser, as plain methods returning JSON-able data."""
 
-    def __init__(self, team_file: Path, load_models: bool = True):
-        self.team_file = team_file
-        self.hub = Hub.open(team_file, opener=launch.tab_opener(team_file))
+    def __init__(self, team_file: Path | None = None, load_models: bool = True):
+        self.team_file: Path | None = None
+        self._hub: Hub | None = None
         self.catalog = ModelCatalog(load_models)
+        self._checks: tuple[float, list[dict[str, object]]] | None = None
+        self._resumable: dict[str, tuple[str | None, bool, float]] = {}
+        if team_file is not None:
+            self._open(team_file)
+
+    # opening and creating teams
+
+    @property
+    def hub(self) -> Hub:
+        if self._hub is None:
+            raise ApiError(NO_TEAM, HTTPStatus.PRECONDITION_FAILED)
+        return self._hub
 
     @property
     def me(self):
         return self.hub.session(self.hub.base_team.owner)
 
+    def _open(self, team_file: Path) -> None:
+        team_file = team_file.resolve()
+        hub = Hub.open(team_file, opener=launch.tab_opener(team_file))  # raises TeamError
+        if self._hub is not None:
+            self._hub.close()
+        self._hub, self.team_file = hub, team_file
+        self._resumable.clear()
+        remember_recent(team_file)
+
+    def close(self) -> None:
+        if self._hub is not None:
+            self._hub.close()
+        self._hub = self.team_file = None
+
+    def home(self) -> dict[str, Any]:
+        recent = [{"path": p, "name": Path(p).parent.name, "exists": Path(p).is_file()} for p in load_recent()]
+        return {"open": self._hub is not None, "team_file": str(self.team_file or ""),
+                "recent": recent, "templates": templates.catalogue()}
+
+    def open_team(self, body: dict[str, Any]) -> dict[str, Any]:
+        path = Path(_str(body, "path").strip().strip('"'))
+        if path.is_dir():
+            path = path / "team.yaml"
+        if not path.is_file():
+            raise ApiError(f"There is no team.yaml at {path}. Create a team there instead.")
+        try:
+            self._open(path)
+        except TeamError as e:
+            raise ApiError(f"That team.yaml has a problem: {e}") from None
+        return {"team_file": str(self.team_file)}
+
+    def create_team(self, body: dict[str, Any]) -> dict[str, Any]:
+        folder = Path(_str(body, "folder").strip().strip('"'))
+        template = _str(body, "template")
+        if template not in templates.TEMPLATES:
+            raise ApiError(f"Unknown team template '{template}'.")
+        if not folder.is_absolute():
+            raise ApiError("Choose a full folder path, for example E:\\projects\\my-app.")
+        team_file = folder / "team.yaml"
+        if team_file.exists() and not body.get("overwrite"):
+            raise ApiError(f"{team_file} already exists. Open it instead, or choose another folder.")
+        folder.mkdir(parents=True, exist_ok=True)
+        team_file.write_text(yaml.safe_dump(templates.team_config(template), sort_keys=False,
+                                            allow_unicode=True, width=100), encoding="utf-8")
+        self._open(team_file)
+        return {"team_file": str(self.team_file)}
+
+    def close_team(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.close()
+        return {"open": False}
+
+    def pick_folder(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Show Windows' own folder picker on this computer and return what was chosen."""
+        try:
+            import tkinter
+            from tkinter import filedialog
+        except ImportError:
+            raise ApiError("The folder picker is not available here; type the folder path instead.") from None
+        root = tkinter.Tk()
+        try:
+            root.withdraw()
+            root.attributes("-topmost", True)
+            chosen = filedialog.askdirectory(parent=root, title=body.get("title") or "Choose a folder",
+                                             mustexist=False)
+        finally:
+            root.destroy()
+        return {"path": str(Path(chosen)) if chosen else ""}
+
+    # setup checks
+
+    def checks(self, fresh: bool = False) -> dict[str, Any]:
+        used = {r.harness for r in self._hub.team.roles.values()} if self._hub else None
+        if fresh or self._checks is None or time.time() - self._checks[0] > 60:
+            self._checks = (time.time(), [c.to_dict() for c in doctor.run_checks(used)])
+        return {"checks": self._checks[1]}
+
+    def install_grok_hooks(self, body: dict[str, Any]) -> dict[str, Any]:
+        path = launch.install_grok_hooks()
+        self._checks = None
+        return {"installed": str(path)}
+
     # reading
+
+    def _resumes(self, role: str, harness: str) -> bool:
+        """Whether the role's next start resumes a conversation (cached: it looks at files)."""
+        record = self.hub.store.get_session(role)
+        sid = record.session_id if record and record.harness == harness else None
+        cached = self._resumable.get(role)
+        if cached and cached[0] == sid and time.time() - cached[2] < 30:
+            return cached[1]
+        found = sessions.exists(harness, sid)
+        self._resumable[role] = (sid, found, time.time())
+        return found
 
     def state(self) -> dict[str, Any]:
         team = self.hub.team
@@ -123,6 +254,7 @@ class App:
         unread = store.unread_counts()
         locks = store.locks()
         online = store.online()
+        open_tasks = store.tasks(open_only=True)
         roles = []
         for name in [team.leader, *team.subtree_of(team.leader)]:
             r = team.roles[name]
@@ -136,7 +268,11 @@ class App:
                 "unread": unread.get(name, 0),
                 "locks": [lock.path for lock in locks if lock.owner == name],
                 "online": online.get(name, 0),
+                "open_tasks": sum(1 for t in open_tasks if t.assignee == name),
+                "notes": store.get_notes(name),
+                "resumes": self._resumes(name, r.harness),
             })
+        recent_tasks = store.tasks(limit=60)
         return {
             "owner": team.owner,
             "leader": team.leader,
@@ -148,6 +284,7 @@ class App:
                        "active": sum(1 for r in roles if r["tier"] == t.name)}
                       for t in team.tiers.values()],
             "locks": [_lock(x) for x in locks],
+            "tasks": [_task(t) for t in recent_tasks],
             "owner_unread": unread.get(team.owner, 0),
             "launchable": list(launch.BUILDERS),
         }
@@ -155,7 +292,11 @@ class App:
     def messages(self, after: int) -> dict[str, Any]:
         return {"messages": [_message(m) for m in self.hub.store.messages_after(after)]}
 
+    def law(self) -> dict[str, Any]:
+        return {"law": [{"title": t, "rule": r} for t, r in LAW]}
+
     def team_config(self) -> dict[str, Any]:
+        self.hub  # noqa: B018 - needs an open team
         data = yaml.safe_load(self.team_file.read_text(encoding="utf-8")) or {}
         return {"config": data, "harnesses": list(HARNESSES), "models": self.catalog.models,
                 "efforts": EFFORTS}
@@ -163,7 +304,16 @@ class App:
     # acting as the owner
 
     def send(self, body: dict[str, Any]) -> dict[str, Any]:
-        return _message(self.me.send(_str(body, "to"), _str(body, "text"), body.get("reply_to")))
+        to, text, urgent = _str(body, "to"), _str(body, "text"), bool(body.get("urgent"))
+        if to == "@all":
+            return {"sent": [_message(m) for m in self.me.broadcast("@all", text, urgent)]}
+        return {"sent": [_message(self.me.send(to, text, body.get("reply_to"), urgent))]}
+
+    def assign(self, body: dict[str, Any]) -> dict[str, Any]:
+        return _task(self.me.assign_task(_str(body, "to"), _str(body, "title"), body.get("details") or ""))
+
+    def cancel_task(self, body: dict[str, Any]) -> dict[str, Any]:
+        return _task(self.me.cancel_task(int(body["task_id"]), body.get("reason") or ""))
 
     def summon(self, body: dict[str, Any]) -> dict[str, Any]:
         role = self.me.summon_consultant(int(body["help_id"]), _str(body, "tier"), body.get("brief") or "")
@@ -182,7 +332,8 @@ class App:
     def launch(self, body: dict[str, Any]) -> dict[str, Any]:
         """Open terminal tabs: the given roles, or every role in team.yaml.
 
-        Roles that are already running are skipped unless `force` is set.
+        Each role resumes its last conversation unless `fresh`; roles that are already
+        running are skipped unless `force`.
         """
         team = self.hub.team
         names = body.get("roles") or list(self.hub.base_team.roles)
@@ -191,6 +342,7 @@ class App:
                 raise ApiError(f"'{name}' is not a role")
         tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
                                        force=bool(body.get("force")), fresh=bool(body.get("fresh")))
+        self._resumable.clear()
 
         def open_all() -> None:
             for tab in tabs:
@@ -202,6 +354,15 @@ class App:
 
         threading.Thread(target=open_all, daemon=True).start()
         return {"opening": [t[t.index("--title") + 1] for t in tabs], "skipped": skipped}
+
+    def stop(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Stop one role's agent, or every running agent (role '@all')."""
+        role = _str(body, "role")
+        team = self.hub.team
+        names = [n for n in team.roles if self.hub.store.online().get(n)] if role == "@all" else [role]
+        if role != "@all" and role not in team.roles:
+            raise ApiError(f"'{role}' is not a role")
+        return {"stopped": {n: launch.stop_role(self.hub, n) for n in names}}
 
     def save_team(self, body: dict[str, Any]) -> dict[str, Any]:
         config = body.get("config")
@@ -226,12 +387,22 @@ def _str(body: dict[str, Any], key: str) -> str:
     return value
 
 
-GET_ROUTES = {"/api/state": lambda app, q: app.state(),
-              "/api/messages": lambda app, q: app.messages(int(q.get("after", ["0"])[0])),
-              "/api/team": lambda app, q: app.team_config()}
-POST_ROUTES = {"/api/send": App.send, "/api/summon": App.summon, "/api/dismiss": App.dismiss,
-               "/api/release": App.release, "/api/inbox/read": App.read_inbox,
-               "/api/launch": App.launch, "/api/team": App.save_team}
+GET_ROUTES = {
+    "/api/home": lambda app, q: app.home(),
+    "/api/state": lambda app, q: app.state(),
+    "/api/messages": lambda app, q: app.messages(int(q.get("after", ["0"])[0])),
+    "/api/team": lambda app, q: app.team_config(),
+    "/api/law": lambda app, q: app.law(),
+    "/api/checks": lambda app, q: app.checks(fresh=q.get("fresh", ["0"])[0] == "1"),
+}
+POST_ROUTES = {
+    "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
+    "/api/pick-folder": App.pick_folder, "/api/install-grok-hooks": App.install_grok_hooks,
+    "/api/send": App.send, "/api/task": App.assign, "/api/cancel-task": App.cancel_task,
+    "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
+    "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,
+    "/api/team": App.save_team,
+}
 
 
 def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPRequestHandler]:
@@ -271,6 +442,8 @@ def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPR
                 self._json(e.status, {"error": str(e)})
             except HubError as e:
                 self._json(HTTPStatus.CONFLICT, {"error": str(e)})
+            except TeamError as e:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": f"team problem: {e}"})
             except (KeyError, ValueError, TypeError) as e:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": f"bad request: {e}"})
 
@@ -303,7 +476,7 @@ def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPR
     return Handler
 
 
-def serve(team_file: Path, port: int, token: str | None = None,
+def serve(team_file: Path | None, port: int, token: str | None = None,
           load_models: bool = True) -> tuple[ThreadingHTTPServer, App, str]:
     """Build the server (not started). Port 0 picks a free port."""
     app = App(team_file, load_models)
@@ -316,20 +489,26 @@ def serve(team_file: Path, port: int, token: str | None = None,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="The agent-org web UI")
-    parser.add_argument("--team", default="team.yaml")
+    parser.add_argument("--team", help="team.yaml to open (default: the welcome page)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)
+    team_file = Path(args.team).resolve() if args.team else None
     try:
-        server, app, token = serve(Path(args.team).resolve(), args.port)
+        server, app, token = serve(team_file, args.port)
     except TeamError as e:
         print(f"team error: {e}", file=sys.stderr)
         return 2
-    except OSError as e:
-        print(f"cannot listen on port {args.port}: {e}. Try --port 0 for any free port.", file=sys.stderr)
-        return 1
+    except OSError:
+        try:  # the usual port is taken (another agent-org window?): use any free one
+            server, app, token = serve(team_file, 0)
+        except OSError as e:
+            print(f"cannot start the UI: {e}", file=sys.stderr)
+            return 1
     url = f"http://127.0.0.1:{server.server_address[1]}/?token={token}"
-    print(f"agent-org UI for {app.team_file}\n  {url}\nKeep this window open; press Ctrl+C to stop.")
+    print("agent-org is running." + (f" Team: {app.team_file}" if app.team_file else ""))
+    print(f"  {url}")
+    print("Keep this window open while you use agent-org; close it to stop the page (not the agents).")
     if not args.no_browser:
         webbrowser.open(url)
     try:
@@ -338,7 +517,7 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         server.server_close()
-        app.hub.close()
+        app.close()
     return 0
 
 

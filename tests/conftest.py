@@ -31,6 +31,15 @@ TEAM = {
 }
 
 
+@pytest.fixture(autouse=True)
+def private_recent_list(tmp_path_factory, monkeypatch):
+    """Never touch the real ~/.agent-org/recent.json from tests."""
+    from agent_org import ui
+
+    path = tmp_path_factory.mktemp("home") / "recent.json"
+    monkeypatch.setattr(ui, "recent_file", lambda: path)
+
+
 @pytest.fixture
 def team(tmp_path: Path) -> Team:
     (tmp_path / "project").mkdir()
