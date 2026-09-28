@@ -24,7 +24,7 @@ def git(root: Path, *args: str, check: bool = False, env_extra: dict[str, str] |
         raise FileNotFoundError("git is not installed")
     env = {**os.environ, **(env_extra or {})}
     return subprocess.run([exe, "-C", str(root), *args], capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", timeout=timeout, check=check, env=env)
+                          errors="replace", timeout=timeout, check=check, env=env, stdin=subprocess.DEVNULL)
 
 
 def is_own_repo(root: Path) -> bool:

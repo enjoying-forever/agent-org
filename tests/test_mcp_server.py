@@ -259,6 +259,38 @@ def test_runs_over_real_stdio(tmp_path):
     store.close()
 
 
+def test_checks_run_inside_a_real_server_while_it_reads_its_pipe(tmp_path):
+    """A check started by the server must not inherit the harness's stdin pipe: on Windows
+    the child then hangs before it starts, and finish_task never answers."""
+    (tmp_path / "project").mkdir()
+    team_file = tmp_path / "team.yaml"
+    check = f'"{sys.executable}" -c "print(\'OK\')"'
+    team_file.write_text(yaml.safe_dump({**TEAM, "checks": [{"name": "quick", "run": check}]}), encoding="utf-8")
+    from agent_org.hub import Hub
+    hub = Hub.open(team_file)
+    task = hub.session("tech-lead").assign_task("worker-a", "Tiny fix")
+    hub.session("worker-a").read_inbox()
+    hub.close()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "agent_org.mcp_server", "--team", str(team_file), "--role", "worker-a"],
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    replies: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()
+    try:
+        for r in ({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+                  {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                      "name": "finish_task", "arguments": {"task_id": task.id, "result": "fixed"}}}):
+            proc.stdin.write((json.dumps(r) + "\n").encode())
+        proc.stdin.flush()  # stdin stays open: the server's main thread is blocked reading it
+        replies.get(timeout=20)
+        answer = replies.get(timeout=30)
+        assert answer["result"]["content"][0]["text"].startswith(f"Task #{task.id} is done"), answer
+    finally:
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"] if os.name == "nt" else ["kill", str(proc.pid)],
+                       capture_output=True)
+
+
 def test_role_can_come_from_the_environment(tmp_path):
     (tmp_path / "project").mkdir()
     team_file = tmp_path / "team.yaml"

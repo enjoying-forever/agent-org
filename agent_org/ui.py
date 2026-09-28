@@ -76,7 +76,8 @@ class ModelCatalog:
                 continue
             try:
                 out = subprocess.run([exe, *command[1:]], capture_output=True, text=True,
-                                     encoding="utf-8", errors="replace", timeout=30).stdout
+                                     encoding="utf-8", errors="replace", timeout=30,
+                                     stdin=subprocess.DEVNULL).stdout
                 self.models[harness] = parse(out)
             except (OSError, subprocess.SubprocessError, ValueError):
                 pass
@@ -282,7 +283,8 @@ class App:
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:
             raise ApiError("PowerShell is needed to create the shortcut.")
-        r = subprocess.run([shell, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([shell, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
         if r.returncode != 0:
             raise ApiError(f"Could not create the shortcut: {r.stderr.strip()[:300]}")
         return {"shortcut": r.stdout.strip()}

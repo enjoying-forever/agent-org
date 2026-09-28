@@ -25,7 +25,7 @@ class Check:
 def run(command: list[str], timeout: float = 40) -> tuple[int, str]:
     try:
         r = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout)
+                           errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.SubprocessError) as e:
         return -1, str(e)

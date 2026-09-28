@@ -376,7 +376,7 @@ def open_tab(tab: list[str]) -> None:
     wt = shutil.which("wt")
     if wt is None or shutil.which("pwsh") is None:
         raise HubError("needs Windows Terminal (wt) and PowerShell 7 (pwsh) on PATH")
-    subprocess.run([wt, *tab[1:]], check=True)
+    subprocess.run([wt, *tab[1:]], check=True, stdin=subprocess.DEVNULL)
 
 
 HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}
@@ -386,7 +386,7 @@ def program_name(pid: int) -> str:
     """The executable name of a running process ('' if there is none)."""
     try:
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                             capture_output=True, text=True, timeout=15).stdout
+                             capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
     first = out.strip().splitlines()[0] if out.strip() else ""
@@ -402,7 +402,8 @@ def stop_role(hub: Hub, role: str) -> int:
     stopped = 0
     for pid, ppid in hub.store.sessions_of(role):
         if ppid and program_name(ppid) in HARNESS_PROGRAMS:
-            subprocess.run(["taskkill", "/PID", str(ppid), "/T", "/F"], capture_output=True, timeout=30)
+            subprocess.run(["taskkill", "/PID", str(ppid), "/T", "/F"], capture_output=True, timeout=30,
+                           stdin=subprocess.DEVNULL)
             stopped += 1
         hub.store.check_out(pid)
     return stopped
