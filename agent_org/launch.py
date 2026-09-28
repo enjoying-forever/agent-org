@@ -81,7 +81,12 @@ def resumable_session(hub: Hub, role: str) -> str | None:
     spec = hub.team.roles[role]
     record = hub.store.get_session(role)
     if record is not None and record.harness == spec.harness and sessions.exists(spec.harness, record.session_id):
-        return record.session_id
+        own = sessions.main_session(spec.harness, record.session_id)
+        if own == record.session_id:
+            return own
+        if own and sessions.exists(spec.harness, own):  # the record named a helper conversation: fix it
+            hub.store.record_session_id(role, spec.harness, own)
+            return own
     found = sessions.find(spec.harness, hub.base_team.project_root, role)
     if found and sessions.exists(spec.harness, found):
         hub.store.record_session_id(role, spec.harness, found)

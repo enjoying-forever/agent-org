@@ -39,6 +39,43 @@ def exists(harness: str, session_id: str | None) -> bool:
     return False
 
 
+def codex_meta(session_id: str) -> dict | None:
+    """The first record (session_meta) of a Codex conversation, or None if it is not on disk yet."""
+    for path in (home() / ".codex" / "sessions").glob(f"*/*/*/rollout-*-{session_id}.jsonl"):
+        try:
+            with path.open(encoding="utf-8", errors="replace") as f:
+                meta = json.loads(f.readline()).get("payload")
+        except (OSError, ValueError):
+            return None
+        return meta if isinstance(meta, dict) else None
+    return None
+
+
+def is_sub_session(meta: dict) -> bool:
+    """A conversation Codex runs on the agent's behalf (its auto-review, a sub-agent), not the agent itself."""
+    source = meta.get("source")
+    return bool(meta.get("parent_thread_id")) or (isinstance(source, dict) and "subagent" in source)
+
+
+def main_session(harness: str, session_id: str) -> str | None:
+    """The agent's own conversation for `session_id`.
+
+    Codex runs helpers such as its auto-reviewer ("guardian") as separate conversations in
+    the same process; they fire the same hooks but have no tools. For one of those this is
+    the conversation it belongs to (None if that is unknown). A conversation not on disk yet
+    is taken as it is; resuming checks it again.
+    """
+    if harness != "codex":
+        return session_id
+    meta = codex_meta(session_id)
+    if meta is None:
+        return session_id
+    if is_sub_session(meta):
+        parent = meta.get("parent_thread_id") or meta.get("session_id")
+        return str(parent) if parent and parent != session_id else None
+    return session_id
+
+
 def markers(role: str) -> tuple[str, ...]:
     """Text only a conversation started by agent-org for `role` contains: its kickoff prompts."""
     return (f"You are the '{role}' agent in a team", f"you are back as '{role}'")
@@ -93,5 +130,7 @@ def _candidates(harness: str, project_root: Path) -> Iterator[tuple[Path, str]]:
                     meta = json.loads(f.readline()).get("payload", {})
             except (OSError, ValueError):
                 continue
+            if is_sub_session(meta):
+                continue  # an auto-review quotes the agent's history, kickoff included
             if str(meta.get("cwd", "")).lower() == root.lower() and meta.get("id"):
                 yield path, str(meta["id"])

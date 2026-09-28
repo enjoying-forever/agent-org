@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import usage
+from . import sessions, usage
 from .hub import Hub, HubError, RoleSession
 from .store import Message
 
@@ -238,7 +238,11 @@ def remember_session(me: RoleSession, payload: dict[str, Any]) -> None:
     session_id = field(payload, "session_id") or payload.get("conversationId")
     role = me.hub.team.roles.get(me.name)
     if isinstance(session_id, str) and session_id and role is not None:
-        me.store.record_session_id(me.name, role.harness, session_id)
+        # Codex's auto-reviewer runs as its own conversation and fires these hooks too: record
+        # the agent's conversation, never the helper's (resuming that gives an agent with no tools).
+        own = sessions.main_session(role.harness, session_id)
+        if own:
+            me.store.record_session_id(me.name, role.harness, own)
 
 
 def on_session(me: RoleSession, payload: dict[str, Any]):

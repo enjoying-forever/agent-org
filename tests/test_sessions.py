@@ -202,3 +202,36 @@ def test_grok_conversations_are_found_in_the_folder_they_ran_in(team_file, fake_
     chat.parent.mkdir(parents=True)
     chat.write_text(json.dumps({"content": launch.kickoff("researcher")}), encoding="utf-8")
     assert sessions.find("grok", project, "researcher") == sid
+
+
+def write_codex(home, sid, meta):
+    folder = home / ".codex" / "sessions" / "2026" / "09" / "28"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"rollout-2026-09-28T17-28-05-{sid}.jsonl").write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": sid, **meta}}) + "\n", encoding="utf-8")
+
+
+MAIN = "01a0e757-c7e2-73f3-9cfc-795201ec2236"
+REVIEW = "01a0e757-c923-7012-b57c-1bdbf15c3690"
+
+
+def test_codex_auto_review_is_never_taken_for_the_agent(team_file, fake_home):
+    """Codex runs its auto-reviewer as a separate conversation that fires the same hooks.
+    Resuming that one gave the user a worker without any org tools."""
+    project = str(team_file.parent / "project")
+    write_codex(fake_home, MAIN, {"cwd": project, "source": "cli", "thread_source": "user",
+                                  "note": "You are the 'worker-a' agent in a team"})
+    write_codex(fake_home, REVIEW, {"cwd": project, "source": {"subagent": {"other": "guardian"}},
+                                    "thread_source": "guardian_review", "parent_thread_id": MAIN,
+                                    "note": "history quoted: You are the 'worker-a' agent in a team"})
+    hub = Hub.open(team_file)
+    try:
+        hooks.remember_session(hub.session("worker-a"), {"session_id": REVIEW})
+        assert hub.store.get_session("worker-a").session_id == MAIN
+        hub.store.record_session_id("worker-a", "codex", REVIEW)  # a record written before this fix
+        assert launch.resumable_session(hub, "worker-a") == MAIN
+        assert hub.store.get_session("worker-a").session_id == MAIN  # and repaired
+        hub.store.record_session_id("worker-a", "codex", "0000-not-on-disk")
+        assert launch.resumable_session(hub, "worker-a") == MAIN  # searching skips the reviewer too
+    finally:
+        hub.close()
