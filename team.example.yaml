@@ -30,7 +30,7 @@ roles:
   tech-lead:
     superior: leader
     harness: codex
-    model: gpt-6-astra
+    model: gpt-6-luna
     effort: high
     duties: >
       Design the modules and interfaces, hand implementation tasks to your
@@ -40,7 +40,7 @@ roles:
   worker-a:
     superior: tech-lead
     harness: codex
-    model: gpt-6-astra
+    model: gpt-6-luna
     effort: low
     duties: Implement the tasks you are given. Keep changes small.
     write_scope: [src/*, tests/*]
@@ -73,9 +73,9 @@ consultants:
     effort: medium
     max_active: 2
     use_for: everyday problems - unclear errors, API questions, small bugs
-  astra-high:
+  luna-high:
     harness: codex
-    model: gpt-6-astra
+    model: gpt-6-luna
     effort: high
     max_active: 2
     use_for: tricky code - failing tests, subtle bugs, algorithms

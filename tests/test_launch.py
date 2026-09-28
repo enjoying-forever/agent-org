@@ -17,7 +17,7 @@ def team_file(tmp_path):
     (tmp_path / "project").mkdir()
     data = json.loads(json.dumps(TEAM))
     data["roles"]["leader"].update(model="opus", effort="high", duties="Plan it; don't code.")
-    data["roles"]["worker-a"].update(model="gpt-6-astra", effort="low")
+    data["roles"]["worker-a"].update(model="gpt-6-luna", effort="low")
     path = tmp_path / "team.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     return path

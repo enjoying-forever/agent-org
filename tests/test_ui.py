@@ -165,4 +165,4 @@ def test_model_output_parsers():
         "grok-4.7", "grok-4.6"]
     assert ui._parse_agy("Fetching...\ngemini-3.8-flash-high\tGemini\nclaude-opus-4-6\tClaude\n") == [
         "gemini-3.8-flash-high", "claude-opus-4-6"]
-    assert ui._parse_codex('{"models": [{"slug": "gpt-6-astra"}, {"id": "gpt-6-sol"}]}') == ["gpt-6-astra", "gpt-6-sol"]
+    assert ui._parse_codex('{"models": [{"slug": "gpt-6-luna"}, {"id": "gpt-6-sol"}]}') == ["gpt-6-luna", "gpt-6-sol"]

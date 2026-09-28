@@ -117,7 +117,7 @@ def test_role_cards(hub, summoned):
     assert "You can message only worker-a" in card
     lead_card = role_card(hub.session("tech-lead"))
     assert "summon_consultant(help_id, tier, brief)" in lead_card
-    assert "high (codex / gpt-6-astra, high effort, up to 1 at once): tricky bugs and failing tests" in lead_card
+    assert "high (codex / gpt-6-luna, high effort, up to 1 at once): tricky bugs and failing tests" in lead_card
     assert "summon_consultant" not in role_card(hub.session("worker-a"))
 
 

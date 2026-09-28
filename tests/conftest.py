@@ -25,7 +25,7 @@ TEAM = {
     "consultants": {
         "medium": {"harness": "claude", "model": "claude-opus-5-5", "effort": "medium", "max_active": 2,
                    "use_for": "questions a strong model answers quickly"},
-        "high": {"harness": "codex", "model": "gpt-6-astra", "effort": "high",
+        "high": {"harness": "codex", "model": "gpt-6-luna", "effort": "high",
                  "use_for": "tricky bugs and failing tests"},
     },
 }
