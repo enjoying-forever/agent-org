@@ -38,6 +38,9 @@ def private_recent_list(tmp_path_factory, monkeypatch):
 
     path = tmp_path_factory.mktemp("home") / "recent.json"
     monkeypatch.setattr(ui, "recent_file", lambda: path)
+    from agent_org import launch
+    grok = path.parent / ".grok" / "hooks" / "agent-org.json"  # nor the real ~/.grok hooks
+    monkeypatch.setattr(launch, "grok_hooks_file", lambda: grok)
 
 
 @pytest.fixture

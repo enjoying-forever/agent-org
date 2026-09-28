@@ -142,7 +142,7 @@ def test_hooks_record_the_session_they_run_in(hub):
 def test_session_hook_is_registered(team_file):
     assert "SessionStart" in launch.hook_table(None)
     command = launch.hook_table(None)["SessionStart"][0]["hooks"][0]["command"]
-    assert command.endswith('org_hook.py" session')
+    assert command.endswith("org_hook.py session")
     assert json.dumps(launch.hook_table("Edit"))  # serialisable for settings files
 
 

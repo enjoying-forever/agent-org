@@ -73,11 +73,14 @@ def check_grok(harnesses: set[str]) -> list[Check]:
         if "not authenticated" in out.lower():
             checks.append(Check("Grok sign-in", False, "Grok is not signed in", "Run: grok login",
                                 needed=c.needed))
-        hooks = Path.home() / ".grok" / "hooks" / "agent-org.json"
+        from .launch import grok_hooks_state
+        state = grok_hooks_state()
+        detail = {"current": "installed",
+                  "outdated": "installed by an older agent-org: they fail in Grok until updated",
+                  "missing": "not installed: Grok agents only see messages when they check"}[state]
         checks.append(Check(
-            "Grok message delivery", hooks.exists(),
-            "installed" if hooks.exists() else "not installed: Grok agents only see messages when they check",
-            "" if hooks.exists() else "Click 'Install Grok hooks' (they do nothing outside agent-org tabs).",
+            "Grok message delivery", state == "current", detail,
+            "" if state == "current" else "Click 'Install Grok hooks' (they do nothing outside agent-org tabs).",
             needed=c.needed))
     return checks
 

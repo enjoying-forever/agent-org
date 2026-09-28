@@ -125,7 +125,7 @@ def test_claude_gets_the_hooks_through_settings(team_file):
     assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
     assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit"
     stop = hooks["Stop"][0]["hooks"][0]
-    assert stop["command"].endswith('org_hook.py" stop') and stop["timeout"] > launch.STOP_WAIT
+    assert stop["command"].endswith("org_hook.py stop") and stop["timeout"] > launch.STOP_WAIT
     script = (out / "start.ps1").read_text(encoding="utf-8")
     assert f"'--settings' '{out / 'settings.json'}'" in script
 
@@ -144,7 +144,7 @@ def test_codex_gets_the_hooks_through_config_overrides(team_file, tmp_path):
             hooks[key.removeprefix("hooks.")] = tomllib.loads(f"v = {value}")["v"]
     assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
     assert "matcher" not in hooks["PreToolUse"][0]  # pre-edit picks out edits itself
-    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith('org_hook.py" post-tool')
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith("org_hook.py post-tool")
 
 
 def test_running_roles_are_not_started_twice(team_file, capsys):
@@ -161,6 +161,8 @@ def test_running_roles_are_not_started_twice(team_file, capsys):
 
 
 def test_grok_hooks_install_into_the_home_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.undo()  # drop conftest's stand-in to check the real location, under the fake home
     monkeypatch.setattr(launch.Path, "home", classmethod(lambda cls: tmp_path))
     path = launch.install_grok_hooks()
     assert path == tmp_path / ".grok" / "hooks" / "agent-org.json"
@@ -194,7 +196,7 @@ def test_antigravity_gets_a_project_plugin_and_starts_interactively(team_file):
     hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))["agent-org"]
     assert set(hooks) == {"PreToolUse", "PreInvocation", "Stop"}
     stop = hooks["Stop"][0]["command"]
-    assert stop.startswith('""') and stop.endswith('org_hook.py" stop agy"')  # cmd /c strips one pair
+    assert '"' not in stop and stop.endswith("org_hook.py stop agy")  # runs as it is in cmd /c
     script = (base / "worker-b" / "start.ps1").read_text(encoding="utf-8")
     assert "& 'agy' '--prompt-interactive' 'You are the ''worker-b'' agent" in script
 
@@ -215,3 +217,21 @@ def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
     script = (team_file.parent / ".agent-org" / "launch" / "worker-b" / "start.ps1").read_text(encoding="utf-8")
     assert f"'--conversation' '{sid}' '--prompt-interactive' 'agent-org: the team was restarted" in script
     assert tab
+
+
+def test_hook_commands_run_in_powershell_cmd_and_bash():
+    """Grok and Codex run hooks through PowerShell, where a quoted program path is a ParserError."""
+    command = launch.hook_command("stop")
+    assert '"' not in command and "\\" not in command
+    assert command.endswith("org_hook.py stop")
+
+
+def test_outdated_grok_hooks_are_reported_and_refreshed():
+    path = launch.grok_hooks_file()
+    assert launch.grok_hooks_state() == "missing"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"hooks": {"Stop": [{"hooks": [{"command": "\\"python\\" \\"org_hook.py\\" stop"}]}]}}',
+                    encoding="utf-8")  # the quoted form PowerShell cannot parse
+    assert launch.grok_hooks_state() == "outdated"
+    launch.install_grok_hooks()
+    assert launch.grok_hooks_state() == "current"

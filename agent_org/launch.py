@@ -15,6 +15,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import os
 import sys
 import time
 import uuid
@@ -107,8 +108,24 @@ def mcp_server(team_file: Path | None = None, role: str | None = None) -> tuple[
 
 
 def hook_command(event: str) -> str:
-    """The command a harness runs for one of our hooks. Quoted forward-slash paths work in every shell."""
-    return f'"{Path(sys.executable).as_posix()}" "{HOOK_SCRIPT.as_posix()}" {event}'
+    """The command a harness runs for one of our hooks.
+
+    Harnesses hand it to different shells - PowerShell (Grok, Codex), cmd, bash - so it uses
+    the one form all of them run: unquoted forward-slash paths. A quoted program path is a
+    parse error in PowerShell ("ParserError") unless prefixed with '&', which cmd rejects.
+    """
+    return f"{shell_path(Path(sys.executable))} {shell_path(HOOK_SCRIPT)} {event}"
+
+
+def shell_path(path: Path) -> str:
+    """`path` with forward slashes and no quotes; on Windows a path with spaces uses its short name."""
+    text = path.as_posix()
+    if " " in text and os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, len(buf)) and " " not in buf.value:
+            text = Path(buf.value).as_posix()
+    return text if " " not in text else f'"{text}"'  # no short name: quoting is the best left
 
 
 def hook_table(edit_matcher: str | None) -> dict[str, list[dict[str, object]]]:
@@ -133,11 +150,29 @@ def install_grok_hooks() -> Path:
 
     Outside an agent-org tab (no AGENT_ORG_ROLE) every one of them does nothing.
     """
-    path = Path.home() / ".grok" / "hooks" / "agent-org.json"
+    path = grok_hooks_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit")}, indent=2) + "\n",
-                    encoding="utf-8")
+    path.write_text(_grok_hooks_text(), encoding="utf-8")
     return path
+
+
+def grok_hooks_file() -> Path:
+    return Path.home() / ".grok" / "hooks" / "agent-org.json"
+
+
+def _grok_hooks_text() -> str:
+    return json.dumps({"hooks": hook_table("Edit|Write|MultiEdit")}, indent=2) + "\n"
+
+
+def grok_hooks_state() -> str:
+    """'missing', 'outdated' (written by an older agent-org) or 'current'."""
+    path = grok_hooks_file()
+    if not path.exists():
+        return "missing"
+    try:
+        return "current" if path.read_text(encoding="utf-8") == _grok_hooks_text() else "outdated"
+    except OSError:
+        return "outdated"
 
 
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
@@ -202,6 +237,8 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
 def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
                 resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
+    if grok_hooks_state() == "outdated":  # the owner installed them once; keep them working
+        install_grok_hooks()
     # Grok loads MCP servers only from config files, so register one 'org' server in the
     # project's .grok/config.toml ("add" also updates it). The entry names no role: every
     # Grok tab passes its own AGENT_ORG_* variables on to the server it starts.
@@ -233,8 +270,12 @@ def antigravity_plugin(project_root: Path) -> Path:
     folder = project_root / ".agents" / "plugins" / "agent-org"
     folder.mkdir(parents=True, exist_ok=True)
     command, args, env = mcp_server()
-    run = lambda event, timeout: {"type": "command", "command": f'"{hook_command(event)} agy"',  # noqa: E731
-                                  "timeout": timeout}
+    def run(event: str, timeout: int) -> dict[str, object]:
+        command = f"{hook_command(event)} agy"
+        if '"' in command:  # Antigravity runs it through cmd /c, which strips one outer pair of quotes
+            command = f'"{command}"'
+        return {"type": "command", "command": command, "timeout": timeout}
+
     files = {
         "plugin.json": {"name": "agent-org"},
         "mcp_config.json": {"mcpServers": {SERVER_NAME: {"command": command, "args": args, "env": env}}},
