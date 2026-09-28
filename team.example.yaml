@@ -1,0 +1,62 @@
+# Copy this to team.yaml in the project your agents will work on, then edit it.
+#
+# The tree: every role names its `superior`. Exactly one role reports to the
+# owner (you) - that role is the leader. Move a role by changing its superior.
+#
+# Communication rules (enforced by the hub):
+#   - a role can report to / ask help from its DIRECT superior only
+#   - a role can instruct and look at anyone below it (its whole subtree)
+#   - siblings do not talk directly; they go through their shared superior
+#
+# Put strong, expensive models high in the tree (few, decision-heavy messages)
+# and cheaper, faster models at the leaves (bulk work).
+# List models with: `codex debug models`, `grok models`, `agy models`.
+
+owner: you
+project_root: .            # the folder the agents work in, relative to this file
+# database: .agent-org/hub.db
+
+roles:
+  leader:
+    superior: you
+    harness: claude
+    model: opus
+    effort: high
+    duties: >
+      Understand the goal, split it into tasks, assign them down the tree,
+      and give the final review before reporting to the owner.
+    write_scope: [PLAN.md, docs/*]
+
+  tech-lead:
+    superior: leader
+    harness: codex
+    model: gpt-6-astra
+    effort: high
+    duties: >
+      Design the modules and interfaces, hand implementation tasks to your
+      workers, and review their code before reporting up.
+    write_scope: [src/*]
+
+  worker-a:
+    superior: tech-lead
+    harness: codex
+    model: gpt-6-astra
+    effort: low
+    duties: Implement the tasks you are given. Keep changes small.
+    write_scope: [src/*, tests/*]
+
+  worker-b:
+    superior: tech-lead
+    harness: antigravity
+    model: gemini-3.8-flash-medium
+    duties: Write and run tests, and keep the docs in step with the code.
+    write_scope: [tests/*, docs/*]
+
+  researcher:
+    superior: leader
+    harness: grok
+    model: grok-4.7
+    duties: >
+      Research libraries, APIs and prior art on the web, and give second
+      opinions on plans. You do not edit project files.
+    write_scope: []

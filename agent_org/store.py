@@ -1,0 +1,196 @@
+"""SQLite state shared by every agent's hub connection.
+
+Each harness starts its own hub process, so they all meet in one database file.
+WAL mode lets them read concurrently, and writes that must not interleave
+(taking a lock, draining an inbox) run inside BEGIN IMMEDIATE transactions.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS messages (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    sent_at   REAL NOT NULL,
+    sender    TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    text      TEXT NOT NULL,
+    reply_to  INTEGER REFERENCES messages(id),
+    read_at   REAL
+);
+CREATE INDEX IF NOT EXISTS messages_inbox ON messages(recipient, read_at);
+
+CREATE TABLE IF NOT EXISTS status (
+    role       TEXT PRIMARY KEY,
+    state      TEXT NOT NULL,
+    task       TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS locks (
+    key        TEXT PRIMARY KEY,
+    path       TEXT NOT NULL,
+    owner      TEXT NOT NULL,
+    claimed_at REAL NOT NULL
+);
+"""
+
+
+@dataclass(frozen=True)
+class Message:
+    id: int
+    sent_at: float
+    sender: str
+    recipient: str
+    kind: str
+    text: str
+    reply_to: int | None
+    read_at: float | None
+
+
+@dataclass(frozen=True)
+class Status:
+    role: str
+    state: str
+    task: str
+    updated_at: float
+
+
+@dataclass(frozen=True)
+class Lock:
+    path: str
+    owner: str
+    claimed_at: float
+
+
+class Store:
+    def __init__(self, db_path: str | Path):
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(db_path, timeout=30, isolation_level=None, check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.executescript(SCHEMA)
+
+    def close(self) -> None:
+        self._db.close()
+
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            yield self._db
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
+        self._db.execute("COMMIT")
+
+    # messages
+
+    def add_message(
+        self, sender: str, recipient: str, kind: str, text: str, reply_to: int | None = None
+    ) -> Message:
+        cur = self._db.execute(
+            "INSERT INTO messages (sent_at, sender, recipient, kind, text, reply_to)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (time.time(), sender, recipient, kind, text, reply_to),
+        )
+        message = self.get_message(cur.lastrowid)
+        assert message is not None
+        return message
+
+    def get_message(self, message_id: int) -> Message | None:
+        row = self._db.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
+        return _message(row) if row else None
+
+    def take_unread(self, recipient: str) -> list[Message]:
+        """Return the recipient's unread messages and mark them read, atomically."""
+        with self._transaction() as db:
+            rows = db.execute(
+                "SELECT * FROM messages WHERE recipient = ? AND read_at IS NULL ORDER BY id",
+                (recipient,),
+            ).fetchall()
+            if rows:
+                now = time.time()
+                db.executemany(
+                    "UPDATE messages SET read_at = ? WHERE id = ?", [(now, r["id"]) for r in rows]
+                )
+        return [_message(r) for r in rows]
+
+    def unread_count(self, recipient: str) -> int:
+        row = self._db.execute(
+            "SELECT COUNT(*) FROM messages WHERE recipient = ? AND read_at IS NULL", (recipient,)
+        ).fetchone()
+        return row[0]
+
+    def messages_involving(self, role: str, limit: int = 20) -> list[Message]:
+        """The most recent messages sent by or to `role`, oldest first."""
+        rows = self._db.execute(
+            "SELECT * FROM messages WHERE sender = ? OR recipient = ? ORDER BY id DESC LIMIT ?",
+            (role, role, limit),
+        ).fetchall()
+        return [_message(r) for r in reversed(rows)]
+
+    # status
+
+    def set_status(self, role: str, state: str, task: str) -> Status:
+        now = time.time()
+        self._db.execute(
+            "INSERT INTO status (role, state, task, updated_at) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(role) DO UPDATE SET state = excluded.state, task = excluded.task,"
+            " updated_at = excluded.updated_at",
+            (role, state, task, now),
+        )
+        return Status(role, state, task, now)
+
+    def get_status(self, role: str) -> Status | None:
+        row = self._db.execute("SELECT * FROM status WHERE role = ?", (role,)).fetchone()
+        return Status(row["role"], row["state"], row["task"], row["updated_at"]) if row else None
+
+    # locks
+
+    def claim(self, key: str, path: str, owner: str) -> Lock:
+        """Take the lock on `key` for `owner` unless someone holds it. Returns the lock as it now stands."""
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM locks WHERE key = ?", (key,)).fetchone()
+            if row is None:
+                now = time.time()
+                db.execute(
+                    "INSERT INTO locks (key, path, owner, claimed_at) VALUES (?, ?, ?, ?)",
+                    (key, path, owner, now),
+                )
+                return Lock(path, owner, now)
+        return _lock(row)
+
+    def release(self, key: str) -> None:
+        self._db.execute("DELETE FROM locks WHERE key = ?", (key,))
+
+    def lock_for(self, key: str) -> Lock | None:
+        row = self._db.execute("SELECT * FROM locks WHERE key = ?", (key,)).fetchone()
+        return _lock(row) if row else None
+
+    def locks(self, owner: str | None = None) -> list[Lock]:
+        if owner is None:
+            rows = self._db.execute("SELECT * FROM locks ORDER BY path").fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM locks WHERE owner = ? ORDER BY path", (owner,)
+            ).fetchall()
+        return [_lock(r) for r in rows]
+
+
+def _message(row: sqlite3.Row) -> Message:
+    return Message(
+        row["id"], row["sent_at"], row["sender"], row["recipient"],
+        row["kind"], row["text"], row["reply_to"], row["read_at"],
+    )
+
+
+def _lock(row: sqlite3.Row) -> Lock:
+    return Lock(row["path"], row["owner"], row["claimed_at"])
