@@ -53,8 +53,8 @@ class Client:
         assert reply["id"] == msg_id
         return reply
 
-    def tool(self, name, **arguments):
-        result = self.call("tools/call", {"name": name, "arguments": arguments})["result"]
+    def tool(self, tool_name, /, **arguments):
+        result = self.call("tools/call", {"name": tool_name, "arguments": arguments})["result"]
         return result["content"][0]["text"], result["isError"]
 
     def close(self):
@@ -85,13 +85,42 @@ def test_initialize_echoes_protocol_and_gives_the_role_card(client):
     assert "Your superior: tech-lead" in result["instructions"]
 
 
+BASIC_TOOLS = {"my_role", "send_message", "ask_help", "read_inbox", "wait_for_messages",
+               "set_status", "view", "claim_file", "release_file", "list_locks", "hand_over_file"}
+
+
+def tool_names(c):
+    return {t["name"] for t in c.call("tools/list")["result"]["tools"]}
+
+
 def test_tools_are_listed_with_schemas(client):
     tools = client("worker-a").call("tools/list")["result"]["tools"]
-    names = {t["name"] for t in tools}
-    assert names == {"my_role", "send_message", "ask_help", "read_inbox", "wait_for_messages",
-                     "set_status", "view", "claim_file", "release_file", "list_locks"}
     send = next(t for t in tools if t["name"] == "send_message")
     assert send["inputSchema"]["required"] == ["to", "text"]
+
+
+def test_each_role_gets_the_tools_it_can_use(client, hub):
+    # a worker can have a consultant (and dismiss it) but has nobody to summon one for
+    assert tool_names(client("worker-a")) == BASIC_TOOLS | {"dismiss_consultant"}
+    # a manager can summon; the tier list is in the tool's schema
+    lead = client("tech-lead")
+    assert tool_names(lead) == BASIC_TOOLS | {"dismiss_consultant", "summon_consultant"}
+    summon = next(t for t in lead.call("tools/list")["result"]["tools"] if t["name"] == "summon_consultant")
+    assert summon["inputSchema"]["properties"]["tier"]["enum"] == ["medium", "high"]
+    # a consultant only helps
+    request = hub.session("worker-a").ask_help("stuck")
+    hub.session("tech-lead").summon_consultant(request.id, "medium")
+    assert tool_names(client("consultant-1")) == BASIC_TOOLS
+
+
+def test_summon_and_dismiss_through_tools(client, hub, opener):
+    request = hub.session("worker-a").ask_help("the parser hangs on empty input")
+    text, is_error = client("tech-lead").tool("summon_consultant", help_id=request.id, tier="high",
+                                              brief="probably the loop in tokenize()")
+    assert not is_error and text.startswith("Summoned consultant-1 (high, codex) under worker-a")
+    assert opener.opened == ["consultant-1"]
+    text, is_error = client("worker-a").tool("dismiss_consultant", name="consultant-1")
+    assert (text, is_error) == ("Dismissed consultant-1.", False)
 
 
 def test_role_card_lists_the_whole_subtree_for_managers(client):

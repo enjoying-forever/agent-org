@@ -17,53 +17,17 @@ import sys
 import threading
 import traceback
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from .cards import role_card
 from .hub import Hub, HubError, RoleSession
+from .launch import tab_opener
 from .store import Lock, Message
 from .team import TeamError
 
-SERVER_NAME = "org"
 FALLBACK_PROTOCOL = "2025-06-18"
 DEFAULT_WAIT = 1800  # seconds; launchers raise each harness's tool timeout above this
-
-
-def role_card(me: RoleSession) -> str:
-    """Everything an agent needs to know about its place in the team."""
-    team = me.team
-    lines = [f"You are '{me.name}' in an agent team run by {team.owner} (the owner)."]
-    role = team.roles.get(me.name)
-    if role and role.duties:
-        lines.append(f"Your duties: {role.duties}")
-    lines.append(f"Your superior: {me.superior}")
-    subs = team.subordinates_of(me.name)
-    lines.append(f"Your direct subordinates: {', '.join(subs) or 'none'}")
-    below = team.subtree_of(me.name)
-    if len(below) > len(subs):
-        lines.append(f"Everyone below you: {', '.join(below)}")
-    if subs:
-        lines.append("Their duties:")
-        for name in below:
-            r = team.roles[name]
-            lines.append(f"  - {name} ({r.harness}, reports to {r.superior}): {r.duties or '-'}")
-    scope = ", ".join(role.write_scope) if role else "everything"
-    lines.append(f"Files you may write (after claim_file): {scope or 'none - you do not edit files'}")
-    lines += [
-        "",
-        "Rules:",
-        f"- Talk to the team only through the '{SERVER_NAME}' tools.",
-        f"- Report and ask for help only to your direct superior ({me.superior}). "
-        "You cannot skip levels or message siblings.",
-        "- You may instruct and view anyone below you. Give clear, self-contained tasks.",
-        "- Before editing any file, claim_file it. If someone else holds it, do not edit it: "
-        "ask your superior. release_file when you are done with it.",
-        "- Keep your status current with set_status.",
-        "- When you finish a task, report the result to your superior.",
-        "- When you have nothing to do, call wait_for_messages and act on what arrives. "
-        "If it returns nothing, call it again.",
-        "- If you lose track of your role, call my_role.",
-    ]
-    return "\n".join(lines)
 
 
 def _fmt_message(m: Message) -> str:
@@ -117,6 +81,29 @@ class Tools:
                   {"path": text}, ["path"], lambda a: "Released " + me.release(a["path"]).path)
         self._add("list_locks", "List every file that is currently being written, and by whom.", {}, [],
                   lambda a: "\n".join(_fmt_lock(x) for x in me.store.locks()) or "No files are locked.")
+        self._add("hand_over_file",
+                  "Give a file you hold to your direct superior or a direct subordinate (such as your consultant).",
+                  {"path": text, "to": text}, ["path", "to"],
+                  lambda a: "Handed over " + _fmt_lock(me.hand_over(a["path"], a["to"])))
+
+        team = me.team
+        role = team.roles.get(me.name)
+        if role is not None and role.is_consultant:
+            return  # consultants neither summon nor dismiss
+        if team.can_summon(me.name):
+            tiers = "; ".join(f"{t.describe()}: {t.use_for}" if t.use_for else t.describe()
+                              for t in team.tiers.values())
+            self._add("summon_consultant",
+                      "When a subordinate's help request is too hard for it, attach a temporary consultant "
+                      f"under that subordinate. Pick the cheapest tier that can solve it. Tiers: {tiers}",
+                      {"help_id": {"type": "integer", "description": "id of the help request you received"},
+                       "tier": {"type": "string", "enum": list(team.tiers)},
+                       "brief": {"type": "string", "description": "your notes for the consultant"}},
+                      ["help_id", "tier"], self._summon)
+        self._add("dismiss_consultant",
+                  "Dismiss a consultant working for you (or below you) once its problem is solved. "
+                  "Files it holds go back to the agent it helped.",
+                  {"name": text}, ["name"], self._dismiss)
 
     def _add(self, name: str, description: str, props: dict[str, Any], required: list[str],
              handler: Callable[[dict[str, Any]], str]) -> None:
@@ -133,6 +120,16 @@ class Tools:
         messages = self.me.wait_for_messages(timeout, stop=cancelled)
         self.me.set_status("working" if messages else "idle", "")
         return _fmt_messages(messages, f"No messages in {timeout} seconds. Call wait_for_messages again.")
+
+    def _summon(self, args: dict[str, Any]) -> str:
+        role = self.me.summon_consultant(int(args["help_id"]), args["tier"], args.get("brief") or "")
+        return (f"Summoned {role.name} ({role.tier}, {role.harness}) under {role.superior}. "
+                f"It has the request and your brief, and {role.superior} has been told.")
+
+    def _dismiss(self, args: dict[str, Any]) -> str:
+        role, returned = self.me.dismiss_consultant(args["name"])
+        back = f" Files returned to {role.superior}: {', '.join(returned)}." if returned else ""
+        return f"Dismissed {role.name}.{back}"
 
     def _status(self, args: dict[str, Any]) -> str:
         s = self.me.set_status(args["state"], args.get("task") or "")
@@ -261,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # type: ignore[union-attr]
     try:
-        hub = Hub.open(args.team)
+        hub = Hub.open(args.team, opener=tab_opener(Path(args.team).resolve()))
         me = hub.session(args.role)
     except (TeamError, HubError) as e:
         print(f"agent-org: {e}", file=sys.stderr)

@@ -85,6 +85,21 @@ def test_owner_console(team_file):
     assert "org send leader" in script
 
 
+def test_consultant_tab_uses_its_tier(team_file):
+    hub = Hub.open(team_file)
+    try:
+        request = hub.session("worker-a").ask_help("stuck")
+        hub.session("tech-lead").summon_consultant(request.id, "medium")  # no opener: nothing opens
+        tab = launch.role_tab(hub, team_file.resolve(), "consultant-1")
+    finally:
+        hub.close()
+    assert tab[tab.index("--title") + 1] == "consultant-1 (medium)"
+    out = team_file.parent / ".agent-org" / "launch" / "consultant-1"
+    script = (out / "start.ps1").read_text(encoding="utf-8")
+    assert "'--model' 'claude-opus-5-5' '--effort' 'medium' '--name' 'consultant-1'" in script
+    assert "temporary medium consultant" in (out / "role.md").read_text(encoding="utf-8")
+
+
 def test_unknown_roles_are_refused(team_file):
     assert launch.main(["--team", str(team_file), "--dry-run", "ghost"]) == 2
 

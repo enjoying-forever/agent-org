@@ -70,6 +70,36 @@ def test_invalid_teams_are_rejected(tmp_path, changes, error):
         build(tmp_path, **changes)
 
 
+def test_consultant_tiers_are_parsed(team):
+    medium = team.tiers["medium"]
+    assert (medium.harness, medium.model, medium.effort, medium.max_active) == (
+        "claude", "claude-opus-5-5", "medium", 2)
+    assert team.tiers["high"].max_active == 1  # the default
+    assert team.can_summon("tech-lead") and team.can_summon("you")
+    assert not team.can_summon("worker-a")
+
+
+@pytest.mark.parametrize(
+    "tier, error",
+    [
+        ({"harness": "gpt"}, "'harness' must be one of"),
+        ({"harness": "claude", "max_active": 0}, "at least 1"),
+        ({"harness": "claude", "max_active": True}, "at least 1"),
+        ({"harness": "claude", "budget": 5}, "unknown keys"),
+    ],
+)
+def test_invalid_tiers_are_rejected(tmp_path, tier, error):
+    data = copy.deepcopy(TEAM)
+    data["consultants"]["bad"] = tier
+    with pytest.raises(TeamError, match=error):
+        Team.from_dict(data, base_dir=tmp_path)
+
+
+def test_consultant_names_are_reserved(tmp_path):
+    with pytest.raises(TeamError, match="kept for consultants"):
+        build(tmp_path, **{"consultant-9": {"superior": "leader", "harness": "claude"}})
+
+
 def test_missing_project_root_is_rejected(tmp_path):
     data = copy.deepcopy(TEAM)
     del data["project_root"]

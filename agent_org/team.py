@@ -10,8 +10,10 @@ import yaml
 
 HARNESSES = ("claude", "codex", "grok", "antigravity")
 ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
-TEAM_KEYS = {"owner", "project_root", "database", "roles"}
+TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
+TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants"}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+CONSULTANT_PREFIX = "consultant-"  # names of temporary consultant roles: consultant-1, consultant-2, ...
 
 
 class TeamError(ValueError):
@@ -27,16 +29,40 @@ class Role:
     effort: str | None = None
     duties: str = ""
     write_scope: tuple[str, ...] = ()
+    tier: str | None = None  # set for temporary consultants
+
+    @property
+    def is_consultant(self) -> bool:
+        return self.tier is not None
+
+
+@dataclass(frozen=True)
+class Tier:
+    """A kind of consultant a superior can summon for a subordinate's help request."""
+
+    name: str
+    harness: str
+    model: str | None
+    effort: str | None
+    use_for: str
+    max_active: int
+
+    def describe(self) -> str:
+        model = " / ".join(x for x in (self.harness, self.model) if x)
+        effort = f", {self.effort} effort" if self.effort else ""
+        return f"{self.name} ({model}{effort}, up to {self.max_active} at once)"
 
 
 class Team:
     """A validated tree rooted at the owner (you), with exactly one leader below it."""
 
-    def __init__(self, owner: str, project_root: Path, database: Path, roles: dict[str, Role]):
+    def __init__(self, owner: str, project_root: Path, database: Path, roles: dict[str, Role],
+                 tiers: dict[str, Tier] | None = None):
         self.owner = owner
         self.project_root = project_root
         self.database = database
         self.roles = roles
+        self.tiers = tiers or {}
         self._children: dict[str, list[str]] = {owner: [], **{name: [] for name in roles}}
         for role in roles.values():
             if role.superior not in self._children:
@@ -77,7 +103,17 @@ class Team:
         roles = {name: _parse_role(name, spec) for name, spec in raw_roles.items()}
         if owner in roles:
             raise TeamError(f"'{owner}' is the owner and cannot also be a role")
-        return cls(owner, project_root, database, roles)
+
+        raw_tiers = data.get("consultants") or {}
+        if not isinstance(raw_tiers, dict):
+            raise TeamError("'consultants' must be a mapping of tier name to settings")
+        tiers = {name: _parse_tier(name, spec) for name, spec in raw_tiers.items()}
+        return cls(owner, project_root, database, roles, tiers)
+
+    def with_roles(self, extra: list[Role]) -> Team:
+        """This team plus some temporary roles (the active consultants)."""
+        return Team(self.owner, self.project_root, self.database,
+                    {**self.roles, **{r.name: r for r in extra}}, self.tiers)
 
     def _validate(self) -> None:
         for name in self.roles:
@@ -129,6 +165,17 @@ class Team:
     def is_above(self, upper: str, lower: str) -> bool:
         return upper in self.chain_of(lower)
 
+    def can_summon(self, name: str) -> bool:
+        """Consultants can be summoned by the owner and by anyone with a regular subordinate.
+
+        A consultant is never helped by another consultant, so a role whose only
+        subordinates are its consultants has no one to summon for.
+        """
+        if not self.tiers:
+            return False
+        return name == self.owner or any(
+            not self.roles[s].is_consultant for s in self._children[name])
+
     def tree_lines(self) -> list[str]:
         lines = [f"{self.owner} (owner)"]
 
@@ -138,16 +185,44 @@ class Team:
                 last = i == len(children) - 1
                 role = self.roles[child]
                 model = f" / {role.model}" if role.model else ""
-                lines.append(f"{prefix}{'└── ' if last else '├── '}{child}  [{role.harness}{model}]")
+                temp = f"  (consultant, {role.tier})" if role.is_consultant else ""
+                lines.append(f"{prefix}{'└── ' if last else '├── '}{child}  [{role.harness}{model}]{temp}")
                 walk(child, prefix + ("    " if last else "│   "))
 
         walk(self.owner, "")
         return lines
 
 
+def _parse_tier(name: object, spec: object) -> Tier:
+    if not isinstance(name, str) or not NAME_RE.match(name):
+        raise TeamError(f"invalid consultant tier name {name!r}: use letters, digits, '-' and '_'")
+    if not isinstance(spec, dict):
+        raise TeamError(f"consultant tier {name}: must be a mapping")
+    unknown = set(spec) - TIER_KEYS
+    if unknown:
+        raise TeamError(f"consultant tier {name}: unknown keys {sorted(unknown)}")
+    harness = spec.get("harness")
+    if harness not in HARNESSES:
+        raise TeamError(f"consultant tier {name}: 'harness' must be one of {list(HARNESSES)}")
+    max_active = spec.get("max_active", 1)
+    if not isinstance(max_active, int) or isinstance(max_active, bool) or max_active < 1:
+        raise TeamError(f"consultant tier {name}: 'max_active' must be a whole number of at least 1")
+    model, effort = spec.get("model"), spec.get("effort")
+    return Tier(
+        name=name,
+        harness=harness,
+        model=None if model is None else str(model),
+        effort=None if effort is None else str(effort),
+        use_for=str(spec.get("use_for", "")).strip(),
+        max_active=max_active,
+    )
+
+
 def _parse_role(name: object, spec: object) -> Role:
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise TeamError(f"invalid role name {name!r}: use letters, digits, '-' and '_'")
+    if name.startswith(CONSULTANT_PREFIX):
+        raise TeamError(f"{name}: names starting with '{CONSULTANT_PREFIX}' are kept for consultants")
     if not isinstance(spec, dict):
         raise TeamError(f"{name}: role must be a mapping")
     unknown = set(spec) - ROLE_KEYS

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ParamSpec, TypeVar
 
+from .team import CONSULTANT_PREFIX
+
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -46,6 +48,21 @@ CREATE TABLE IF NOT EXISTS locks (
     owner      TEXT NOT NULL,
     claimed_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS consultants (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tier         TEXT NOT NULL,
+    harness      TEXT NOT NULL,
+    model        TEXT,
+    effort       TEXT,
+    helped       TEXT NOT NULL,
+    summoned_by  TEXT NOT NULL,
+    help_id      INTEGER NOT NULL REFERENCES messages(id),
+    brief        TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    dismissed_at REAL,
+    dismissed_by TEXT
+);
 """
 
 
@@ -74,6 +91,26 @@ class Lock:
     path: str
     owner: str
     claimed_at: float
+
+
+@dataclass(frozen=True)
+class Consultant:
+    id: int
+    tier: str
+    harness: str
+    model: str | None
+    effort: str | None
+    helped: str
+    summoned_by: str
+    help_id: int
+    brief: str
+    created_at: float
+    dismissed_at: float | None
+    dismissed_by: str | None
+
+    @property
+    def name(self) -> str:
+        return f"{CONSULTANT_PREFIX}{self.id}"
 
 
 def _locked(method: Callable[P, R]) -> Callable[P, R]:
@@ -200,6 +237,15 @@ class Store:
         self._db.execute("DELETE FROM locks WHERE key = ?", (key,))
 
     @_locked
+    def transfer(self, key: str, from_owner: str, to_owner: str) -> Lock | None:
+        """Move a lock between holders, only if `from_owner` still holds it."""
+        cur = self._db.execute(
+            "UPDATE locks SET owner = ?, claimed_at = ? WHERE key = ? AND owner = ?",
+            (to_owner, time.time(), key, from_owner),
+        )
+        return self.lock_for(key) if cur.rowcount else None
+
+    @_locked
     def lock_for(self, key: str) -> Lock | None:
         row = self._db.execute("SELECT * FROM locks WHERE key = ?", (key,)).fetchone()
         return _lock(row) if row else None
@@ -213,6 +259,77 @@ class Store:
                 "SELECT * FROM locks WHERE owner = ? ORDER BY path", (owner,)
             ).fetchall()
         return [_lock(r) for r in rows]
+
+    # consultants
+
+    @_locked
+    def add_consultant(self, tier: str, harness: str, model: str | None, effort: str | None,
+                       helped: str, summoned_by: str, help_id: int, brief: str,
+                       max_active: int) -> Consultant | None:
+        """Register a consultant unless `max_active` of this tier are already working."""
+        with self._transaction() as db:
+            (active,) = db.execute(
+                "SELECT COUNT(*) FROM consultants WHERE tier = ? AND dismissed_at IS NULL", (tier,)
+            ).fetchone()
+            if active >= max_active:
+                return None
+            cur = db.execute(
+                "INSERT INTO consultants (tier, harness, model, effort, helped, summoned_by, help_id,"
+                " brief, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (tier, harness, model, effort, helped, summoned_by, help_id, brief, time.time()),
+            )
+            row = db.execute("SELECT * FROM consultants WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return _consultant(row)
+
+    @_locked
+    def get_consultant(self, name: str) -> Consultant | None:
+        if not name.startswith(CONSULTANT_PREFIX) or not name[len(CONSULTANT_PREFIX):].isdigit():
+            return None
+        row = self._db.execute(
+            "SELECT * FROM consultants WHERE id = ?", (int(name[len(CONSULTANT_PREFIX):]),)
+        ).fetchone()
+        return _consultant(row) if row else None
+
+    @_locked
+    def active_consultants(self) -> list[Consultant]:
+        rows = self._db.execute(
+            "SELECT * FROM consultants WHERE dismissed_at IS NULL ORDER BY id"
+        ).fetchall()
+        return [_consultant(r) for r in rows]
+
+    @_locked
+    def delete_consultant(self, name: str) -> None:
+        consultant = self.get_consultant(name)
+        if consultant is not None:
+            self._db.execute("DELETE FROM consultants WHERE id = ?", (consultant.id,))
+
+    @_locked
+    def dismiss_consultant(self, name: str, by: str) -> list[str]:
+        """Dismiss a consultant and give every file it holds back to the agent it helped.
+
+        Returns the paths that went back.
+        """
+        consultant = self.get_consultant(name)
+        assert consultant is not None
+        with self._transaction() as db:
+            db.execute(
+                "UPDATE consultants SET dismissed_at = ?, dismissed_by = ? WHERE id = ?",
+                (time.time(), by, consultant.id),
+            )
+            paths = [r["path"] for r in db.execute(
+                "SELECT path FROM locks WHERE owner = ? ORDER BY path", (name,)
+            ).fetchall()]
+            db.execute("UPDATE locks SET owner = ?, claimed_at = ? WHERE owner = ?",
+                       (consultant.helped, time.time(), name))
+        return paths
+
+
+def _consultant(row: sqlite3.Row) -> Consultant:
+    return Consultant(
+        row["id"], row["tier"], row["harness"], row["model"], row["effort"], row["helped"],
+        row["summoned_by"], row["help_id"], row["brief"], row["created_at"],
+        row["dismissed_at"], row["dismissed_by"],
+    )
 
 
 def _message(row: sqlite3.Row) -> Message:

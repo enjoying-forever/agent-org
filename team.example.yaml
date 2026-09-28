@@ -60,3 +60,28 @@ roles:
       Research libraries, APIs and prior art on the web, and give second
       opinions on plans. You do not edit project files.
     write_scope: []
+
+# Consultants: when a subordinate asks for help (ask_help), the superior who
+# received the request can summon one of these as a temporary subordinate of the
+# agent that asked. It opens in its own tab, edits only files handed to it, and
+# is dismissed when the problem is solved. `use_for` is what the superior reads
+# to judge which tier a problem needs; `max_active` caps how many run at once.
+consultants:
+  opus-medium:
+    harness: claude
+    model: claude-opus-5-5
+    effort: medium
+    max_active: 2
+    use_for: everyday problems - unclear errors, API questions, small bugs
+  astra-high:
+    harness: codex
+    model: gpt-6-astra
+    effort: high
+    max_active: 2
+    use_for: tricky code - failing tests, subtle bugs, algorithms
+  opus-xhigh:
+    harness: claude
+    model: claude-opus-5-5
+    effort: xhigh
+    max_active: 1
+    use_for: the hardest problems - design flaws, deep debugging across many files

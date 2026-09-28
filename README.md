@@ -14,7 +14,29 @@ file has one writer at a time.
 | **Up** | A role can report to, or ask help from, its **direct** superior only. |
 | **Down** | A role can instruct and look at anyone below it: its subordinates and theirs. |
 | **Sideways** | Siblings don't talk directly. They go through their shared superior. |
-| **Files** | A role can only lock files inside its `write_scope`. One writer per file. A lock is released by its holder or by anyone above the holder. |
+| **Files** | A role can only lock files inside its `write_scope`. One writer per file. A lock is released by its holder or by anyone above the holder, and a holder can hand it to its direct superior or a direct subordinate. |
+| **Consultants** | See below. |
+
+## Consultants
+
+When a subordinate asks for help, the superior who received the request judges how
+hard it is and can call `summon_consultant(help_id, tier, brief)`. The hub then:
+
+1. adds a temporary role (`consultant-1`, `consultant-2`, ...) **under the agent that
+   asked**, running the tier's harness and model, in its own new tab;
+2. sends it the help request and the superior's brief, and tells the helped agent.
+
+The helped agent and its consultant work together like any superior and subordinate.
+A consultant can't claim files: it edits only the files the helped agent passes to it
+with `hand_over_file`, and hands them back (or `release_file`s them) when done. When
+the problem is solved, the helped agent or anyone above it calls
+`dismiss_consultant`. Every file the consultant still holds goes back to the helped
+agent, and the consultant's tools stop working. Consultants can't get consultants
+of their own.
+
+Tiers are set in `team.yaml` under `consultants:`, each with a harness, model,
+effort, a `use_for` line that the superior reads to pick a tier, and `max_active`,
+the most that can run at once.
 
 ## Setup
 
@@ -65,12 +87,16 @@ one yourself to restart a single agent.
 | `status STATE [TASK]` | Set your status: idle, working, waiting, blocked, done |
 | `view ROLE` | Look at yourself or a role below you |
 | `claim PATH` / `release PATH` / `locks` | File write locks |
+| `hand-over PATH TO` | Give a lock you hold to your superior or a direct subordinate |
+| `summon HELP_ID TIER [--brief TEXT]` | Attach a consultant to whoever sent you help request HELP_ID |
+| `dismiss NAME` | Dismiss a consultant working for you or below you |
 | `can-write PATH` | Exit 0 if you hold the lock on PATH (for pre-edit hooks) |
 
 ## Status
 
 - [x] Step 1: hub core (role tree, rules, messages, status, file locks) with tests
 - [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
+- [x] Consultants: temporary helpers summoned for help requests, with file hand-over
 - [ ] Step 3: all four harnesses, with message delivery into live sessions
 - [ ] Step 4: pre-edit hooks that enforce locks
 - [ ] Step 5: dashboard (org chart editor, messages, locks)

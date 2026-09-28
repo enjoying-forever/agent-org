@@ -22,6 +22,12 @@ TEAM = {
         "worker-b": {"superior": "tech-lead", "harness": "antigravity", "write_scope": ["tests/*", "docs/*"]},
         "researcher": {"superior": "leader", "harness": "grok", "write_scope": []},
     },
+    "consultants": {
+        "medium": {"harness": "claude", "model": "claude-opus-5-5", "effort": "medium", "max_active": 2,
+                   "use_for": "questions a strong model answers quickly"},
+        "high": {"harness": "codex", "model": "gpt-6-astra", "effort": "high",
+                 "use_for": "tricky bugs and failing tests"},
+    },
 }
 
 
@@ -31,8 +37,26 @@ def team(tmp_path: Path) -> Team:
     return Team.from_dict(TEAM, base_dir=tmp_path)
 
 
+class FakeOpener:
+    """Records the consultants the hub asks to open, instead of opening terminal tabs."""
+
+    def __init__(self):
+        self.opened = []
+        self.fail = False
+
+    def __call__(self, role):
+        if self.fail:
+            raise RuntimeError("no terminal")
+        self.opened.append(role.name)
+
+
 @pytest.fixture
-def hub(team: Team):
-    hub = Hub(team, Store(team.database))
+def opener() -> FakeOpener:
+    return FakeOpener()
+
+
+@pytest.fixture
+def hub(team: Team, opener: FakeOpener):
+    hub = Hub(team, Store(team.database), opener)
     yield hub
     hub.close()

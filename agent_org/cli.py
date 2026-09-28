@@ -14,8 +14,10 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
 from .hub import Hub, HubError, RoleSession, RoleView
+from .launch import tab_opener
 from .store import Lock, Message
 from .team import TeamError
 
@@ -23,8 +25,9 @@ from .team import TeamError
 def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(errors="replace")  # type: ignore[union-attr]
     args = _parser().parse_args(argv)
+    team_file = Path(args.team).resolve()
     try:
-        hub = Hub.open(args.team)
+        hub = Hub.open(team_file, opener=tab_opener(team_file))
     except TeamError as e:
         print(f"team error: {e}", file=sys.stderr)
         return 2
@@ -62,6 +65,15 @@ def _run(args: argparse.Namespace, hub: Hub, me: RoleSession) -> int:
     elif cmd == "locks":
         locks = hub.store.locks()
         print("\n".join(_fmt_lock(lock) for lock in locks) if locks else "no locks")
+    elif cmd == "hand-over":
+        print(f"handed over: {_fmt_lock(me.hand_over(args.path, args.to))}")
+    elif cmd == "summon":
+        role = me.summon_consultant(args.help_id, args.tier, args.brief)
+        print(f"summoned {role.name} ({role.tier}, {role.harness}) under {role.superior}")
+    elif cmd == "dismiss":
+        role, returned = me.dismiss_consultant(args.name)
+        print(f"dismissed {role.name}" + (f"; files back to {role.superior}: {', '.join(returned)}"
+                                          if returned else ""))
     elif cmd == "can-write":
         return 0 if me.can_write(args.path) else 1
     return 0
@@ -95,6 +107,15 @@ def _parser() -> argparse.ArgumentParser:
     s = sub.add_parser("release", help="release a write lock")
     s.add_argument("path")
     sub.add_parser("locks", help="list all write locks")
+    s = sub.add_parser("hand-over", help="give a lock you hold to your superior or a direct subordinate")
+    s.add_argument("path")
+    s.add_argument("to")
+    s = sub.add_parser("summon", help="attach a consultant to the sender of a help request you received")
+    s.add_argument("help_id", type=int)
+    s.add_argument("tier")
+    s.add_argument("--brief", default="")
+    s = sub.add_parser("dismiss", help="dismiss a consultant working for you or below you")
+    s.add_argument("name")
     s = sub.add_parser("can-write", help="exit 0 if you hold the lock on PATH, else 1")
     s.add_argument("path")
     return p

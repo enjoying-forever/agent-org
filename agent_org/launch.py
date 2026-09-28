@@ -20,16 +20,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .hub import Hub
-from .mcp_server import SERVER_NAME, role_card
-from .team import Team
+from .cards import SERVER_NAME, role_card
+from .hub import Hub, HubError, Opener
+from .team import Role, Team
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 WINDOW = "agent-org"
 WAIT_LIMIT = 3600  # seconds a single wait_for_messages call may take; harness tool timeouts are set to this
 TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4",
               "owner": "#F2C94C"}
-SUPPORTED = ("claude", "codex")  # grok and antigravity arrive in step 3
 
 
 @dataclass
@@ -151,28 +150,57 @@ def tab_command(title: str, color: str, cwd: Path, script: Path) -> list[str]:
             "pwsh", "-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(script)]
 
 
+def role_tab(hub: Hub, team_file: Path, role: str) -> list[str]:
+    """Write one role's start script and return the tab command that opens it."""
+    team = hub.team
+    spec = team.roles[role]
+    if spec.harness not in BUILDERS:
+        raise HubError(f"{spec.harness} is not supported yet")
+    out = team.database.parent / "launch" / role
+    out.mkdir(parents=True, exist_ok=True)
+    launch = BUILDERS[spec.harness](hub, team_file, role, out)
+    script = out / "start.ps1"
+    script.write_text(role_script(launch, team, team_file), encoding="utf-8")
+    title = f"{role} ({spec.tier})" if spec.is_consultant else role
+    return tab_command(title, TAB_COLORS[spec.harness], team.project_root, script)
+
+
 def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool) -> list[list[str]]:
     """Write every start script and return the tab commands that would open them."""
     team = hub.team
-    base = team.database.parent / "launch"
     tabs = []
     if owner_tab:
-        script = base / team.owner / "start.ps1"
+        script = team.database.parent / "launch" / team.owner / "start.ps1"
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text(owner_script(team, team_file), encoding="utf-8")
         tabs.append(tab_command(team.owner, TAB_COLORS["owner"], team.project_root, script))
     for role in roles:
-        harness = team.roles[role].harness
-        if harness not in BUILDERS:
-            print(f"skipping {role}: {harness} is not supported yet", file=sys.stderr)
-            continue
-        out = base / role
-        out.mkdir(parents=True, exist_ok=True)
-        launch = BUILDERS[harness](hub, team_file, role, out)
-        script = out / "start.ps1"
-        script.write_text(role_script(launch, team, team_file), encoding="utf-8")
-        tabs.append(tab_command(role, TAB_COLORS[harness], team.project_root, script))
+        try:
+            tabs.append(role_tab(hub, team_file, role))
+        except HubError as e:
+            print(f"skipping {role}: {e}", file=sys.stderr)
     return tabs
+
+
+def open_tab(tab: list[str]) -> None:
+    wt = shutil.which("wt")
+    if wt is None or shutil.which("pwsh") is None:
+        raise HubError("needs Windows Terminal (wt) and PowerShell 7 (pwsh) on PATH")
+    subprocess.run([wt, *tab[1:]], check=True)
+
+
+def tab_opener(team_file: Path) -> Opener:
+    """What the hub calls to show a newly summoned consultant in its own tab."""
+
+    def open_consultant(role: Role) -> None:
+        hub = Hub.open(team_file)  # a fresh connection sees the consultant just registered
+        try:
+            tab = role_tab(hub, team_file, role.name)
+        finally:
+            hub.close()
+        open_tab(tab)
+
+    return open_consultant
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             print(f"not roles in this team: {', '.join(unknown)}", file=sys.stderr)
             return 2
-        tabs = prepare(hub, team_file, args.roles or list(hub.team.roles), not args.no_owner)
+        tabs = prepare(hub, team_file, args.roles or list(hub.base_team.roles), not args.no_owner)
     finally:
         hub.close()
 
@@ -198,13 +226,13 @@ def main(argv: list[str] | None = None) -> int:
         for tab in tabs:
             print(subprocess.list2cmdline(tab))
         return 0
-    wt = shutil.which("wt")
-    if wt is None or shutil.which("pwsh") is None:
-        print("needs Windows Terminal (wt) and PowerShell 7 (pwsh) on PATH", file=sys.stderr)
+    try:
+        for tab in tabs:
+            open_tab(tab)
+            time.sleep(1)  # let the named window exist before the next tab joins it
+    except HubError as e:
+        print(e, file=sys.stderr)
         return 1
-    for tab in tabs:
-        subprocess.run([wt, *tab[1:]], check=True)
-        time.sleep(1)  # let the named window exist before the next tab joins it
     return 0
 
 
