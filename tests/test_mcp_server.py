@@ -174,7 +174,7 @@ def test_tool_calls_follow_the_hub_rules(client, hub):
     text, is_error = worker.tool("send_message", to="leader", text="done")
     assert is_error and text.startswith("Refused: you cannot message 'leader'")
     text, is_error = worker.tool("claim_file", path="src/app.py")
-    assert not is_error and "src/app.py (held by worker-a)" in text
+    assert not is_error and text.startswith("You now hold src/app.py.")
     assert [m.text for m in hub.session("tech-lead").read_inbox()] == ["done"]
 
 

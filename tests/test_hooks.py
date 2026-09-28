@@ -254,3 +254,30 @@ def test_antigravity_hooks_always_answer_even_outside_a_tab(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "org_hook.py"), "invocation", "agy"], cwd=tmp_path, env=env,
                        input=b"{}", capture_output=True, timeout=30)
     assert r.stdout == b"{}"
+
+
+def test_hooks_work_without_home_folder_variables(monkeypatch):
+    """Codex starts hooks with a trimmed environment: no USERPROFILE or HOME."""
+    from agent_org import sessions
+    for var in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(var, raising=False)
+    assert sessions.home().is_dir()
+
+
+def test_a_crashing_handler_is_logged_not_fatal(hub, monkeypatch, capsys, tmp_path):
+    import yaml
+    from .conftest import TEAM
+    (tmp_path / "t" / "project").mkdir(parents=True)
+    team_file = tmp_path / "t" / "team.yaml"
+    team_file.write_text(yaml.safe_dump(TEAM), encoding="utf-8")
+    monkeypatch.setenv("AGENT_ORG_TEAM", str(team_file))
+    monkeypatch.setenv("AGENT_ORG_ROLE", "worker-a")
+    monkeypatch.setattr("sys.stdin", __import__("io").TextIOWrapper(__import__("io").BytesIO(b"{}")))
+
+    def boom(me, payload):
+        raise RuntimeError("something odd")
+
+    monkeypatch.setitem(hooks.HANDLERS, "post-tool", boom)
+    assert hooks.main(["post-tool"]) == 0
+    log = (tmp_path / "t" / ".agent-org" / hooks.HOOK_LOG).read_text(encoding="utf-8")
+    assert "RuntimeError: something odd" in log and "worker-a post-tool" in log

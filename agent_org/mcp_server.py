@@ -111,7 +111,7 @@ class Tools:
                   "Leases run out after an hour without activity.",
                   {"path": {"type": "string", "description": "file or pattern, relative to the project folder"},
                    "reason": {"type": "string", "description": "what for, e.g. task #12"}},
-                  ["path"], lambda a: "You now hold " + _fmt_lock(me.claim(a["path"], a.get("reason") or "")))
+                  ["path"], self._claim)
         self._add("release_file", "Release a lease you (or someone below you) hold: the file or pattern "
                                   "exactly as it was claimed.",
                   {"path": text}, ["path"], lambda a: "Released " + me.release(a["path"]).path)
@@ -247,6 +247,10 @@ class Tools:
     def _cancel(self, args: dict[str, Any]) -> str:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
         return f"Task #{task.id} is cancelled; {task.assignee} has been told."
+
+    def _claim(self, args: dict[str, Any]) -> str:
+        lock = self.me.claim(args["path"], args.get("reason") or "")
+        return f"You now hold {lock.path}" + (f" ({lock.reason})" if lock.reason else "") + "."
 
     def _reassign(self, args: dict[str, Any]) -> str:
         task = self.me.reassign_task(int(args["task_id"]), args["to"], args.get("reason") or "")

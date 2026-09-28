@@ -267,6 +267,23 @@ def for_antigravity(event: str, out: dict[str, Any] | None) -> dict[str, Any]:
     return {}
 
 
+HOOK_LOG = "hook-errors.log"
+
+
+def log_error(hub: Hub, event: str, role: str) -> None:
+    """Keep the traceback next to the hub's database, and in the Activity list, instead of failing."""
+    import traceback
+    text = traceback.format_exc()
+    try:
+        path = hub.base_team.database.parent / HOOK_LOG
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} {role} {event}\n{text}\n")
+        hub.event("agent", role, f"a {event} hook failed ({text.strip().splitlines()[-1][:160]}); "
+                                 f"details in {path}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     event = argv[0] if argv else ""
@@ -295,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
             out = HANDLERS[event](me, payload)
         except HubError:
             out = None  # e.g. a dismissed consultant
+        except Exception:  # noqa: BLE001 - a failing hook shows up in the agent's tab on every step
+            log_error(hub, event, role)
+            out = None
         finally:
             hub.close()
     if antigravity:

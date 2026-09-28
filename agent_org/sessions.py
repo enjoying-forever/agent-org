@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from collections.abc import Iterator
@@ -21,7 +22,17 @@ SCAN_DAYS = 45  # how old a Codex conversation may be to still be found by searc
 
 
 def home() -> Path:
-    return Path.home()
+    """The user's home folder - even for a hook that Codex starts without USERPROFILE or HOME."""
+    try:
+        return Path.home()
+    except RuntimeError:
+        pass
+    if os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0028, None, 0, buf) == 0:  # CSIDL_PROFILE
+            return Path(buf.value)
+    return Path(os.path.expanduser("~"))
 
 
 def exists(harness: str, session_id: str | None) -> bool:
