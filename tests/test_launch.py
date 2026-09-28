@@ -49,6 +49,7 @@ def test_claude_role_files(team_file):
     script = (out / "start.ps1").read_text(encoding="utf-8")
     assert "$env:AGENT_ORG_ROLE = 'leader'" in script
     assert "$env:MCP_TOOL_TIMEOUT = '3600000'" in script
+    assert "$env:DISABLE_AUTOUPDATER = '1'" in script  # agents must not update the shared install
     assert "'--model' 'opus' '--effort' 'high' '--name' 'leader' 'You are the ''leader'' agent" in script
 
 

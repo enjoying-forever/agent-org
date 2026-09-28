@@ -76,7 +76,10 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
     # --mcp-config and --allowedTools take several values, so a plain option must
     # come between them and the prompt or they would swallow it.
     cli += ["--name", role, kickoff(role)]
-    return Launch(role, "claude", "claude", cli, {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000)})
+    # Several agents share one Claude Code install; an update started by one tab can't
+    # replace the program while the others run it, and leaves a broken install behind.
+    env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1"}
+    return Launch(role, "claude", "claude", cli, env)
 
 
 def codex_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
@@ -114,7 +117,7 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
     if spec.effort:
         cli += ["--reasoning-effort", spec.effort]
     cli.append(kickoff(role))
-    return Launch(role, "grok", "grok", cli, setup=[register])
+    return Launch(role, "grok", "grok", cli, {"GROK_DISABLE_AUTOUPDATER": "1"}, setup=[register])
 
 
 BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch}
