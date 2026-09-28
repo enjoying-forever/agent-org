@@ -11,7 +11,9 @@ import yaml
 HARNESSES = ("claude", "codex", "grok", "antigravity")
 ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
-TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants"}
+CHECK_KEYS = {"name", "run", "when", "timeout"}
+TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants", "checks",
+             "autostart", "max_running", "commit_on_accept"}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 CONSULTANT_PREFIX = "consultant-"  # names of temporary consultant roles: consultant-1, consultant-2, ...
 
@@ -53,16 +55,36 @@ class Tier:
         return f"{self.name} ({model}{effort}, up to {self.max_active} at once)"
 
 
+@dataclass(frozen=True)
+class CheckSpec:
+    """A command that must pass before a task may be closed as done (a verification gate)."""
+
+    name: str
+    run: str
+    when: tuple[str, ...] = ()  # only if the task changed a file matching one of these
+    timeout: int = 300
+
+
+@dataclass(frozen=True)
+class Settings:
+    autostart: bool = False       # start an agent by itself when it has work and is not running
+    max_running: int = 0          # most agents running at once (0: no limit)
+    commit_on_accept: bool = True  # commit a task's files when its result is accepted
+
+
 class Team:
     """A validated tree rooted at the owner (you), with exactly one leader below it."""
 
     def __init__(self, owner: str, project_root: Path, database: Path, roles: dict[str, Role],
-                 tiers: dict[str, Tier] | None = None):
+                 tiers: dict[str, Tier] | None = None, checks: tuple[CheckSpec, ...] = (),
+                 settings: Settings | None = None):
         self.owner = owner
         self.project_root = project_root
         self.database = database
         self.roles = roles
         self.tiers = tiers or {}
+        self.checks = checks
+        self.settings = settings or Settings()
         self._children: dict[str, list[str]] = {owner: [], **{name: [] for name in roles}}
         for role in roles.values():
             if role.superior not in self._children:
@@ -108,12 +130,21 @@ class Team:
         if not isinstance(raw_tiers, dict):
             raise TeamError("'consultants' must be a mapping of tier name to settings")
         tiers = {name: _parse_tier(name, spec) for name, spec in raw_tiers.items()}
-        return cls(owner, project_root, database, roles, tiers)
+        raw_checks = data.get("checks") or []
+        if not isinstance(raw_checks, list):
+            raise TeamError("'checks' must be a list of {name, run} entries")
+        checks = tuple(_parse_check(i, spec) for i, spec in enumerate(raw_checks, 1))
+        max_running = data.get("max_running", 0)
+        if not isinstance(max_running, int) or isinstance(max_running, bool) or max_running < 0:
+            raise TeamError("'max_running' must be a whole number (0 means no limit)")
+        settings = Settings(autostart=bool(data.get("autostart", False)), max_running=max_running,
+                            commit_on_accept=bool(data.get("commit_on_accept", True)))
+        return cls(owner, project_root, database, roles, tiers, checks, settings)
 
     def with_roles(self, extra: list[Role]) -> Team:
         """This team plus some temporary roles (the active consultants)."""
         return Team(self.owner, self.project_root, self.database,
-                    {**self.roles, **{r.name: r for r in extra}}, self.tiers)
+                    {**self.roles, **{r.name: r for r in extra}}, self.tiers, self.checks, self.settings)
 
     def _validate(self) -> None:
         for name in self.roles:
@@ -191,6 +222,26 @@ class Team:
 
         walk(self.owner, "")
         return lines
+
+
+def _parse_check(number: int, spec: object) -> CheckSpec:
+    if not isinstance(spec, dict):
+        raise TeamError(f"check {number}: must be a mapping with 'name' and 'run'")
+    unknown = set(spec) - CHECK_KEYS
+    if unknown:
+        raise TeamError(f"check {number}: unknown keys {sorted(unknown)}")
+    run = spec.get("run")
+    if not isinstance(run, str) or not run.strip():
+        raise TeamError(f"check {number}: 'run' must be the command to run")
+    when = spec.get("when", [])
+    if isinstance(when, str):
+        when = [when]
+    if not isinstance(when, list) or not all(isinstance(w, str) for w in when):
+        raise TeamError(f"check {number}: 'when' must be a pattern or a list of patterns")
+    timeout = spec.get("timeout", 300)
+    if not isinstance(timeout, int) or timeout < 1:
+        raise TeamError(f"check {number}: 'timeout' must be a number of seconds")
+    return CheckSpec(str(spec.get("name") or run.split()[0]), run.strip(), tuple(when), timeout)
 
 
 def _parse_tier(name: object, spec: object) -> Tier:

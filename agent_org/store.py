@@ -112,9 +112,18 @@ CREATE TABLE IF NOT EXISTS tasks (
     depends_on TEXT NOT NULL DEFAULT '',       -- ",3,5," : ids of tasks that must finish first
     revisions  INTEGER NOT NULL DEFAULT 0,
     nudged_at  REAL,
-    started_at REAL
+    started_at REAL,
+    checks     TEXT NOT NULL DEFAULT '',
+    commit_id  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(assignee, state);
+
+CREATE TABLE IF NOT EXISTS task_files (
+    task_id INTEGER NOT NULL,
+    path    TEXT NOT NULL,
+    at      REAL NOT NULL,
+    PRIMARY KEY (task_id, path)
+);
 
 CREATE TABLE IF NOT EXISTS events (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +163,8 @@ UPGRADES = {
               "pattern": "INTEGER NOT NULL DEFAULT 0"},
     "tasks": {"done_when": "TEXT NOT NULL DEFAULT ''", "priority": "INTEGER NOT NULL DEFAULT 2",
               "depends_on": "TEXT NOT NULL DEFAULT ''", "revisions": "INTEGER NOT NULL DEFAULT 0",
-              "nudged_at": "REAL", "started_at": "REAL"},
+              "nudged_at": "REAL", "started_at": "REAL", "checks": "TEXT NOT NULL DEFAULT ''",
+              "commit_id": "TEXT NOT NULL DEFAULT ''"},
 }
 
 
@@ -191,6 +201,8 @@ class Task:
     revisions: int = 0
     nudged_at: float | None = None
     started_at: float | None = None
+    checks: str = ""      # what the verification checks said when it was finished
+    commit_id: str = ""   # the git commit made when it was accepted
 
     @property
     def is_open(self) -> bool:
@@ -464,7 +476,7 @@ class Store:
 
     @_locked
     def update_task(self, task_id: int, **fields: object) -> Task:
-        allowed = {"state", "message_id", "result", "revisions", "nudged_at", "started_at"}
+        allowed = {"state", "message_id", "result", "revisions", "nudged_at", "started_at", "checks", "commit_id"}
         assert set(fields) <= allowed, fields
         sets = ", ".join(f"{k} = ?" for k in fields)
         self._db.execute(f"UPDATE tasks SET {sets}, updated_at = ? WHERE id = ?",
@@ -493,6 +505,16 @@ class Store:
             args += list(states)
         rows = self._db.execute(query + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
         return [_task(r) for r in reversed(rows)]
+
+    @_locked
+    def add_task_file(self, task_id: int, path: str) -> None:
+        self._db.execute("INSERT OR IGNORE INTO task_files (task_id, path, at) VALUES (?, ?, ?)",
+                         (task_id, path, time.time()))
+
+    @_locked
+    def task_files(self, task_id: int) -> list[str]:
+        rows = self._db.execute("SELECT path FROM task_files WHERE task_id = ? ORDER BY path", (task_id,))
+        return [r[0] for r in rows.fetchall()]
 
     @_locked
     def dependents(self, task_id: int) -> list[Task]:
@@ -819,7 +841,7 @@ def _task(row: sqlite3.Row) -> Task:
     return Task(row["id"], row["assigner"], row["assignee"], row["title"], row["details"],
                 row["state"], row["message_id"], row["parent_id"], row["result"],
                 row["created_at"], row["updated_at"], row["done_when"], row["priority"], deps,
-                row["revisions"], row["nudged_at"], row["started_at"])
+                row["revisions"], row["nudged_at"], row["started_at"], row["checks"], row["commit_id"])
 
 
 def _lock(row: sqlite3.Row) -> Lock:

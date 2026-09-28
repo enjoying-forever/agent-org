@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from agent_org import launch, ui
+from agent_org.team import Team
 
 from .conftest import TEAM, FakeOpener
 
@@ -297,3 +298,47 @@ def test_search_and_activity_feed(server):
     events = server.ok("/api/events?after=0")["events"]
     assert events[-1]["text"] == "gave #1 to leader: Plan it"
     assert server.ok("/api/state")["last_event"] == events[-1]["id"]
+
+
+# history, changes, auto-start and the running cap
+
+
+def test_task_changes_and_turning_history_on(server):
+    root = server.app.hub.base_team.project_root
+    task = server.ok("/api/task", {"to": "leader", "title": "Write the plan"})
+    leader = server.app.hub.session("leader")
+    leader.read_inbox()
+    leader.claim("PLAN.md")
+    (root / "PLAN.md").write_text("step 1\n", encoding="utf-8")
+    changes = server.ok(f"/api/task-changes?id={task['id']}")
+    assert changes == {"files": ["PLAN.md"], "history": False, "diff": ""}
+    assert server.ok("/api/history", {})["history"] == "on"
+    changes = server.ok(f"/api/task-changes?id={task['id']}")
+    assert changes["history"] is True and changes["diff"] == ""  # the starting point includes it
+    (root / "PLAN.md").write_text("step 1\nstep 2\n", encoding="utf-8")
+    assert "+step 2" in server.ok(f"/api/task-changes?id={task['id']}")["diff"]
+    assert server.ok("/api/state")["history"] is True
+
+
+def test_launch_keeps_to_the_running_limit(server):
+    hub = server.app.hub
+    hub.base_team = Team.from_dict({**yaml.safe_load(server.team_file.read_text(encoding="utf-8")),
+                                    "max_running": 2}, base_dir=server.team_file.parent)
+    hub.store.check_in(31, "leader")
+    result = server.ok("/api/launch", {"roles": ["tech-lead", "worker-a"]})
+    assert result["opening"] == ["tech-lead"]
+    assert result["skipped"] == ["worker-a: 2 agents are running already (the team's limit)"]
+
+
+def test_autostart_starts_agents_that_have_work(server):
+    hub = server.app.hub
+    hub.base_team = Team.from_dict({**yaml.safe_load(server.team_file.read_text(encoding="utf-8")),
+                                    "autostart": True}, base_dir=server.team_file.parent)
+    server.ok("/api/task", {"to": "leader", "title": "Build it"})
+    from agent_org import watchdog
+    server.app._autostart(hub, watchdog.patrol(hub))
+    assert [t[t.index("--title") + 1] for t in server.opened_tabs] == ["leader"]
+    events = [e.text for e in hub.store.events_after(0)]
+    assert "started automatically: it has work waiting" in events
+    server.app._autostart(hub, watchdog.patrol(hub))  # not again straight away
+    assert len(server.opened_tabs) == 1

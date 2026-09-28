@@ -80,12 +80,16 @@ async function openTask(id) {
     t.done_when && h('div', { class: 'done-when' }, h('b', {}, 'Done when: '), t.done_when),
     t.details && h('div', { class: 'text-block' }, t.details),
     t.result && h('div', { class: `result ${t.state}` }, h('b', {}, 'Result: '), t.result),
+    (t.checks || t.commit_id) && h('div', { class: 'muted small' },
+      t.checks && `Checks: ${t.checks}. `, t.commit_id && `Committed as ${t.commit_id}.`),
+    h('div', { id: 'task-changes', class: 'changes' }, h('span', { class: 'muted small' }, 'Loading changes...')),
     t.state === 'done' && h('div', { class: 'review' },
       h('b', {}, 'Your review'),
       t.done_when && h('div', { class: 'muted small' }, 'Check the result against "done when" above.'),
       feedback,
       h('div', { class: 'actions' },
-        h('button', { class: 'primary', onclick: () => review(t, true) }, 'Accept'),
+        h('button', { class: 'primary', onclick: () => review(t, true) },
+          S.state.history && S.state.settings.commit_on_accept ? 'Accept & commit' : 'Accept'),
         h('button', { onclick: () => review(t, false, feedback.value) }, 'Send back'))),
     h('div', { class: 'actions' },
       h('button', { onclick: () => { $('#task-dialog').close(); composeTo(t.assignee, 'message'); } }, `Message ${t.assignee}`),
@@ -93,6 +97,42 @@ async function openTask(id) {
     h('h3', {}, `Conversation (${d.thread.length})`),
     d.thread.length ? d.thread.map((m) => messageEl(m, true)) : h('div', { class: 'muted' }, 'No messages yet.'));
   if (!$('#task-dialog').open) $('#task-dialog').showModal();
+  loadChanges(t.id);
+}
+
+async function loadChanges(id) {
+  let c;
+  try { c = await api(`/api/task-changes?id=${id}`); } catch { return; }
+  const box = document.getElementById('task-changes');
+  if (!box) return;
+  if (!c.files.length) {
+    fill(box, h('span', { class: 'muted small' }, 'No file changes recorded for this task.'));
+    return;
+  }
+  fill(box,
+    h('b', {}, `Changes (${plural(c.files.length, 'file')})`),
+    h('div', { class: 'mono small' }, c.files.join(', ')),
+    c.history
+      ? (c.diff ? diffEl(c.diff) : h('div', { class: 'muted small' }, 'No differences from the last commit.'))
+      : h('div', { class: 'history-off' },
+        h('span', { class: 'muted small' }, 'Turn on history (git) to see exactly what changed, and to keep each '
+          + 'accepted task as a commit you can undo.'),
+        h('button', { class: 'small', onclick: () => turnOnHistory(id) }, 'Turn on history')));
+}
+
+function diffEl(text) {
+  return h('pre', { class: 'diff' }, text.split('\n').map((line) => {
+    const cls = line.startsWith('diff --git') ? 'd-file' : line.startsWith('@@') ? 'd-hunk'
+      : line.startsWith('+') && !line.startsWith('+++') ? 'd-add'
+        : line.startsWith('-') && !line.startsWith('---') ? 'd-del' : '';
+    return h('span', { class: cls }, line + '\n');
+  }));
+}
+
+async function turnOnHistory(id) {
+  if (!confirm('Turn on history? This creates a git repository in the project folder and saves everything '
+    + 'as a starting point. From then on each accepted task becomes a commit.')) return;
+  if (await act(api('/api/history', {}), () => 'History is on.')) loadChanges(id);
 }
 
 async function review(t, accept, feedback = '') {

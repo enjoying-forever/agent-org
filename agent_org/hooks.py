@@ -200,6 +200,7 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
         key, _ = me.hub.lock_key(full)
         lock = me.store.covering(key)
         if lock is not None and lock.owner == me.name:
+            me.note_edit(rel)
             continue
         if lock is not None:
             why = f" for {lock.reason}" if lock.reason else ""

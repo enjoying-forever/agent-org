@@ -342,14 +342,16 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
 
 
 def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
-            force: bool = False, fresh: bool = False) -> tuple[list[list[str]], list[str]]:
+            force: bool = False, fresh: bool = False, limit: int = 0) -> tuple[list[list[str]], list[str]]:
     """Write the start scripts and return (tab commands to open, reasons for roles skipped).
 
     A role that is already running is skipped unless `force`: a second session of the
-    same role would split its messages between the two.
+    same role would split its messages between the two. With a `limit`, no more than
+    that many agents run at once (Gas Town's scheduler).
     """
     team = hub.team
     online = hub.store.online()
+    running = sum(1 for n in online if n in team.roles)
     tabs, skipped = [], []
     if owner_tab:
         script = team.database.parent / "launch" / team.owner / "start.ps1"
@@ -359,6 +361,9 @@ def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
     for role in roles:
         if online.get(role) and not force:
             skipped.append(f"{role}: already running")
+            continue
+        if limit and running + len(tabs) >= limit:
+            skipped.append(f"{role}: {limit} agents are running already (the team's limit)")
             continue
         try:
             tabs.append(role_tab(hub, team_file, role, fresh))

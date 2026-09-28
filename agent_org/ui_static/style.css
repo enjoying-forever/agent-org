@@ -449,3 +449,14 @@ dialog.wide { width: min(760px, calc(100vw - 32px)); }
 .filters { flex-wrap: wrap; row-gap: 6px; }
 .filters .seg button, .filters > button { white-space: nowrap; }
 .filters #search { flex: 1 1 120px; }
+
+/* task changes */
+.changes { display: flex; flex-direction: column; gap: 6px; }
+.diff { margin: 0; max-height: 360px; overflow: auto; background: var(--panel-2); border-radius: 8px; padding: 8px 10px;
+  font: 12px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre; }
+.diff .d-add { color: #16803c; background: color-mix(in srgb, #16a34a 10%, transparent); }
+.diff .d-del { color: #b42318; background: color-mix(in srgb, #d33a2c 10%, transparent); }
+.diff .d-hunk { color: var(--instruction); }
+.diff .d-file { font-weight: 700; color: var(--text); }
+@media (prefers-color-scheme: dark) { .diff .d-add { color: #6fdc8c; } .diff .d-del { color: #ff8b80; } }
+.history-off { display: flex; gap: 10px; align-items: center; }

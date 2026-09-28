@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, launch, templates, usage, watchdog
+from . import doctor, gitops, launch, templates, usage, watchdog
 from .hub import LAW, Hub, HubError
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -38,6 +38,7 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset
 MAX_BODY = 1_000_000
 NO_TEAM = "no_team"  # error the page answers by showing the welcome screen
 WATCH_EVERY = 30  # seconds between watchdog patrols
+AUTOSTART_GAP = 600  # seconds before the same agent is started automatically again
 
 # Effort levels each harness accepts (suggestions in the editor; any text is allowed).
 EFFORTS = {
@@ -110,7 +111,8 @@ def _task(t: Task) -> dict[str, Any]:
     return {"id": t.id, "assigner": t.assigner, "assignee": t.assignee, "title": t.title,
             "details": t.details, "state": t.state, "result": t.result, "parent_id": t.parent_id,
             "created_at": t.created_at, "updated_at": t.updated_at, "done_when": t.done_when,
-            "priority": t.priority, "after": list(t.depends_on), "revisions": t.revisions}
+            "priority": t.priority, "after": list(t.depends_on), "revisions": t.revisions,
+            "checks": t.checks, "commit_id": t.commit_id}
 
 
 def recent_file() -> Path:
@@ -141,6 +143,8 @@ class App:
         self._checks: tuple[float, list[dict[str, object]]] | None = None
         self._resumable: dict[str, tuple[str | None, bool, float]] = {}
         self._problems: tuple[float, list[dict[str, object]]] = (0.0, [])
+        self._history: tuple[float, bool] = (0.0, False)
+        self._autostarted: dict[str, float] = {}
         if watch:
             threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
         if team_file is not None:
@@ -175,9 +179,45 @@ class App:
             if hub is None:
                 continue
             try:
-                watchdog.patrol(hub)
+                problems = watchdog.patrol(hub)
+                if hub.base_team.settings.autostart:
+                    self._autostart(hub, problems)
             except Exception as e:  # noqa: BLE001 - a failed patrol must not end the UI
                 print(f"watchdog: {e}", file=sys.stderr)
+
+    def _autostart(self, hub: Hub, problems: list[watchdog.Problem]) -> None:
+        """Start agents that have work but are not running (Gas Town's 'sling'), within the cap."""
+        now = time.time()
+        for p in problems:
+            if p.kind != "stopped" or now - self._autostarted.get(p.role, 0) < AUTOSTART_GAP:
+                continue
+            if hub.team.roles[p.role].harness not in launch.BUILDERS:
+                continue
+            tabs, _ = launch.prepare(hub, self.team_file, [p.role], owner_tab=False,
+                                     limit=hub.base_team.settings.max_running)
+            if not tabs:
+                continue  # at the cap: it waits for a free place
+            self._autostarted[p.role] = now
+            launch.open_tab(tabs[0])
+            hub.event("agent", p.role, f"started automatically: it has work waiting")
+
+    def history(self) -> bool:
+        """Whether the project keeps git history (cached: it runs git)."""
+        if time.time() - self._history[0] > 30:
+            self._history = (time.time(), gitops.is_own_repo(self.hub.base_team.project_root))
+        return self._history[1]
+
+    def enable_history(self, body: dict[str, Any]) -> dict[str, Any]:
+        state = gitops.init(self.hub.base_team.project_root)
+        self._history = (0.0, False)
+        self.hub.event("git", self.hub.base_team.owner, "turned history on")
+        return {"history": state}
+
+    def task_changes(self, task_id: int) -> dict[str, Any]:
+        self.me.task_details(task_id)  # the owner may see every task; this checks it exists
+        files = self.hub.store.task_files(task_id)
+        return {"files": files, "history": self.history(),
+                "diff": gitops.diff(self.hub.base_team.project_root, files) if self.history() else ""}
 
     def problems(self) -> list[dict[str, object]]:
         if time.time() - self._problems[0] > 5:
@@ -326,6 +366,10 @@ class App:
             "locks": [_lock(x) for x in locks],
             "tasks": [_task(t) for t in recent_tasks],
             "problems": self.problems(),
+            "history": self.history(),
+            "settings": {"autostart": team.settings.autostart, "max_running": team.settings.max_running,
+                         "commit_on_accept": team.settings.commit_on_accept,
+                         "checks": [c.name for c in team.checks]},
             "last_event": store.last_event_id(),
             "owner_unread": unread.get(team.owner, 0),
             "launchable": list(launch.BUILDERS),
@@ -407,7 +451,8 @@ class App:
             if name not in team.roles:
                 raise ApiError(f"'{name}' is not a role")
         tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
-                                       force=bool(body.get("force")), fresh=bool(body.get("fresh")))
+                                       force=bool(body.get("force")), fresh=bool(body.get("fresh")),
+                                       limit=self.hub.base_team.settings.max_running)
         self._resumable.clear()
 
         def open_all() -> None:
@@ -463,6 +508,7 @@ GET_ROUTES = {
     "/api/events": lambda app, q: app.events(int(q.get("after", ["0"])[0])),
     "/api/task": lambda app, q: app.task_details(int(q["id"][0])),
     "/api/search": lambda app, q: app.search(q.get("q", [""])[0]),
+    "/api/task-changes": lambda app, q: app.task_changes(int(q["id"][0])),
 }
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
@@ -471,7 +517,7 @@ POST_ROUTES = {
     "/api/send": App.send, "/api/task": App.assign, "/api/cancel-task": App.cancel_task,
     "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
     "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,
-    "/api/team": App.save_team, "/api/review": App.review,
+    "/api/team": App.save_team, "/api/review": App.review, "/api/history": App.enable_history,
 }
 
 

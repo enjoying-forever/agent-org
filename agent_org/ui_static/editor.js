@@ -7,11 +7,21 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const E = { draft: null, meta: null, dirty: false };
 
 function toDraft(config) {
-  const { owner = 'you', project_root = '.', roles = {}, consultants = {}, ...extra } = config || {};
+  const {
+    owner = 'you', project_root = '.', roles = {}, consultants = {}, checks = [],
+    autostart = false, max_running = 0, commit_on_accept = true, ...extra
+  } = config || {};
   return {
     owner: String(owner),
     project_root: String(project_root),
     extra,
+    autostart: Boolean(autostart),
+    max_running: Number(max_running) || 0,
+    commit_on_accept: commit_on_accept !== false,
+    checks: (checks || []).map((c) => ({
+      name: c.name ?? '', run: c.run ?? '',
+      when: Array.isArray(c.when) ? c.when.join(', ') : (c.when ?? ''), timeout: c.timeout ?? 300,
+    })),
     roles: Object.entries(roles || {}).map(([name, r]) => ({
       name, superior: r.superior ?? '', harness: r.harness ?? 'claude', model: r.model ?? '',
       effort: r.effort ?? '', duties: r.duties ?? '', write_scope: (r.write_scope || []).join(', '),
@@ -33,7 +43,19 @@ function fromDraft(d) {
     spec.write_scope = r.write_scope.split(',').map((s) => s.trim()).filter(Boolean);
     roles[r.name.trim()] = spec;
   }
-  const config = { owner: d.owner.trim(), project_root: d.project_root.trim() || '.', ...d.extra, roles };
+  const config = { owner: d.owner.trim(), project_root: d.project_root.trim() || '.', ...d.extra };
+  if (d.autostart) config.autostart = true;
+  if (Number(d.max_running) > 0) config.max_running = Math.round(Number(d.max_running));
+  if (!d.commit_on_accept) config.commit_on_accept = false;
+  const checks = d.checks.filter((c) => c.run.trim()).map((c) => {
+    const spec = { name: c.name.trim() || c.run.trim().split(/\s+/)[0], run: c.run.trim() };
+    const when = c.when.split(',').map((x) => x.trim()).filter(Boolean);
+    if (when.length) spec.when = when;
+    if (Number(c.timeout) && Number(c.timeout) !== 300) spec.timeout = Math.round(Number(c.timeout));
+    return spec;
+  });
+  if (checks.length) config.checks = checks;
+  config.roles = roles;
   if (d.tiers.length) {
     config.consultants = {};
     for (const t of d.tiers) {
@@ -82,6 +104,14 @@ function validate(d) {
   for (const t of d.tiers) {
     if (!(Number(t.max_active) >= 1)) errs.push(`Tier ${t.name}: "at once" must be at least 1.`);
   }
+  if (!(Number(d.max_running) >= 0)) errs.push('"At most this many agents at once" must be 0 or more.');
+  const checkNames = d.checks.map((c) => c.name.trim());
+  d.checks.forEach((c, i) => {
+    const label = checkNames[i] || `check ${i + 1}`;
+    if (!c.run.trim()) errs.push(`Check ${label}: give the command to run, or remove it.`);
+    if (checkNames[i] && checkNames.indexOf(checkNames[i]) !== i) errs.push(`Two checks are called "${checkNames[i]}".`);
+    if (!(Number(c.timeout) >= 1)) errs.push(`Check ${label}: the time limit must be at least 1 second.`);
+  });
   return [...new Set(errs)];
 }
 
@@ -175,7 +205,31 @@ function renderEditor() {
           oninput: (e) => { const old = d.owner; d.owner = e.target.value; renameRefs(old, d.owner); touch(); },
           onchange: renderEditor,
         })),
-        h('label', { class: 'wide' }, 'Project folder the agents work in', bound(d, 'project_root', { class: 'mono' })))),
+        h('label', { class: 'wide' }, 'Project folder the agents work in', bound(d, 'project_root', { class: 'mono' })),
+        h('label', { class: 'inline wide' }, h('input', {
+          type: 'checkbox', checked: d.autostart, onchange: (e) => { d.autostart = e.target.checked; touch(); },
+        }), 'Start agents automatically when they get work (while this page is open)'),
+        h('label', {}, 'At most this many agents at once (0: no limit)',
+          bound(d, 'max_running', { type: 'number', min: 0 })),
+        h('label', { class: 'inline wide' }, h('input', {
+          type: 'checkbox', checked: d.commit_on_accept,
+          onchange: (e) => { d.commit_on_accept = e.target.checked; touch(); },
+        }), 'Commit each accepted task to git (when the project keeps history)'))),
+    h('div', { class: 'section-head' },
+      h('h2', {}, `Checks (${d.checks.length})`),
+      h('button', { onclick: () => { d.checks.push({ name: '', run: '', when: '', timeout: 300 }); touch(); renderEditor(); } }, '+ Add check')),
+    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
+      'Commands that must pass before a task can be closed as done, for example your tests. '
+      + 'They run in the project folder.'),
+    ...d.checks.map((c) => h('div', { class: 'card' },
+      h('div', { class: 'grid' },
+        h('label', {}, 'Name', bound(c, 'name', { placeholder: 'tests' })),
+        h('label', { class: 'wide' }, 'Command', bound(c, 'run', { class: 'mono', placeholder: 'python -m pytest -q' })),
+        h('label', {}, 'Only when these files changed (optional)', bound(c, 'when', { class: 'mono', placeholder: '*.py' })),
+        h('label', {}, 'Time limit (seconds)', bound(c, 'timeout', { type: 'number', min: 1 })),
+        h('div', { class: 'wide' }, h('button', {
+          class: 'small danger', onclick: () => { d.checks.splice(d.checks.indexOf(c), 1); touch(); renderEditor(); },
+        }, 'Remove check'))))),
     h('div', { class: 'section-head' },
       h('h2', {}, `Roles (${d.roles.length})`),
       h('button', { onclick: addRole }, '+ Add role')),

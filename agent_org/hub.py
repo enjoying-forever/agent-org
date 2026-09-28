@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
+from . import gitops, verify
 from .store import ACTIVE, CLOSED, Consultant, Lock, Message, Status, Store, Task
 from .team import Role, Team
 
@@ -427,7 +428,17 @@ class RoleSession:
         if task.state not in ("open", "working", "blocked"):
             raise HubError(f"task #{task_id} is already {task.state}")
         result = _text(result)
-        task = self.store.update_task(task_id, state=outcome, result=result)
+        checks = ""
+        if outcome == "done" and self.team.checks:
+            outcomes = verify.run(self.team, self.store.task_files(task_id))
+            failed = [o for o in outcomes if not o.ok]
+            checks = verify.summary(outcomes)
+            if failed:
+                self.hub.event("check", self.name, f"#{task.id} checks failed: {checks}", task.id)
+                details = "\n\n".join(f"--- {o.name} ---\n{o.output}" for o in failed)
+                raise HubError(f"task #{task_id} is not done yet: {checks}.\n\n{details}\n\nFix it and "
+                               "finish_task again, or close it as blocked or failed and say why.")
+        task = self.store.update_task(task_id, state=outcome, result=result, checks=checks)
         head = {"done": "is DONE - please review it", "blocked": "is BLOCKED", "failed": "FAILED",
                 "rejected": "was REJECTED"}[outcome]
         self.store.add_message(self.name, task.assigner, "result",
@@ -454,7 +465,7 @@ class RoleSession:
         if accept:
             task = self.store.update_task(task_id, state="accepted")
             self.hub.event("task", self.name, f"accepted #{task.id}: {task.title}", task.id)
-            return task
+            return self._commit(task)
         feedback = _text(feedback) if feedback.strip() else ""
         if not feedback:
             raise HubError("say what has to change: sending a task back needs feedback")
@@ -467,6 +478,25 @@ class RoleSession:
                                f"of {MAX_REVISIONS}):\n\n{feedback}\n\nFix it and finish_task({task.id}, result) again.",
                                task.message_id, False, task.id)
         self.hub.event("task", self.name, f"sent #{task.id} back to {task.assignee}", task.id)
+        return task
+
+    def _commit(self, task: Task) -> Task:
+        """Commit the files an accepted task changed, if the team keeps history."""
+        if not self.team.settings.commit_on_accept:
+            return task
+        files = self.store.task_files(task.id)
+        if not files:
+            return task
+        message = (f"task #{task.id}: {task.title}\n\nDone by {task.assignee}, accepted by {self.name}."
+                   + (f"\n\n{task.result[:1500]}" if task.result else ""))
+        try:
+            commit_id = gitops.commit(self.hub.base_team.project_root, files, message)
+        except Exception as e:  # noqa: BLE001 - history is a bonus; acceptance stands without it
+            self.hub.event("git", self.name, f"could not commit #{task.id}: {e}", task.id)
+            return task
+        if commit_id:
+            self.hub.event("git", self.name, f"committed #{task.id} as {commit_id}", task.id)
+            return self.store.update_task(task.id, commit_id=commit_id)
         return task
 
     def cancel_task(self, task_id: int, reason: str = "") -> Task:
@@ -579,9 +609,21 @@ class RoleSession:
     # file leases
 
     def current_task(self) -> Task | None:
-        """The task this role is most likely working on: its most urgent started task."""
+        """The task this role is most likely working on: its most urgent started task.
+
+        A consultant works on the current task of the agent it helps.
+        """
+        me = self.team.roles.get(self.name)
+        if me is not None and me.is_consultant:
+            return self.hub.session(me.superior).current_task()
         mine = [t for t in self.my_tasks() if t.state == "working"]
         return min(mine, key=lambda t: (t.priority, t.id)) if mine else None
+
+    def note_edit(self, rel: str) -> None:
+        """Remember that the current task changed `rel`, for its review and its commit."""
+        task = self.current_task()
+        if task is not None:
+            self.store.add_task_file(task.id, rel)
 
     def claim(self, path: str | Path, reason: str = "") -> Lock:
         """Take the lease on a file, or on every file matching a pattern such as src/api/*."""
@@ -600,6 +642,8 @@ class RoleSession:
         if lock.owner != self.name:
             why = f" for {lock.reason}" if lock.reason else ""
             raise LockConflict(f"{lock.path} is being written by {lock.owner}{why}")
+        if not lock.pattern:
+            self.note_edit(rel)
         self.hub.event("file", self.name, f"took {rel}" + (f" ({lock.reason})" if lock.reason else ""))
         return lock
 
