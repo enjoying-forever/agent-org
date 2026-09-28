@@ -4,8 +4,16 @@ It works from any folder, because it puts this directory on the import path firs
 See agent_org/hooks.py for the events.
 """
 
+import os
 import sys
-from pathlib import Path
+
+if not (os.environ.get("AGENT_ORG_TEAM") and os.environ.get("AGENT_ORG_ROLE")):
+    # Not an agent-org tab (Grok's hooks are global): do nothing, and quickly.
+    if "agy" in sys.argv[2:]:
+        sys.stdout.write("{}")  # Antigravity expects an answer from every hook
+    sys.exit(0)
+
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
