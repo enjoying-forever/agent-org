@@ -23,6 +23,13 @@ function h(tag, props, ...kids) {
   return el;
 }
 
+/** Replace an element's children, flattening lists and skipping empty values, like h() does. */
+function fill(el, ...kids) {
+  el.replaceChildren(h('div', {}, ...kids));
+  el.replaceChildren(...el.firstChild.childNodes);
+  return el;
+}
+
 const TOKEN = (() => {
   const fromUrl = new URLSearchParams(location.search).get('token');
   try {
@@ -106,7 +113,7 @@ async function act(promise, done) {
 const S = {
   state: null, stateKey: '', messages: [], lastId: 0, mode: null,
   filter: 'all', roleFilter: '', replyTo: null, selected: null, summonFor: null,
-  compose: 'message', taskFilter: 'open', notified: 0,
+  compose: 'message', notified: 0,
 };
 
 async function refresh() {
@@ -150,7 +157,9 @@ function applyState(state) {
   $('#project').title = `team file: ${state.team_file}`;
   renderChart();
   renderGuide();
-  renderTasks();
+  renderProblems();
+  renderBoard();
+  refreshActivity();
   renderLocks();
   renderRecipients();
   renderRoleFilter();
@@ -178,7 +187,8 @@ function enterHome() {
   Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0 });
   if (typeof E !== 'undefined') E.draft = null;
   $('#drawer').hidden = true;
-  for (const id of ['#view-team', '#view-editor', '#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) {
+  resetActivity();
+  for (const id of ['#view-team', '#view-board', '#view-editor', '#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) {
     $(id).hidden = true;
   }
   $('#project').textContent = '';
@@ -281,7 +291,8 @@ function renderGuide() {
     { done: running, text: 'Click "Launch team". Each agent opens in its own terminal tab. The first time, '
       + 'say yes when Claude or Codex asks to trust the folder, and choose "Trust all and continue" when '
       + 'Codex asks to review hooks.' },
-    { done: talked, text: `Give ${st.leader} a task: switch the box at the bottom right to "Task".` },
+    { done: talked, text: `Give ${st.leader} a task: open the Board and click "New task". Say what "done" means, `
+      + 'so the result can be checked.' },
   ];
   const g = $('#guide');
   g.hidden = steps.every((s) => s.done);
@@ -322,8 +333,23 @@ function roleCard(r) {
       runningEl(r),
       r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'task')) : null,
       h('span', { class: r.unread ? 'hot' : '' }, `${r.unread} unread`),
-      r.locks.length ? h('span', {}, plural(r.locks.length, 'file')) : null));
+      r.locks.length ? h('span', {}, plural(r.locks.length, 'file')) : null,
+      r.usage && h('span', { title: usageText(r.usage) }, shortUsage(r.usage))));
 }
+
+function fmtNum(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
+  return String(n);
+}
+
+function usageText(u) {
+  if (!u.tokens_in && !u.tokens_out) return `${u.messages} messages${u.model ? ` · ${u.model}` : ''}`;
+  return `${fmtNum(u.tokens_in)} in · ${fmtNum(u.tokens_cached)} cached · ${fmtNum(u.tokens_out)} out`
+    + ` · ${plural(u.messages, 'reply')}${u.model ? ` · ${u.model}` : ''}`;
+}
+
+const shortUsage = (u) => (u.tokens_in || u.tokens_out ? `${fmtNum(u.tokens_in + u.tokens_out)} tok` : `${u.messages} msg`);
 
 function runningEl(r) {
   if (!r.online) return h('span', { class: 'run off', title: 'No session of this role is running' }, 'not running');
@@ -354,6 +380,7 @@ function renderDrawer() {
   const s = r.status;
   const recent = S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-30);
   const tasks = S.state.tasks.filter((t) => t.assignee === r.name).slice(-10).reverse();
+  const u = r.usage;
   const subs = rolesUnder(r.name).map((x) => x.name);
   const launchable = S.state.launchable.includes(r.harness);
   $('#drawer').replaceChildren(
@@ -363,7 +390,7 @@ function renderDrawer() {
       h('button', { class: 'small', title: 'Close', onclick: closeDrawer }, '✕')),
     h('div', { class: 'body' },
       h('div', { class: 'actions' },
-        h('button', { class: 'primary', onclick: () => composeTo(r.name, 'task') }, 'Give a task'),
+        !r.tier && h('button', { class: 'primary', onclick: () => { closeDrawer(); openNewTask(r.name); } }, 'Give a task'),
         h('button', { onclick: () => composeTo(r.name, 'message') }, 'Message'),
         launchable && !r.online && h('button', { onclick: () => launchRoles([r.name]) },
           r.resumes ? 'Start (resume)' : 'Start'),
@@ -381,12 +408,13 @@ function renderDrawer() {
         h('dt', {}, 'Superior'), h('dd', {}, r.superior),
         h('dt', {}, 'Subordinates'), h('dd', {}, subs.join(', ') || '-'),
         h('dt', {}, 'Model'), h('dd', {}, modelLine(r)),
+        u && [h('dt', {}, 'Used'), h('dd', {}, usageText(u), u.limits.length ? h('div', { class: 'muted small' }, u.limits.join(' · ')) : null)],
         r.tier
           ? [h('dt', {}, 'Consultant'), h('dd', {}, `${r.tier} tier, helping with #${r.help_id}`)]
           : [h('dt', {}, 'Write scope'), h('dd', { class: 'mono' }, r.write_scope.join(', ') || 'nothing')],
         r.duties && [h('dt', {}, 'Duties'), h('dd', {}, r.duties)]),
       h('h3', {}, `Tasks (${r.open_tasks} open)`),
-      tasks.length ? tasks.map((t) => taskEl(t, true)) : h('div', { class: 'muted' }, 'No tasks yet.'),
+      tasks.length ? tasks.map((t) => taskEl(t)) : h('div', { class: 'muted' }, 'No tasks yet.'),
       h('h3', {}, `Files (${r.locks.length})`),
       r.locks.length
         ? r.locks.map((p) => h('div', { class: 'lock-row' },
@@ -444,6 +472,7 @@ function visible(m) {
 }
 
 function renderFeed(scroll) {
+  if ($('#search').value.trim()) return; // showing search results
   const feed = $('#feed');
   const shown = S.messages.filter(visible);
   const empty = S.messages.length
@@ -455,7 +484,7 @@ function renderFeed(scroll) {
 
 const KIND_LABEL = {
   instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer',
-  task: 'task', result: 'result', reply: 'reply',
+  task: 'task', result: 'result', reply: 'reply', notice: 'hub notice',
 };
 
 function messageEl(m, compact = false) {
@@ -536,6 +565,7 @@ function setCompose(mode) {
   for (const b of document.querySelectorAll('#mode-seg button')) b.classList.toggle('active', b.dataset.mode === mode);
   const task = mode === 'task';
   $('#task-title').hidden = !task;
+  $('#task-done').hidden = !task;
   $('#urgent-wrap').hidden = task;
   $('#text').placeholder = task
     ? 'Details: everything they need to do it (optional)'
@@ -575,38 +605,14 @@ function clearReply() {
 
 // ---------- tasks ----------
 
-const STATE_LABEL = { open: 'open', blocked: 'blocked', done: 'done', cancelled: 'cancelled' };
-
-function taskEl(t, compact = false) {
-  const open = t.state === 'open' || t.state === 'blocked';
-  return h('div', { class: `taskc ${t.state}` },
+function taskEl(t) {
+  const label = t.state === 'done' ? 'review' : t.state;
+  return h('button', { class: `taskc ${t.state}`, onclick: () => openTask(t.id) },
     h('div', { class: 'head' },
-      h('span', { class: `tstate ${t.state}` }, STATE_LABEL[t.state] || t.state),
+      h('span', { class: `tstate ${t.state}` }, label),
       h('b', {}, `#${t.id} ${t.title}`)),
-    h('div', { class: 'muted small' },
-      `${t.assigner} → ${t.assignee} · ${ago(t.created_at)}`, t.parent_id ? ` · part of #${t.parent_id}` : ''),
-    !compact && t.details && h('div', { class: 'text clamped-3' }, t.details),
-    t.result && h('div', { class: `result ${t.state}` }, t.result),
-    open && h('div', { class: 'acts' },
-      h('button', { class: 'small', onclick: () => cancelTask(t) }, 'Cancel')));
-}
-
-function renderTasks() {
-  const tasks = S.state.tasks;
-  const open = tasks.filter((t) => t.state === 'open' || t.state === 'blocked');
-  $('#tasks-count').textContent = open.length ? `(${open.length})` : '';
-  const shown = (S.taskFilter === 'open' ? open : tasks).slice().reverse();
-  $('#task-list').replaceChildren(...(shown.length
-    ? shown.map((t) => taskEl(t))
-    : [h('div', { class: 'empty' }, S.taskFilter === 'open'
-      ? 'No open tasks. Give one from the box on the Messages tab (switch it to "Task").'
-      : 'No tasks yet.')]));
-}
-
-function cancelTask(t) {
-  const reason = prompt(`Cancel task #${t.id} (${t.title})? ${t.assignee} will be told to stop.\n\nReason (optional):`, '');
-  if (reason === null) return;
-  act(api('/api/cancel-task', { task_id: t.id, reason }), () => `Task #${t.id} cancelled.`);
+    h('div', { class: 'muted small' }, `from ${t.assigner} · ${ago(t.created_at)}`),
+    t.result && h('div', { class: `result ${t.state}` }, t.result));
 }
 
 // ---------- files ----------
@@ -673,8 +679,8 @@ function openSummon(m) {
   $('#summon').showModal();
 }
 
-$('#summon').addEventListener('close', () => {
-  if ($('#summon').returnValue !== 'ok') return;
+$('#summon form').addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'ok') return;
   const tier = document.querySelector('#summon-tiers input:checked')?.value;
   if (!tier) { toast('Pick a tier first.', true); return; }
   act(api('/api/summon', { help_id: S.summonFor.id, tier, brief: $('#summon-brief').value }),
@@ -686,16 +692,17 @@ $('#summon').addEventListener('close', () => {
 function showView(v) {
   for (const b of document.querySelectorAll('.views button')) b.classList.toggle('active', b.dataset.view === v);
   $('#view-team').hidden = v !== 'team';
+  $('#view-board').hidden = v !== 'board';
   $('#view-editor').hidden = v !== 'editor';
-  $('#launch-all').hidden = v !== 'team';
-  $('#stop-all').hidden = v !== 'team';
+  $('#launch-all').hidden = v === 'editor';
+  $('#stop-all').hidden = v === 'editor';
   if (v === 'editor') { closeDrawer(); if (!E.draft) loadEditor(); }
 }
 
 function showTab(t) {
   for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === t);
   $('#tab-messages').hidden = t !== 'messages';
-  $('#tab-tasks').hidden = t !== 'tasks';
+  $('#tab-activity').hidden = t !== 'activity';
   $('#tab-files').hidden = t !== 'files';
 }
 
@@ -703,14 +710,20 @@ for (const b of document.querySelectorAll('.views button')) b.addEventListener('
 for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
 for (const b of document.querySelectorAll('#filter-seg button')) b.addEventListener('click', () => setFilter(b.dataset.filter));
 for (const b of document.querySelectorAll('#mode-seg button')) b.addEventListener('click', () => setCompose(b.dataset.mode));
-for (const b of document.querySelectorAll('#task-seg button')) {
-  b.addEventListener('click', () => {
-    S.taskFilter = b.dataset.tasks;
-    for (const x of document.querySelectorAll('#task-seg button')) x.classList.toggle('active', x === b);
-    renderTasks();
-  });
-}
 $('#filter-role').addEventListener('change', (e) => { S.roleFilter = e.target.value; renderFeed('bottom'); });
+let searchTimer;
+$('#search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(async () => {
+    if (!q) { renderFeed('bottom'); return; }
+    try {
+      const { messages } = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      $('#feed').replaceChildren(h('div', { class: 'muted small' }, `${plural(messages.length, 'message')} with "${q}"`),
+        ...messages.map((m) => messageEl(m)));
+    } catch (err) { toast(err.message, true); }
+  }, 250);
+});
 $('#reply-chip button').addEventListener('click', clearReply);
 $('#mark-read').addEventListener('click', () => act(api('/api/inbox/read', {}), () => {
   for (const m of S.messages) if (m.recipient === S.state.owner) m.read = true;
@@ -728,8 +741,9 @@ $('#composer').addEventListener('submit', (e) => {
   if (S.compose === 'task') {
     const title = $('#task-title').value.trim();
     if (!title) { toast('Give the task a one-line title.', true); return; }
-    act(api('/api/task', { to, title, details: text }).then((t) => {
+    act(api('/api/task', { to, title, details: text, done_when: $('#task-done').value }).then((t) => {
       $('#task-title').value = '';
+      $('#task-done').value = '';
       $('#text').value = '';
       return t;
     }), (t) => `Task #${t.id} given to ${t.assignee}.`);

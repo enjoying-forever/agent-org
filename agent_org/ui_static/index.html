@@ -11,6 +11,7 @@
     <div class="brand"><b>agent-org</b><span id="project" class="muted"></span></div>
     <nav class="views" id="views" hidden>
       <button data-view="team" class="active">Team</button>
+      <button data-view="board">Board <span id="board-count" class="muted"></span></button>
       <button data-view="editor">Edit team</button>
     </nav>
     <div class="spacer"></div>
@@ -56,13 +57,14 @@
 
   <main id="view-team" class="team-view" hidden>
     <section class="chart-pane">
+      <div id="problems" class="problems" hidden></div>
       <div id="guide" class="guide" hidden></div>
       <ul id="chart" class="tree"></ul>
     </section>
     <aside class="side">
       <div class="tabs">
         <button data-tab="messages" class="active">Messages <span id="inbox-badge" class="badge" hidden></span></button>
-        <button data-tab="tasks">Tasks <span id="tasks-count" class="muted"></span></button>
+        <button data-tab="activity">Activity</button>
         <button data-tab="files">Files <span id="files-count" class="muted"></span></button>
       </div>
       <div id="tab-messages" class="tab">
@@ -73,6 +75,7 @@
             <button data-filter="work">Tasks &amp; help</button>
           </div>
           <select id="filter-role" title="Only messages sent by or to this role"></select>
+          <input id="search" type="search" placeholder="Search" title="Search every message">
           <button id="mark-read" class="small" hidden>Mark read</button>
         </div>
         <div id="feed" class="feed"></div>
@@ -86,6 +89,7 @@
           </div>
           <span id="reply-chip" class="chip" hidden><span></span><button type="button" title="Not a reply">&times;</button></span>
           <input id="task-title" placeholder="Task title: one line saying what to do" hidden>
+          <input id="task-done" placeholder="Done when: how anyone can check it is finished (recommended)" hidden>
           <textarea id="text" rows="3" placeholder="Write to your team... (Ctrl+Enter to send)"></textarea>
           <div class="row">
             <label class="inline" id="urgent-wrap" title="Interrupts what they are doing. Use it only to stop or redirect work."><input type="checkbox" id="urgent"> urgent</label>
@@ -94,20 +98,22 @@
           </div>
         </form>
       </div>
-      <div id="tab-tasks" class="tab" hidden>
-        <div class="filters">
-          <div class="seg" id="task-seg">
-            <button data-tasks="open" class="active">Open</button>
-            <button data-tasks="all">All</button>
-          </div>
-          <span class="muted hint">Every task ends with a result: done or blocked.</span>
-        </div>
-        <div id="task-list" class="feed"></div>
+      <div id="tab-activity" class="tab" hidden>
+        <div id="activity" class="feed activity"></div>
       </div>
       <div id="tab-files" class="tab" hidden>
         <div class="feed" style="padding:0"><table class="locks"><thead><tr><th>File</th><th>Being written by</th><th>Since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
       </div>
     </aside>
+  </main>
+
+  <main id="view-board" class="board-view" hidden>
+    <div class="board-bar">
+      <button id="new-task-btn" class="primary">New task</button>
+      <select id="board-role" title="Only tasks of this role"></select>
+      <span class="muted hint">A task moves right as it is worked on. Done tasks wait in Review until whoever gave them accepts them.</span>
+    </div>
+    <div id="board" class="board"></div>
   </main>
 
   <main id="view-editor" class="editor-view" hidden>
@@ -140,6 +146,28 @@
     </form>
   </dialog>
 
+  <dialog id="task-dialog" class="wide">
+    <div class="dialog-body" id="task-body"></div>
+  </dialog>
+
+  <dialog id="new-task">
+    <form method="dialog" id="new-task-form">
+      <h2>New task</h2>
+      <div class="grid2">
+        <label>For<select id="nt-to"></select></label>
+        <label>Priority<select id="nt-priority"><option value="2">normal</option><option value="1">urgent</option><option value="3">low</option></select></label>
+      </div>
+      <label>What to do (one line)<input id="nt-title" required></label>
+      <label>Details<textarea id="nt-details" rows="4" placeholder="Everything they need to do it"></textarea></label>
+      <label>Done when<input id="nt-done" placeholder="How anyone can check it is finished, e.g. the page shows today's stories"></label>
+      <label>Start after (optional)<div id="nt-after" class="after-list"></div></label>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button class="primary" value="ok">Give task</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="info">
     <form method="dialog">
       <h2 id="info-title"></h2>
@@ -152,6 +180,7 @@
   <div id="blocker" class="blocker" hidden></div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/board.js"></script>
   <script src="/static/editor.js"></script>
 </body>
 </html>

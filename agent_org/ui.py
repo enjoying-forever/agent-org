@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, launch, templates
+from . import doctor, launch, templates, usage, watchdog
 from .hub import LAW, Hub, HubError
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -37,6 +37,7 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset
                  ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 MAX_BODY = 1_000_000
 NO_TEAM = "no_team"  # error the page answers by showing the welcome screen
+WATCH_EVERY = 30  # seconds between watchdog patrols
 
 # Effort levels each harness accepts (suggestions in the editor; any text is allowed).
 EFFORTS = {
@@ -98,7 +99,7 @@ def _parse_agy(out: str) -> list[str]:
 def _message(m: Message) -> dict[str, Any]:
     return {"id": m.id, "sent_at": m.sent_at, "sender": m.sender, "recipient": m.recipient,
             "kind": m.kind, "text": m.text, "reply_to": m.reply_to, "read": m.read_at is not None,
-            "urgent": m.urgent}
+            "urgent": m.urgent, "task_id": m.task_id}
 
 
 def _lock(lock: Lock) -> dict[str, Any]:
@@ -108,7 +109,8 @@ def _lock(lock: Lock) -> dict[str, Any]:
 def _task(t: Task) -> dict[str, Any]:
     return {"id": t.id, "assigner": t.assigner, "assignee": t.assignee, "title": t.title,
             "details": t.details, "state": t.state, "result": t.result, "parent_id": t.parent_id,
-            "created_at": t.created_at, "updated_at": t.updated_at}
+            "created_at": t.created_at, "updated_at": t.updated_at, "done_when": t.done_when,
+            "priority": t.priority, "after": list(t.depends_on), "revisions": t.revisions}
 
 
 def recent_file() -> Path:
@@ -132,12 +134,15 @@ def remember_recent(team_file: Path) -> None:
 class App:
     """Everything the owner can do from the browser, as plain methods returning JSON-able data."""
 
-    def __init__(self, team_file: Path | None = None, load_models: bool = True):
+    def __init__(self, team_file: Path | None = None, load_models: bool = True, watch: bool = True):
         self.team_file: Path | None = None
         self._hub: Hub | None = None
         self.catalog = ModelCatalog(load_models)
         self._checks: tuple[float, list[dict[str, object]]] | None = None
         self._resumable: dict[str, tuple[str | None, bool, float]] = {}
+        self._problems: tuple[float, list[dict[str, object]]] = (0.0, [])
+        if watch:
+            threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
         if team_file is not None:
             self._open(team_file)
 
@@ -161,6 +166,23 @@ class App:
         self._hub, self.team_file = hub, team_file
         self._resumable.clear()
         remember_recent(team_file)
+
+    def _watch(self) -> None:
+        """Patrol the open team every half minute: nudge, escalate, release expired leases."""
+        while True:
+            time.sleep(WATCH_EVERY)
+            hub = self._hub
+            if hub is None:
+                continue
+            try:
+                watchdog.patrol(hub)
+            except Exception as e:  # noqa: BLE001 - a failed patrol must not end the UI
+                print(f"watchdog: {e}", file=sys.stderr)
+
+    def problems(self) -> list[dict[str, object]]:
+        if time.time() - self._problems[0] > 5:
+            self._problems = (time.time(), [p.to_dict() for p in watchdog.patrol(self.hub, act=False)])
+        return self._problems[1]
 
     def close(self) -> None:
         if self._hub is not None:
@@ -288,6 +310,7 @@ class App:
                 "open_tasks": sum(1 for t in open_tasks if t.assignee == name),
                 "notes": store.get_notes(name),
                 "resumes": self._resumes(name, r.harness),
+                "usage": self._usage(name, r.harness),
             })
         recent_tasks = store.tasks(limit=60)
         return {
@@ -302,9 +325,30 @@ class App:
                       for t in team.tiers.values()],
             "locks": [_lock(x) for x in locks],
             "tasks": [_task(t) for t in recent_tasks],
+            "problems": self.problems(),
+            "last_event": store.last_event_id(),
             "owner_unread": unread.get(team.owner, 0),
             "launchable": list(launch.BUILDERS),
         }
+
+    def _usage(self, role: str, harness: str) -> dict[str, object] | None:
+        record = self.hub.store.get_session(role)
+        if record is None or record.harness != harness:
+            return None
+        found = usage.usage(harness, record.session_id)
+        return found.to_dict() if found else None
+
+    def events(self, after: int) -> dict[str, Any]:
+        return {"events": [{"id": e.id, "at": e.at, "kind": e.kind, "role": e.role, "text": e.text,
+                            "task_id": e.task_id} for e in self.hub.store.events_after(after)]}
+
+    def task_details(self, task_id: int) -> dict[str, Any]:
+        task, thread = self.me.task_details(task_id)
+        return {"task": _task(task), "thread": [_message(m) for m in thread],
+                "dependents": [_task(t) for t in self.hub.store.dependents(task_id)]}
+
+    def search(self, words: str) -> dict[str, Any]:
+        return {"messages": [_message(m) for m in self.me.search(words, 60)]}
 
     def messages(self, after: int) -> dict[str, Any]:
         return {"messages": [_message(m) for m in self.hub.store.messages_after(after)]}
@@ -327,7 +371,12 @@ class App:
         return {"sent": [_message(self.me.send(to, text, body.get("reply_to"), urgent))]}
 
     def assign(self, body: dict[str, Any]) -> dict[str, Any]:
-        return _task(self.me.assign_task(_str(body, "to"), _str(body, "title"), body.get("details") or ""))
+        return _task(self.me.assign_task(
+            _str(body, "to"), _str(body, "title"), body.get("details") or "", None,
+            body.get("done_when") or "", [int(x) for x in body.get("after") or []], int(body.get("priority") or 2)))
+
+    def review(self, body: dict[str, Any]) -> dict[str, Any]:
+        return _task(self.me.review_task(int(body["task_id"]), bool(body.get("accept")), body.get("feedback") or ""))
 
     def cancel_task(self, body: dict[str, Any]) -> dict[str, Any]:
         return _task(self.me.cancel_task(int(body["task_id"]), body.get("reason") or ""))
@@ -411,6 +460,9 @@ GET_ROUTES = {
     "/api/team": lambda app, q: app.team_config(),
     "/api/law": lambda app, q: app.law(),
     "/api/checks": lambda app, q: app.checks(fresh=q.get("fresh", ["0"])[0] == "1"),
+    "/api/events": lambda app, q: app.events(int(q.get("after", ["0"])[0])),
+    "/api/task": lambda app, q: app.task_details(int(q["id"][0])),
+    "/api/search": lambda app, q: app.search(q.get("q", [""])[0]),
 }
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
@@ -419,7 +471,7 @@ POST_ROUTES = {
     "/api/send": App.send, "/api/task": App.assign, "/api/cancel-task": App.cancel_task,
     "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
     "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,
-    "/api/team": App.save_team,
+    "/api/team": App.save_team, "/api/review": App.review,
 }
 
 
@@ -495,9 +547,9 @@ def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPR
 
 
 def serve(team_file: Path | None, port: int, token: str | None = None,
-          load_models: bool = True) -> tuple[ThreadingHTTPServer, App, str]:
+          load_models: bool = True, watch: bool = True) -> tuple[ThreadingHTTPServer, App, str]:
     """Build the server (not started). Port 0 picks a free port."""
-    app = App(team_file, load_models)
+    app = App(team_file, load_models, watch)
     token = token or secrets.token_urlsafe(24)
     port_holder = [port]
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, token, port_holder))

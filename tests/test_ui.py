@@ -19,7 +19,7 @@ def server(tmp_path, monkeypatch):
     team_file.write_text(yaml.safe_dump(TEAM, sort_keys=False), encoding="utf-8")
     opened_tabs = []
     monkeypatch.setattr(launch, "open_tab", opened_tabs.append)
-    srv, app, token = ui.serve(team_file, 0, token="secret", load_models=False)
+    srv, app, token = ui.serve(team_file, 0, token="secret", load_models=False, watch=False)
     app.hub.opener = FakeOpener()
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
@@ -225,7 +225,7 @@ def test_stop_needs_a_role(server):
 
 
 def test_welcome_mode_without_a_team(tmp_path, monkeypatch):
-    srv, app, token = ui.serve(None, 0, token="t", load_models=False)
+    srv, app, token = ui.serve(None, 0, token="t", load_models=False, watch=False)
     try:
         home = app.home()
         assert home["open"] is False
@@ -267,3 +267,33 @@ def test_setup_checks_report_each_program(server, monkeypatch):
         doctor.Check("Claude Code", True, "2.1.283"), doctor.Check("Grok", False, "not installed", "Install it")])
     checks = server.ok("/api/checks?fresh=1")["checks"]
     assert [(c["name"], c["ok"]) for c in checks] == [("Claude Code", True), ("Grok", False)]
+
+
+# the upgraded law from the page
+
+
+def test_owner_reviews_tasks_and_reads_their_threads(server):
+    task = server.ok("/api/task", {"to": "leader", "title": "Build it", "done_when": "tests pass", "priority": 1})
+    assert (task["done_when"], task["priority"]) == ("tests pass", 1)
+    later = server.ok("/api/task", {"to": "leader", "title": "Then deploy", "after": [task["id"]]})
+    assert later["state"] == "waiting" and later["after"] == [task["id"]]
+    server.app.hub.session("leader").read_inbox()
+    server.app.hub.session("leader").finish_task(task["id"], "all green")
+    detail = server.ok(f"/api/task?id={task['id']}")
+    assert [m["kind"] for m in detail["thread"]] == ["task", "result"]
+    assert [t["id"] for t in detail["dependents"]] == [later["id"]]
+    problems = server.ok("/api/state")["problems"]
+    assert any(p["kind"] == "review" and p["task_id"] == task["id"] for p in problems)
+    back = server.ok("/api/review", {"task_id": task["id"], "accept": False, "feedback": "add a test"})
+    assert (back["state"], back["revisions"]) == ("working", 1)
+    server.app.hub.session("leader").finish_task(task["id"], "test added")
+    assert server.ok("/api/review", {"task_id": task["id"], "accept": True})["state"] == "accepted"
+
+
+def test_search_and_activity_feed(server):
+    server.ok("/api/send", {"to": "worker-a", "text": "Use the blue theme"})
+    server.ok("/api/task", {"to": "leader", "title": "Plan it"})
+    assert [m["text"] for m in server.ok("/api/search?q=blue")["messages"]] == ["Use the blue theme"]
+    events = server.ok("/api/events?after=0")["events"]
+    assert events[-1]["text"] == "gave #1 to leader: Plan it"
+    assert server.ok("/api/state")["last_event"] == events[-1]["id"]

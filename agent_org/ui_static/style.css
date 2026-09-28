@@ -365,3 +365,87 @@ label.inline input { width: auto; }
 .taskc .acts { display: flex; gap: 6px; }
 .clamped-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font-size: 13px; }
 .notes { white-space: pre-wrap; word-break: break-word; background: var(--panel-2); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+
+/* board */
+.board-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.board-bar { display: flex; gap: 10px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.board-bar select { width: auto; }
+.board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(190px, 1fr)); gap: 10px;
+  padding: 14px 18px; overflow: auto; }
+.col { display: flex; flex-direction: column; min-height: 0; background: var(--panel-2); border-radius: 12px; }
+.col header { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px 6px; cursor: help; }
+.col .cards { flex: 1; overflow-y: auto; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 7px; }
+.col-review header b { color: var(--task); }
+.col-blocked header b { color: var(--danger); }
+.tcard { text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--panel);
+  border: 1px solid var(--border); border-left: 3px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); cursor: pointer; }
+.tcard:hover { box-shadow: var(--shadow-lg); }
+.tcard.p1 { border-left-color: var(--danger); }
+.tcard.s-done { border-left-color: var(--task); }
+.tcard.s-accepted, .tcard.s-failed, .tcard.s-rejected, .tcard.s-cancelled { opacity: .8; }
+.tc-head { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
+.tc-title { font-weight: 600; line-height: 1.3; }
+.tc-meta { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
+.tc-after { font-size: 11.5px; }
+.small { font-size: 12px; }
+.empty.small { padding: 10px; }
+@media (max-width: 1000px) { .board { grid-template-columns: repeat(6, 220px); } }
+
+/* task states */
+.tstate.waiting { --tcolor: var(--idle); }
+.tstate.open { --tcolor: var(--instruction); }
+.tstate.working { --tcolor: var(--working); }
+.tstate.blocked, .tstate.failed { --tcolor: var(--danger); }
+.tstate.done { --tcolor: var(--task); }
+.tstate.accepted { --tcolor: var(--result); }
+.tstate.rejected, .tstate.cancelled { --tcolor: var(--idle); }
+button.taskc { text-align: left; cursor: pointer; }
+.taskc.working { --tcolor: var(--working); }
+.taskc.waiting { --tcolor: var(--idle); }
+.taskc.accepted { --tcolor: var(--result); }
+.taskc.failed, .taskc.rejected { --tcolor: var(--danger); }
+
+/* task dialog */
+dialog.wide { width: min(760px, calc(100vw - 32px)); }
+.dialog-body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; max-height: 85vh; overflow-y: auto; }
+.task-head { display: flex; align-items: center; gap: 10px; }
+.task-head h2 { margin: 0; font-size: 17px; flex: 1; }
+.task-meta { display: grid; grid-template-columns: 110px 1fr; gap: 5px 10px; margin: 0; font-size: 13px; }
+.task-meta dt { color: var(--muted); }
+.task-meta dd { margin: 0; }
+.dep { margin-right: 8px; }
+.done-when { background: var(--accent-soft); border-radius: 8px; padding: 8px 11px; }
+.text-block { white-space: pre-wrap; word-break: break-word; }
+.dialog-body .result { white-space: pre-wrap; word-break: break-word; background: var(--panel-2); border-radius: 8px; padding: 8px 11px; }
+.dialog-body .result.blocked, .dialog-body .result.failed { background: color-mix(in srgb, var(--danger) 9%, var(--panel)); }
+.review { border: 2px solid var(--task); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.dialog-body .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dialog-body h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 0 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.after-list { display: flex; flex-direction: column; gap: 3px; max-height: 150px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 9px; color: var(--text); }
+
+/* problems */
+.problems { max-width: 720px; margin: 0 auto 18px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--panel)); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.problem { display: flex; gap: 9px; align-items: center; font-size: 13px; }
+.picon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); flex-shrink: 0; font-size: 12px; }
+.problem.question .picon, .problem.review .picon { background: var(--accent-soft); color: var(--accent); }
+.problem.stopped .picon, .problem.stalled .picon, .problem.blocked .picon, .problem.loop .picon, .problem.duplicate .picon {
+  background: color-mix(in srgb, var(--danger) 15%, var(--panel)); color: var(--danger); }
+.ptext { flex: 1; }
+
+/* activity */
+.activity { gap: 2px; }
+.ev { display: flex; gap: 7px; align-items: baseline; font-size: 13px; padding: 3px 2px; border-bottom: 1px solid var(--border); }
+.ev .eicon { width: 14px; text-align: center; color: var(--muted); }
+.ev.watch .eicon { color: var(--danger); }
+.ev.task .eicon { color: var(--task); }
+.ev button.link { text-align: left; }
+
+/* search and notices */
+#search { width: 130px; font-size: 12.5px; padding: 4px 8px; }
+.msg.notice { --kind: var(--help); background: color-mix(in srgb, var(--help) 5%, var(--panel)); }
+.filters { flex-wrap: wrap; row-gap: 6px; }
+.filters .seg button, .filters > button { white-space: nowrap; }
+.filters #search { flex: 1 1 120px; }

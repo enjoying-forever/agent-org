@@ -625,6 +625,10 @@ class Store:
                                 (after, limit)).fetchall()
         return [Event(r["id"], r["at"], r["kind"], r["role"], r["text"], r["task_id"]) for r in reversed(rows)]
 
+    @_locked
+    def last_event_id(self) -> int:
+        return self._db.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
+
     # settings
 
     @_locked

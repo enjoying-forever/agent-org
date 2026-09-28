@@ -46,6 +46,18 @@ def role_card(me: RoleSession) -> str:
         "How to work:",
         f"- People only receive what you send with the {SERVER_NAME} tools. Text you write in your own "
         "session reaches nobody.",
+        *([
+            "- As the leader: turn each task from the owner into a plan of tasks for your team, each with "
+            "a done_when, ordered with after= where one needs another. Review every result against its "
+            "done_when. When the owner's task is really done, finish_task it with a short summary of what "
+            "was built and where.",
+        ] if superior == team.owner else []),
+        *([
+            "- Give work as tasks with a done_when, and split big work into several tasks; after= makes a "
+            "task wait for others. Review each result (review_task) before building on it.",
+        ] if subs else []),
+        "- Messages from 'hub' are the system's own reminders: a quiet task, an expired file lease, a "
+        "question passed up to you. Act on them.",
         "- Keep your status current with set_status, so everyone can see what you are doing.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "
         "automatically, and you are reminded of open tasks and unanswered questions.",
