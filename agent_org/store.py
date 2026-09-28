@@ -190,6 +190,26 @@ class Store:
         return row[0]
 
     @_locked
+    def messages_after(self, after: int, limit: int = 300) -> list[Message]:
+        """Up to `limit` of the newest messages with an id above `after`, oldest first."""
+        rows = self._db.execute(
+            "SELECT * FROM messages WHERE id > ? ORDER BY id DESC LIMIT ?", (after, limit)
+        ).fetchall()
+        return [_message(r) for r in reversed(rows)]
+
+    @_locked
+    def unread_counts(self) -> dict[str, int]:
+        rows = self._db.execute(
+            "SELECT recipient, COUNT(*) FROM messages WHERE read_at IS NULL GROUP BY recipient"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    @_locked
+    def statuses(self) -> dict[str, Status]:
+        rows = self._db.execute("SELECT * FROM status").fetchall()
+        return {r["role"]: Status(r["role"], r["state"], r["task"], r["updated_at"]) for r in rows}
+
+    @_locked
     def messages_involving(self, role: str, limit: int = 20) -> list[Message]:
         """The most recent messages sent by or to `role`, oldest first."""
         rows = self._db.execute(

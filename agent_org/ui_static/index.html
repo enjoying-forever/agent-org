@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-org</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><b>agent-org</b><span id="project" class="muted"></span></div>
+    <nav class="views">
+      <button data-view="team" class="active">Team</button>
+      <button data-view="editor">Edit team</button>
+    </nav>
+    <div class="spacer"></div>
+    <span id="conn" class="conn">connecting</span>
+    <button id="launch-all" class="primary">Launch team</button>
+  </header>
+
+  <main id="view-team" class="team-view">
+    <section class="chart-pane"><ul id="chart" class="tree"></ul></section>
+    <aside class="side">
+      <div class="tabs">
+        <button data-tab="messages" class="active">Messages <span id="inbox-badge" class="badge" hidden></span></button>
+        <button data-tab="files">Files <span id="files-count" class="muted"></span></button>
+      </div>
+      <div id="tab-messages" class="tab">
+        <div class="filters">
+          <div class="seg" id="filter-seg">
+            <button data-filter="all" class="active">All</button>
+            <button data-filter="me">To me</button>
+            <button data-filter="help">Help</button>
+          </div>
+          <select id="filter-role" title="Only messages sent by or to this role"></select>
+          <button id="mark-read" class="small" hidden>Mark read</button>
+        </div>
+        <div id="feed" class="feed"></div>
+        <form id="composer" class="composer">
+          <div class="row">
+            <select id="to" title="Recipient"></select>
+            <span id="reply-chip" class="chip" hidden><span></span><button type="button" title="Not a reply">&times;</button></span>
+          </div>
+          <textarea id="text" rows="3" placeholder="Write to your team... (Ctrl+Enter to send)"></textarea>
+          <div class="row"><span class="muted" style="flex:1;font-size:12px">You can message anyone.</span><button class="primary">Send</button></div>
+        </form>
+      </div>
+      <div id="tab-files" class="tab" hidden>
+        <div class="feed" style="padding:0"><table class="locks"><thead><tr><th>File</th><th>Being written by</th><th>Since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
+      </div>
+    </aside>
+  </main>
+
+  <main id="view-editor" class="editor-view" hidden>
+    <div id="editor" class="editor-main"></div>
+    <aside class="editor-side">
+      <div class="preview"><ul id="preview" class="tree small"></ul></div>
+      <div class="save">
+        <ul id="errors" class="errors"></ul>
+        <div style="display:flex;gap:8px">
+          <button id="revert">Revert</button>
+          <button id="save" class="primary" style="flex:1">Save team.yaml</button>
+        </div>
+        <span class="muted" style="font-size:12px">Running agents keep their old role until you open their tab again.</span>
+      </div>
+    </aside>
+  </main>
+
+  <div id="drawer" class="drawer" hidden></div>
+
+  <dialog id="summon">
+    <form method="dialog">
+      <h2>Summon a consultant</h2>
+      <div id="summon-quote" class="quote"></div>
+      <div id="summon-tiers" class="tiers"></div>
+      <label>Brief for the consultant (optional)<textarea id="summon-brief" rows="3" placeholder="What you already know, where to look..."></textarea></label>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button id="summon-go" class="primary" value="ok">Summon</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="blocker" class="blocker" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

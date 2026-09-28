@@ -50,7 +50,28 @@ Run everything in the `formal` conda env from this folder.
    python -m agent_org.cli --team path/to/team.yaml tree
    ```
 
-## Launch the team
+## The UI
+
+Drag your `team.yaml` onto **`agent-org-ui.cmd`** (or run
+`agent-org-ui.cmd path\to\team.yaml`). A local web page opens in your browser:
+
+- **Team:** the org chart with each agent's model, live status, unread messages
+  and files. Consultants appear as dashed cards under the agent they help. Click a
+  card for details, to message it, reopen its terminal tab, release its files or
+  dismiss it. **Launch team** opens a terminal tab for every role.
+- **Messages:** the whole team's conversation, live, with filters. Write to any
+  role, reply, and answer help requests addressed to you, including **Summon
+  consultant**, which lets you pick a tier and write a brief.
+- **Files:** every file being written, and by whom.
+- **Edit team:** roles, leader ("Make leader"), superiors, harness, model, effort,
+  write scopes, duties and consultant tiers, with a live tree preview and checks.
+  Saving writes `team.yaml` (the old one is kept as `team.yaml.bak`).
+
+The UI listens on 127.0.0.1 only, and the page's link carries an access token.
+Keep the UI's window open while you use it; closing it stops the page, not the
+agents.
+
+## Launch the team from the command line
 
 ```
 conda run -n formal --cwd E:\code\claude_own\agent-org python -m agent_org.launch --team path\to\team.yaml
@@ -97,8 +118,8 @@ one yourself to restart a single agent.
 - [x] Step 1: hub core (role tree, rules, messages, status, file locks) with tests
 - [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
 - [x] Consultants: temporary helpers summoned for help requests, with file hand-over
+- [x] Web UI (moved up from step 5): org chart, messages, files, consultants, team editor
 - [ ] Step 3: all four harnesses, with message delivery into live sessions
 - [ ] Step 4: pre-edit hooks that enforce locks
-- [ ] Step 5: dashboard (org chart editor, messages, locks)
 
 Run the tests with `python -m pytest`.
