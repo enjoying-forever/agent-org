@@ -207,7 +207,7 @@ def test_owner_writes_to_everyone_and_urgently(server):
 
 def test_the_law_is_served(server):
     law = server.ok("/api/law")["law"]
-    assert law[0]["title"] == "Chain of command" and len(law) == 9
+    assert law[0]["title"] == "Chain of command" and len(law) == 12
 
 
 def test_roles_show_notes_and_whether_they_resume(server):

@@ -13,7 +13,8 @@ from agent_org.store import Store
 def test_the_law_reads_as_numbered_rules():
     text = law_text()
     assert text.startswith("1. Chain of command.")
-    assert "4. Every task gets closed." in text and "9. Urgent is rare." in text
+    assert "5. Every task ends with a result." in text and "6. Results are checked." in text
+    assert "12. Urgent is rare." in text
 
 
 # law 2: answering is always allowed
@@ -47,7 +48,8 @@ def test_tasks_go_down_and_their_result_goes_back_to_the_assigner(hub):
     assert done.state == "done"
     [result] = hub.session("leader").read_inbox()  # past tech-lead: it is the answer to leader's task
     assert (result.kind, result.reply_to) == ("result", message.id)
-    assert result.text.startswith(f"Task #{task.id} finished: Build the login form")
+    assert result.text.startswith(f"Task #{task.id} is DONE - please review it: Build the login form")
+    assert result.task_id == task.id  # the result is in the task's thread
 
 
 def test_tasks_cannot_go_up_or_sideways(hub):

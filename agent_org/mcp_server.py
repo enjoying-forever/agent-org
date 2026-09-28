@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cards import role_card
-from .hub import BROADCAST, Hub, HubError, RoleSession
+from .hub import BROADCAST, OUTCOMES, Hub, HubError, RoleSession
 from .launch import tab_opener
 from .store import Lock, Message
 from .team import TeamError
@@ -42,7 +42,7 @@ def _fmt_messages(messages: list[Message], empty: str) -> str:
 
 
 def _fmt_lock(lock: Lock) -> str:
-    return f"{lock.path} (held by {lock.owner})"
+    return f"{lock.path} (held by {lock.owner}" + (f", {lock.reason}" if lock.reason else "") + ")"
 
 
 class Tools:
@@ -69,14 +69,22 @@ class Tools:
                    "urgent": {"type": "boolean", "description": "only for messages going down: "
                               "interrupts the receiver's current work"}},
                   ["to", "text"], self._send)
-        self._add("list_tasks", "Your open tasks, and the tasks you gave that are not finished yet.",
+        self._add("list_tasks", "Your tasks (to do, and queued behind others), and the tasks you gave that "
+                                "are not finished yet, including those waiting for your review.",
                   {}, [], lambda a: self._list_tasks())
         self._add("finish_task",
-                  "Close a task assigned to you: outcome 'done' with the result, or 'blocked' with what "
-                  "you need. The person who assigned it is told. Every task must be closed this way.",
+                  "Close a task assigned to you. outcome: 'done' (it meets its 'done when'; say what you did "
+                  "and where), 'blocked' (say exactly what you need), 'failed' (say why), or 'rejected' (it "
+                  "is not something you can or should do). Whoever assigned it is told. Every task must "
+                  "be closed this way.",
                   {"task_id": {"type": "integer"}, "result": text,
-                   "outcome": {"type": "string", "enum": ["done", "blocked"]}},
+                   "outcome": {"type": "string", "enum": list(OUTCOMES)}},
                   ["task_id", "result"], self._finish)
+        self._add("task_details", "A task with its whole conversation (its thread).",
+                  {"task_id": {"type": "integer"}}, ["task_id"], self._details)
+        self._add("search_messages", "Search the messages you may read (yours and your team's below you).",
+                  {"words": text}, ["words"],
+                  lambda a: _fmt_messages(me.search(a["words"]), "Nothing found."))
         self._add("save_notes",
                   "Save your working notes (replacing the previous ones): what you know, decided and are "
                   "doing. If your session is ever replaced, the new one starts from these notes.",
@@ -97,10 +105,15 @@ class Tools:
         self._add("view", "Look at a role: its status and locks, and its recent messages if it is you "
                           "or below you.",
                   {"role": text}, ["role"], self._view)
-        self._add("claim_file", "Take the write lock on a file before editing it. One writer per file.",
-                  {"path": {"type": "string", "description": "path relative to the project folder"}},
-                  ["path"], lambda a: "You now hold " + _fmt_lock(me.claim(a["path"])))
-        self._add("release_file", "Release a write lock you (or someone below you) hold.",
+        self._add("claim_file",
+                  "Take the lease on a file, or on a whole folder with a pattern such as src/api/*, before "
+                  "editing. One writer per file. (Editing a free file in your scope takes it for you.) "
+                  "Leases run out after an hour without activity.",
+                  {"path": {"type": "string", "description": "file or pattern, relative to the project folder"},
+                   "reason": {"type": "string", "description": "what for, e.g. task #12"}},
+                  ["path"], lambda a: "You now hold " + _fmt_lock(me.claim(a["path"], a.get("reason") or "")))
+        self._add("release_file", "Release a lease you (or someone below you) hold: the file or pattern "
+                                  "exactly as it was claimed.",
                   {"path": text}, ["path"], lambda a: "Released " + me.release(a["path"]).path)
         self._add("list_locks", "List every file that is currently being written, and by whom.", {}, [],
                   lambda a: "\n".join(_fmt_lock(x) for x in me.store.locks()) or "No files are locked.")
@@ -115,13 +128,23 @@ class Tools:
             return  # consultants neither assign work, summon nor dismiss
         if any(not team.roles[s].is_consultant for s in team.subordinates_of(me.name)):
             self._add("assign_task",
-                      "Give work to someone below you: one clear, self-contained task. They must close it "
-                      "with finish_task, and you get the result. part_of: the id of your own task this is "
-                      "a piece of.",
+                      "Give work to someone below you: one clear, self-contained task. They close it with "
+                      "finish_task, you get the result and review it (review_task).",
                       {"to": text, "title": {"type": "string", "description": "one line"},
                        "details": {"type": "string", "description": "everything they need to do it"},
-                       "part_of": {"type": "integer"}},
+                       "done_when": {"type": "string", "description": "how anyone can check it is finished, "
+                                     "e.g. 'pytest passes and the page shows 10 stories'"},
+                       "after": {"type": "array", "items": {"type": "integer"},
+                                 "description": "ids of tasks that must be done before this one starts"},
+                       "priority": {"type": "integer", "enum": [1, 2, 3],
+                                    "description": "1 urgent, 2 normal, 3 low"},
+                       "part_of": {"type": "integer", "description": "id of your own task this is a piece of"}},
                       ["to", "title"], self._assign)
+            self._add("review_task",
+                      "Review a done task you gave: accept it, or send it back with specific feedback "
+                      "(up to three times).",
+                      {"task_id": {"type": "integer"}, "accept": {"type": "boolean"}, "feedback": text},
+                      ["task_id", "accept"], self._review)
             self._add("cancel_task", "Withdraw a task you gave (or one below you) that is no longer needed.",
                       {"task_id": {"type": "integer"}, "reason": text}, ["task_id"], self._cancel)
         if team.can_summon(me.name):
@@ -183,10 +206,32 @@ class Tools:
         return text
 
     def _assign(self, args: dict[str, Any]) -> str:
-        task = self.me.assign_task(args["to"], args["title"], args.get("details") or "",
-                                   args.get("part_of"))
-        return (f"Assigned task #{task.id} to {task.assignee}: {task.title}. You will get its result "
-                "when they call finish_task.")
+        task = self.me.assign_task(args["to"], args["title"], args.get("details") or "", args.get("part_of"),
+                                   args.get("done_when") or "", args.get("after") or [],
+                                   int(args.get("priority") or 2))
+        start = (f"It starts when #{', #'.join(map(str, task.depends_on))} are done." if task.state == "waiting"
+                 else "They have it now.")
+        hint = "" if task.done_when else " (Tip: give tasks a done_when, so the result can be checked.)"
+        return f"Assigned task #{task.id} to {task.assignee}: {task.title}. {start}{hint}"
+
+    def _review(self, args: dict[str, Any]) -> str:
+        task = self.me.review_task(int(args["task_id"]), bool(args["accept"]), args.get("feedback") or "")
+        return (f"Task #{task.id} accepted." if task.state == "accepted"
+                else f"Task #{task.id} sent back to {task.assignee} (round {task.revisions}).")
+
+    def _details(self, args: dict[str, Any]) -> str:
+        task, thread = self.me.task_details(int(args["task_id"]))
+        lines = [f"Task #{task.id} [{task.state}] {task.assigner} -> {task.assignee}: {task.title}"]
+        if task.depends_on:
+            lines.append(f"after: #{', #'.join(map(str, task.depends_on))}")
+        if task.done_when:
+            lines.append(f"done when: {task.done_when}")
+        if task.details:
+            lines += ["", task.details]
+        if task.result:
+            lines += ["", f"result: {task.result}"]
+        lines += ["", "Thread:", _fmt_messages(thread, "(no messages)")]
+        return "\n".join(lines)
 
     def _finish(self, args: dict[str, Any]) -> str:
         task = self.me.finish_task(int(args["task_id"]), args["result"], args.get("outcome") or "done")
@@ -197,13 +242,18 @@ class Tools:
         return f"Task #{task.id} is cancelled; {task.assignee} has been told."
 
     def _list_tasks(self) -> str:
-        mine, given = self.me.my_tasks(), self.me.given_tasks()
-        lines = ["Your open tasks:" if mine else "You have no open tasks."]
-        lines += [f"  #{t.id} [{t.state}] from {t.assigner}: {t.title}" for t in mine]
+        mine, queued, given = self.me.my_tasks(), self.me.queued_tasks(), self.me.given_tasks()
+        lines = ["Your tasks:" if mine else "You have no tasks to do."]
+        lines += [f"  #{t.id} [{t.state}] from {t.assigner}: {t.title}"
+                  + (f" (done when: {t.done_when})" if t.done_when else "") for t in mine]
+        if queued:
+            lines.append("Queued for you (they start when what they wait for is done):")
+            lines += [f"  #{t.id} after #{', #'.join(map(str, t.depends_on))}: {t.title}" for t in queued]
         if given:
             lines.append("Tasks you gave that are not finished:")
-            lines += [f"  #{t.id} [{t.state}] to {t.assignee}: {t.title}"
-                      + (f" -- {t.result[:200]}" if t.state == "blocked" else "") for t in given]
+            lines += [f"  #{t.id} [{'waits for your review' if t.state == 'done' else t.state}] to "
+                      f"{t.assignee}: {t.title}" + (f" -- {t.result[:200]}" if t.state == "blocked" else "")
+                      for t in given]
         return "\n".join(lines)
 
     def _team_status(self) -> str:

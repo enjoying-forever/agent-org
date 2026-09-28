@@ -88,7 +88,7 @@ def test_initialize_echoes_protocol_and_gives_the_role_card(client):
 
 BASIC_TOOLS = {"my_role", "team_status", "send_message", "ask_help", "read_inbox", "wait_for_messages",
                "set_status", "view", "claim_file", "release_file", "list_locks", "hand_over_file",
-               "list_tasks", "finish_task", "save_notes"}
+               "list_tasks", "finish_task", "save_notes", "task_details", "search_messages"}
 
 
 def tool_names(c):
@@ -106,7 +106,8 @@ def test_each_role_gets_the_tools_it_can_use(client, hub):
     assert tool_names(client("worker-a")) == BASIC_TOOLS | {"dismiss_consultant"}
     # a manager can summon; the tier list is in the tool's schema
     lead = client("tech-lead")
-    assert tool_names(lead) == BASIC_TOOLS | {"dismiss_consultant", "summon_consultant", "assign_task", "cancel_task"}
+    assert tool_names(lead) == BASIC_TOOLS | {"dismiss_consultant", "summon_consultant", "assign_task",
+                                              "cancel_task", "review_task"}
     summon = next(t for t in lead.call("tools/list")["result"]["tools"] if t["name"] == "summon_consultant")
     assert summon["inputSchema"]["properties"]["tier"]["enum"] == ["medium", "high"]
     # a consultant only helps
@@ -135,7 +136,7 @@ def test_role_card_shows_the_whole_team_to_everyone(client):
     assert "    - worker-b (antigravity): -  <- you" in worker
     assert "  - researcher (grok): -" in worker  # other branches are listed too
     assert "Text you write in your own session reaches nobody" in worker
-    assert "THE MESSAGE LAW" in worker and "4. Every task gets closed." in worker
+    assert "THE MESSAGE LAW" in worker and "6. Results are checked." in worker
 
 
 def test_team_status_tool(client, hub):

@@ -59,12 +59,19 @@ def duties_left(me: RoleSession) -> list[str]:
     """What the message law still asks of an agent that is about to go quiet."""
     left = []
     for task in me.my_tasks():
-        if task.state == "open":
+        if task.state in ("open", "working"):
+            check = f" Done when: {task.done_when}." if task.done_when else ""
             left.append(
-                f"Task #{task.id} from {task.assigner} ({task.title}) is still open. If it is finished, "
-                f"call finish_task({task.id}, result). If you cannot go on, call "
-                f"finish_task({task.id}, result, outcome=\"blocked\") and say what you need. If you "
+                f"Task #{task.id} from {task.assigner} ({task.title}) is still open.{check} If it is "
+                f"finished, call finish_task({task.id}, result). If you cannot go on, use outcome "
+                "\"blocked\" and say what you need (or \"failed\" / \"rejected\" with the reason). If you "
                 "are still working on it or waiting for your own subtasks, carry on.")
+    for task in me.to_review():
+        check = f" against its 'done when' ({task.done_when})" if task.done_when else ""
+        left.append(
+            f"Task #{task.id} you gave to {task.assignee} ({task.title}) is done and waits for your "
+            f"review. Check it{check}, then review_task({task.id}, accept=true), or "
+            f"review_task({task.id}, accept=false, feedback=...) to send it back.")
     for task in me.given_tasks():
         if task.state == "blocked":
             left.append(
@@ -129,6 +136,8 @@ def stop_wait() -> float:
 
 
 def on_post_tool(me: RoleSession, payload: dict[str, Any]):
+    me.store.touch(me.name)  # progress, for the watchdog
+    me.store.renew(me.name)  # an agent at work keeps its file leases
     new = me.store.unnoticed(me.name)
     if not new:
         return None
@@ -182,12 +191,14 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
         if rel == HUB_DIR or rel.startswith(HUB_DIR + "/"):
             return deny(f"{rel} belongs to the agent-org hub; use the org tools instead of editing it.")
         key, _ = me.hub.lock_key(full)
-        lock = me.store.lock_for(key)
+        lock = me.store.covering(key)
         if lock is not None and lock.owner == me.name:
             continue
         if lock is not None:
-            return deny(f"{rel} is being written by {lock.owner}; only one agent may write a file. "
-                        f"Do not edit it: ask {me.superior} (or {lock.owner} directly if they are your peer).")
+            why = f" for {lock.reason}" if lock.reason else ""
+            covered = f" (its lease on {lock.path} covers it)" if lock.pattern else ""
+            return deny(f"{rel} is being written by {lock.owner}{why}{covered}; only one agent may write a "
+                        f"file. Do not edit it: ask {me.superior} (or {lock.owner} directly if they are your peer).")
         try:
             me.claim(full)
         except HubError as e:
