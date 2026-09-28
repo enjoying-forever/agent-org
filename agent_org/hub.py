@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -123,14 +124,26 @@ class RoleSession:
     def read_inbox(self) -> list[Message]:
         return self.store.take_unread(self.name)
 
-    def wait_for_messages(self, timeout: float, poll: float = 0.5) -> list[Message]:
-        """Block until at least one message arrives or `timeout` seconds pass."""
+    def wait_for_messages(
+        self, timeout: float, poll: float = 0.5, stop: threading.Event | None = None
+    ) -> list[Message]:
+        """Block until at least one message arrives, `timeout` seconds pass, or `stop` is set.
+
+        A stopped wait returns without taking anything, so no message is lost to a
+        caller that has gone away.
+        """
         deadline = time.monotonic() + timeout
         while True:
+            if stop is not None and stop.is_set():
+                return []
             messages = self.store.take_unread(self.name)
             if messages or time.monotonic() >= deadline:
                 return messages
-            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            delay = min(poll, max(0.0, deadline - time.monotonic()))
+            if stop is not None:
+                stop.wait(delay)
+            else:
+                time.sleep(delay)
 
     def _check_reply(self, reply_to: int | None) -> int | None:
         if reply_to is None:

@@ -28,6 +28,29 @@ Run everything in the `formal` conda env from this folder.
    python -m agent_org.cli --team path/to/team.yaml tree
    ```
 
+## Launch the team
+
+```
+conda run -n formal --cwd E:\code\claude_own\agent-org python -m agent_org.launch --team path\to\team.yaml
+```
+
+This opens a Windows Terminal window named `agent-org`, with one tab for you and
+one per role (add role names to start only some; `--dry-run` writes the scripts
+without opening anything). Each role tab runs its real harness, connected to the
+hub through the `org` MCP server:
+
+- **Claude Code** gets the role card as an appended system prompt and the `org`
+  tools pre-approved.
+- **Codex** gets the role card as developer instructions and the `org` server
+  through `-c` overrides.
+
+Every agent starts by calling `my_role`, then waits for messages. In your tab,
+give the leader its first task with `org send leader "..."`, and watch the other
+tabs. Messages addressed to you arrive in `org inbox`.
+
+The start scripts are in `.agent-org/launch/<role>/start.ps1`; you can rerun
+one yourself to restart a single agent.
+
 ## Command line
 
 `--as ROLE` acts as that role; without it you act as the owner.
@@ -47,7 +70,7 @@ Run everything in the `formal` conda env from this folder.
 ## Status
 
 - [x] Step 1: hub core (role tree, rules, messages, status, file locks) with tests
-- [ ] Step 2: MCP server and a launcher that opens one terminal tab per role
+- [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
 - [ ] Step 3: all four harnesses, with message delivery into live sessions
 - [ ] Step 4: pre-edit hooks that enforce locks
 - [ ] Step 5: dashboard (org chart editor, messages, locks)

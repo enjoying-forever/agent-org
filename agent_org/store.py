@@ -7,12 +7,18 @@ WAL mode lets them read concurrently, and writes that must not interleave
 
 from __future__ import annotations
 
+import functools
 import sqlite3
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ParamSpec, TypeVar
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -70,14 +76,27 @@ class Lock:
     claimed_at: float
 
 
+def _locked(method: Callable[P, R]) -> Callable[P, R]:
+    """One connection may be shared by several threads (parallel tool calls), so use it one at a time."""
+
+    @functools.wraps(method)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        with args[0]._lock:  # type: ignore[attr-defined]
+            return method(*args, **kwargs)
+
+    return wrapper
+
+
 class Store:
     def __init__(self, db_path: str | Path):
+        self._lock = threading.RLock()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(db_path, timeout=30, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
 
+    @_locked
     def close(self) -> None:
         self._db.close()
 
@@ -93,6 +112,7 @@ class Store:
 
     # messages
 
+    @_locked
     def add_message(
         self, sender: str, recipient: str, kind: str, text: str, reply_to: int | None = None
     ) -> Message:
@@ -105,10 +125,12 @@ class Store:
         assert message is not None
         return message
 
+    @_locked
     def get_message(self, message_id: int) -> Message | None:
         row = self._db.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
         return _message(row) if row else None
 
+    @_locked
     def take_unread(self, recipient: str) -> list[Message]:
         """Return the recipient's unread messages and mark them read, atomically."""
         with self._transaction() as db:
@@ -123,12 +145,14 @@ class Store:
                 )
         return [_message(r) for r in rows]
 
+    @_locked
     def unread_count(self, recipient: str) -> int:
         row = self._db.execute(
             "SELECT COUNT(*) FROM messages WHERE recipient = ? AND read_at IS NULL", (recipient,)
         ).fetchone()
         return row[0]
 
+    @_locked
     def messages_involving(self, role: str, limit: int = 20) -> list[Message]:
         """The most recent messages sent by or to `role`, oldest first."""
         rows = self._db.execute(
@@ -139,6 +163,7 @@ class Store:
 
     # status
 
+    @_locked
     def set_status(self, role: str, state: str, task: str) -> Status:
         now = time.time()
         self._db.execute(
@@ -149,12 +174,14 @@ class Store:
         )
         return Status(role, state, task, now)
 
+    @_locked
     def get_status(self, role: str) -> Status | None:
         row = self._db.execute("SELECT * FROM status WHERE role = ?", (role,)).fetchone()
         return Status(row["role"], row["state"], row["task"], row["updated_at"]) if row else None
 
     # locks
 
+    @_locked
     def claim(self, key: str, path: str, owner: str) -> Lock:
         """Take the lock on `key` for `owner` unless someone holds it. Returns the lock as it now stands."""
         with self._transaction() as db:
@@ -168,13 +195,16 @@ class Store:
                 return Lock(path, owner, now)
         return _lock(row)
 
+    @_locked
     def release(self, key: str) -> None:
         self._db.execute("DELETE FROM locks WHERE key = ?", (key,))
 
+    @_locked
     def lock_for(self, key: str) -> Lock | None:
         row = self._db.execute("SELECT * FROM locks WHERE key = ?", (key,)).fetchone()
         return _lock(row) if row else None
 
+    @_locked
     def locks(self, owner: str | None = None) -> list[Lock]:
         if owner is None:
             rows = self._db.execute("SELECT * FROM locks ORDER BY path").fetchall()
