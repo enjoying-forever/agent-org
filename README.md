@@ -15,11 +15,13 @@ subscription you already have, and you watch and steer everything from one web p
 3. **Click *Launch team*.** Each agent opens in its own Windows Terminal tab.
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
-4. **Give the leader a task.** In the box at the bottom right, switch to **Task**,
-   write one line saying what you want, add details if needed, and click *Give task*.
+4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
+   saying what you want, and fill in **Done when**: how anyone can check it is
+   finished (for example "the page shows today's top 10 stories").
 
-Then watch: the cards show who is working, waiting or blocked; messages and tasks
-appear live; the leader's result comes back to you as a message.
+Then watch: the leader splits the work into tasks for its team, each task moves
+across the Board as it is worked on, the leader checks every result, and when your
+task is done it lands in *Review*: open it and click **Accept** or **Send back**.
 
 Next time, open the team from *Open a recent team*, click *Launch team*, and every
 agent carries on where it stopped.
@@ -32,9 +34,17 @@ agent carries on where it stopped.
 - **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.
-- **Tasks:** every task, who gave it to whom, and how it ended (done or blocked, with
-  the result).
-- **Files:** who is writing which file right now.
+- **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
+  progress, Blocked, Review, Finished. Click one to see its whole conversation, what
+  "done" means, what it waits for, and to accept or send back a result.
+- **Needs attention:** at the top of the Team page, what needs you: agents that stopped
+  with work left, stalled tasks, questions for you, results to review, message loops -
+  each with a button to fix it.
+- **Activity:** a timeline of everything that happened (tasks given, started, done,
+  accepted; files taken and released; reminders and escalations).
+- **Files:** who is writing which file right now, and for which task.
+- **Usage:** how many tokens each agent's conversation used (and, for Codex, how much
+  of your subscription limit), on its card and in its details.
 - **Edit team:** add and remove roles, choose the leader and each role's superior, the
   program and model each role uses, what files it may write, and the consultant tiers.
 - **The law:** the rules below. **Setup:** checks that the programs are ready.
@@ -47,32 +57,54 @@ what they still owe.
 1. **Chain of command.** Write to your direct superior, to your peers (same superior)
    and to anyone below you. Don't skip levels upward or write to other teams.
 2. **Answering is always allowed.** You may reply to any message sent to you, whoever
-   sent it.
-3. **Work is given as tasks.** Work goes only downward, one clear, self-contained task
-   at a time. Peers coordinate but never assign work to each other.
-4. **Every task gets closed.** When a task is finished, its owner closes it with the
-   result - done, or blocked with what is needed. Whoever assigned it is told.
-5. **Help goes up one level.** A question goes to your direct superior, who must answer
-   it, pass it up, or summon a consultant.
-6. **Say it once, say it all.** Every message wakes its receiver: no "thanks" or "ok"
+   sent it. Messages from the owner come first.
+3. **Work is given as tasks.** Work goes only downward, one clear task at a time, each
+   with a **done when** that says how anyone can check it is finished. Bigger work is
+   split into several tasks; **after** makes a task wait until others are done. Peers
+   coordinate but never assign work to each other.
+4. **Take it or turn it down.** A task is yours once you read it. If you cannot or
+   should not do it, reject it at once, with the reason.
+5. **Every task ends with a result:** done, blocked (with what is needed), failed
+   (with why), or rejected. Whoever gave it is told. Nothing is dropped silently.
+6. **Results are checked.** Whoever gave a task reviews a done result against its
+   "done when": accept, or send back with feedback (three times at most).
+7. **Help goes up one level.** A question goes to your direct superior, who must answer
+   it, pass it up, or summon a consultant. An unanswered question is passed up for you.
+8. **Say it once, say it all.** Every message wakes its receiver: no "thanks" or "ok"
    messages; long material goes in a file.
-7. **One writer per file.** An agent must hold a file's lock to edit it; editing a free
-   file in its scope takes the lock automatically.
-8. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
-   Messages stay private to the sender, the receiver and their superiors.
-9. **Urgent is rare.** Only messages going down may be urgent; they interrupt the
-   receiver's current work.
+9. **One writer per file.** An agent must hold a file's lease to edit it; editing a free
+   file in its scope takes it, and a whole folder (`src/api/*`) can be reserved for a
+   task. Leases run out when their holder stops working.
+10. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
+    Messages stay private to the sender, the receiver and their superiors.
+11. **Silence is a problem.** A task with no progress gets a reminder, then its assigner
+    is told. Blockers are reported as soon as they are hit.
+12. **Urgent is rare.** Only messages going down may be urgent; they interrupt the
+    receiver's current work.
 
 How the rules are kept:
 
 - When an agent finishes a turn, a hook hands it any new messages, or reminds it of
-  open tasks, blocked tasks it gave, unanswered questions and files it still holds -
-  then waits and wakes it the moment a message arrives. You never have to nudge an
-  idle agent.
+  what the law says it still owes - open tasks, results to review, blocked tasks it
+  gave, unanswered questions, files it holds - then waits and wakes it the moment a
+  message arrives. You never have to nudge an idle agent.
 - After every step it takes, a busy agent is told about new messages; urgent ones
-  interrupt it immediately.
-- Before every file edit, the hub checks the lock, so two agents never write the same
+  interrupt it immediately. Its activity also renews its file leases.
+- Before every file edit, the hub checks the lease, so two agents never write the same
   file.
+- While the page is open, a **watchdog** patrols every half minute: it releases leases
+  that ran out, nudges a stalled task and then tells whoever gave it, passes unanswered
+  questions up, and lists what needs you.
+
+Where the ideas come from: the task lifecycle follows the
+[A2A protocol](https://a2a-protocol.org/latest/topics/life-of-a-task/); "done when" and
+review answer the most common failures found in
+[Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657) (unclear tasks,
+misalignment, missing verification); tasks that wait for others come from
+[Beads](https://github.com/gastownhall/beads); the watchdog is modelled on
+[Gas Town](https://github.com/gastownhall/gastown)'s Witness; leases, threads and search
+come from [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail); the
+Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
 
 ## Memory: agents remember across restarts
 
@@ -125,8 +157,12 @@ library. From this folder:
 How it fits together:
 
 - `team.py` - the role tree and consultant tiers, from `team.yaml`.
-- `hub.py` - the message law, tasks, file locks and consultants, over `store.py` (one
-  SQLite file per team in `.agent-org/`, shared by every agent's process).
+- `hub.py` - the message law, the task lifecycle, file leases and consultants, over
+  `store.py` (one SQLite file per team in `.agent-org/`, shared by every agent's
+  process, upgraded in place when the format grows).
+- `watchdog.py` - nudges, escalations, expired leases and the problems list
+  (`python -m agent_org.watchdog --team team.yaml` runs it without the UI).
+- `usage.py` - token use per agent, from each harness's session files.
 - `mcp_server.py` - the `org` tools each agent gets (standard-library MCP over stdio).
 - `hooks.py` / `org_hook.py` - the hooks each harness runs: deliver mail, remind of
   duties, guard edits, record the conversation id.
