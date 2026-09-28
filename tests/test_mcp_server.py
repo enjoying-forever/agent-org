@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -217,6 +218,21 @@ def test_runs_over_real_stdio(tmp_path):
     assert proc.wait(timeout=20) == 0, proc.stderr.read().decode()
     assert replies[0]["result"]["serverInfo"]["name"] == "agent-org"
     assert "你好, 测试完成 ✓" in replies[1]["result"]["content"][0]["text"]
+
+
+def test_role_can_come_from_the_environment(tmp_path):
+    (tmp_path / "project").mkdir()
+    team_file = tmp_path / "team.yaml"
+    team_file.write_text(yaml.safe_dump(TEAM), encoding="utf-8")
+    env = {**os.environ, "AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": "researcher"}
+    request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+    proc = subprocess.run([sys.executable, "-m", "agent_org.mcp_server"], cwd=ROOT, env=env,
+                          input=json.dumps(request) + "\n", capture_output=True, text=True, timeout=20)
+    assert "You are 'researcher'" in json.loads(proc.stdout.splitlines()[0])["result"]["instructions"]
+    env.pop("AGENT_ORG_ROLE")
+    proc = subprocess.run([sys.executable, "-m", "agent_org.mcp_server"], cwd=ROOT, env=env,
+                          input="", capture_output=True, text=True, timeout=20)
+    assert proc.returncode == 2 and "AGENT_ORG_ROLE" in proc.stderr
 
 
 def test_bad_role_exits_with_a_message(tmp_path):

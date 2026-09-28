@@ -87,7 +87,7 @@ def test_state_lists_the_tree(server):
     assert state["owner"] == "you" and state["leader"] == "leader"
     assert [r["name"] for r in state["roles"]] == ["leader", "tech-lead", "researcher", "worker-a", "worker-b"]
     assert [t["name"] for t in state["tiers"]] == ["medium", "high"]
-    assert state["launchable"] == ["claude", "codex"]
+    assert state["launchable"] == ["claude", "codex", "grok"]
 
 
 def test_owner_messages_and_inbox(server):
@@ -129,9 +129,8 @@ def test_release_a_lock(server):
 
 def test_launch_opens_tabs_for_supported_roles(server):
     result = server.ok("/api/launch", {})
-    assert result["opening"] == ["leader", "tech-lead", "worker-a"]
-    assert result["skipped"] == ["worker-b: antigravity is not supported yet",
-                                 "researcher: grok is not supported yet"]
+    assert result["opening"] == ["leader", "tech-lead", "worker-a", "researcher"]
+    assert result["skipped"] == ["worker-b: antigravity is not supported yet"]
     one = server.ok("/api/launch", {"roles": ["worker-a"]})
     assert one["opening"] == ["worker-a"]
     assert server.request("/api/launch", {"roles": ["ghost"]})[0] == 400

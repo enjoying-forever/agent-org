@@ -38,6 +38,7 @@ class Launch:
     command: str
     args: list[str]
     env: dict[str, str] = field(default_factory=dict)
+    setup: list[list[str]] = field(default_factory=list)  # commands run first, in the project folder
 
 
 def kickoff(role: str) -> str:
@@ -45,9 +46,15 @@ def kickoff(role: str) -> str:
             "your role and the rules, then call wait_for_messages and act on what arrives.")
 
 
-def mcp_server(team_file: Path, role: str) -> tuple[str, list[str], dict[str, str]]:
-    """The command every harness runs to start this role's hub connection."""
-    args = ["-m", "agent_org.mcp_server", "--team", str(team_file), "--role", role]
+def mcp_server(team_file: Path | None = None, role: str | None = None) -> tuple[str, list[str], dict[str, str]]:
+    """The command every harness runs to start this role's hub connection.
+
+    Without a team file and role, the server takes them from AGENT_ORG_TEAM and
+    AGENT_ORG_ROLE, which every start script sets.
+    """
+    args = ["-m", "agent_org.mcp_server"]
+    if team_file is not None and role is not None:
+        args += ["--team", str(team_file), "--role", role]
     return sys.executable, args, {"PYTHONPATH": str(PACKAGE_ROOT)}
 
 
@@ -92,7 +99,25 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
     return Launch(role, "codex", "codex", cli)
 
 
-BUILDERS = {"claude": claude_launch, "codex": codex_launch}
+def grok_launch(hub: Hub, team_file: Path, role: str, out: Path) -> Launch:
+    spec = hub.team.roles[role]
+    # Grok loads MCP servers only from config files, so register one 'org' server in the
+    # project's .grok/config.toml ("add" also updates it). The entry names no role: every
+    # Grok tab passes its own AGENT_ORG_* variables on to the server it starts.
+    # Grok asks you to trust the folder the first time it sees this project server.
+    command, args, env = mcp_server()
+    register = ["grok", "mcp", "add", "--scope", "project", SERVER_NAME, command,
+                *(f"--env={k}={v}" for k, v in env.items()), "--", *args]
+    cli = ["--rules", role_card(hub.session(role)), "--allow", f"MCPTool({SERVER_NAME}__*)"]
+    if spec.model:
+        cli += ["-m", spec.model]
+    if spec.effort:
+        cli += ["--reasoning-effort", spec.effort]
+    cli.append(kickoff(role))
+    return Launch(role, "grok", "grok", cli, setup=[register])
+
+
+BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch}
 
 
 def toml(value: object) -> str:
@@ -122,6 +147,7 @@ def role_script(launch: Launch, team: Team, team_file: Path) -> str:
         f"$Host.UI.RawUI.WindowTitle = {ps(launch.role)}",
         *(f"$env:{name} = {ps(value)}" for name, value in env.items()),
         f"Set-Location -LiteralPath {ps(str(team.project_root))}",
+        *(" ".join(["&", *(ps(a) for a in cmd), "| Out-Null"]) for cmd in launch.setup),
         f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args),
         "",
     ])

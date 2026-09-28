@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 import traceback
@@ -251,9 +252,14 @@ class Server:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="agent-org MCP server for one role")
-    parser.add_argument("--team", required=True)
-    parser.add_argument("--role", required=True)
+    # Harnesses whose MCP config is shared by every session in a folder (Grok) start the
+    # server without arguments; it then takes the role from the start script's environment.
+    parser.add_argument("--team", default=os.environ.get("AGENT_ORG_TEAM"))
+    parser.add_argument("--role", default=os.environ.get("AGENT_ORG_ROLE"))
     args = parser.parse_args(argv)
+    if not args.team or not args.role:
+        print("agent-org: pass --team and --role, or set AGENT_ORG_TEAM and AGENT_ORG_ROLE", file=sys.stderr)
+        return 2
     # stdio carries UTF-8 JSON no matter what the Windows code page is
     sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")  # type: ignore[union-attr]

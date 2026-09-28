@@ -40,7 +40,7 @@ MAX_BODY = 1_000_000
 EFFORTS = {
     "claude": ["low", "medium", "high", "xhigh", "max"],
     "codex": ["minimal", "low", "medium", "high", "xhigh"],
-    "grok": [],
+    "grok": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     "antigravity": ["low", "medium", "high"],
 }
 CLAUDE_MODELS = ["opus", "sonnet", "fable", "haiku", "claude-opus-5-5", "claude-sonnet-5",

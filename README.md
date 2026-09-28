@@ -86,6 +86,12 @@ hub through the `org` MCP server:
   tools pre-approved.
 - **Codex** gets the role card as developer instructions and the `org` server
   through `-c` overrides.
+- **Grok** gets the role card through `--rules` and the `org` tools pre-approved
+  with `--allow`. Grok only reads MCP servers from config files, so its start
+  script registers one `org` server in the project's `.grok/config.toml`; each
+  Grok tab's server takes its role from the tab's `AGENT_ORG_ROLE`. The first time
+  in a folder you haven't trusted, Grok asks you to trust it.
+- **Antigravity** is not supported yet.
 
 Every agent starts by calling `my_role`, then waits for messages. In your tab,
 give the leader its first task with `org send leader "..."`, and watch the other
@@ -119,7 +125,7 @@ one yourself to restart a single agent.
 - [x] Step 2: MCP server and a launcher that opens one terminal tab per role (Claude Code, Codex)
 - [x] Consultants: temporary helpers summoned for help requests, with file hand-over
 - [x] Web UI (moved up from step 5): org chart, messages, files, consultants, team editor
-- [ ] Step 3: all four harnesses, with message delivery into live sessions
+- [~] Step 3: Grok works; Antigravity and message delivery into busy sessions still to do
 - [ ] Step 4: pre-edit hooks that enforce locks
 
 Run the tests with `python -m pytest`.

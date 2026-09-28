@@ -73,10 +73,24 @@ def test_codex_script_passes_valid_toml(team_file, tmp_path):
     assert built.args[-1] == launch.kickoff("worker-a")
 
 
+def test_grok_registers_the_project_server_then_starts(team_file):
+    base = run_dry(team_file, "researcher")
+    script = (base / "researcher" / "start.ps1").read_text(encoding="utf-8")
+    head, register, start = script.partition("& 'grok' 'mcp' 'add'")[0], *script.partition("| Out-Null\n")[::2]
+    assert "Set-Location" in head  # registered in the project folder
+    # the server entry carries no role; '--' stays quoted so PowerShell passes it on
+    assert "'--scope' 'project' 'org' " in register
+    assert "'--' '-m' 'agent_org.mcp_server'" in register and "--role" not in register
+    start = start.strip()
+    assert start.startswith("& 'grok' '--rules' 'You are ''researcher''")
+    assert "'--allow' 'MCPTool(org__*)'" in start
+    assert start.endswith(launch.ps(launch.kickoff("researcher")))
+
+
 def test_unsupported_harnesses_are_skipped(team_file, capsys):
     base = run_dry(team_file)
-    assert "skipping researcher: grok" in capsys.readouterr().err
-    assert sorted(p.name for p in base.iterdir()) == ["leader", "tech-lead", "worker-a", "you"]
+    assert "skipping worker-b: antigravity" in capsys.readouterr().err
+    assert sorted(p.name for p in base.iterdir()) == ["leader", "researcher", "tech-lead", "worker-a", "you"]
 
 
 def test_owner_console(team_file):
