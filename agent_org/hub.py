@@ -600,6 +600,8 @@ class RoleSession:
                 hub.event("git", self.name, f"conflicts with main in {', '.join(conflicts)}", task_id)
                 raise HubError(f"{refusal}. {conflict_text(conflicts)}")
             changed = gitops.git(wt, "diff", "--name-only", f"{main}...HEAD").stdout.split()
+            if not gitops.git(wt, "rev-list", "--count", f"{main}..HEAD").stdout.strip().strip("0"):
+                return "", ""  # nothing of its own to put into main
             checks = self._checks(sorted(set(files) | set(changed)), wt, refusal, task_id)
             with gitops.land_lock(root):
                 commit, why = gitops.land(root, branch, message)

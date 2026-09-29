@@ -183,3 +183,9 @@ def test_junk_committed_earlier_does_not_block_a_merge(hub):
     hub.session("worker-b").finish_task(b_task.id, "done")
     assert "return 'one'" in main_text(hub) and "return 'three'" in main_text(hub)
     assert "old.pyc" not in git(root, "ls-files")
+
+
+def test_an_agent_with_nothing_new_lands_nothing(hub):
+    task, _ = start(hub, "worker-a", "Look into it")
+    done = hub.session("worker-a").finish_task(task.id, "nothing needed changing")
+    assert done.state == "done" and done.commit_id == ""
