@@ -359,7 +359,7 @@ def zcode_launch(hub: Hub, team_file: Path, role: str, out: Path,
     if found is None:
         raise HubError("ZCode is not installed (expected it in %LOCALAPPDATA%\\Programs\\ZCode)")
     exe, script = found
-    cli = [str(script), "--settings", str(zcode_settings(hub, role, out)), "--max-turns", "100000"]
+    cli = [str(script), "--settings", str(zcode_settings(hub, role, out))]  # (its --max-turns is rejected)
     if resume:
         cli += ["--resume", resume]
     cli += ["--prompt", resume_kickoff(role) if resume else kickoff(role)]
