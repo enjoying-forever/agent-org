@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .cards import role_card
+from . import presets
 from .hub import BROADCAST, OUTCOMES, Hub, HubError, RoleSession
 from .launch import stop_role, tab_opener
 from .store import Lock, Message
@@ -165,10 +166,15 @@ class Tools:
                       "agent uses the owner's subscriptions.",
                       {"name": text, "harness": {"type": "string", "enum": list(HARNESSES)},
                        "superior": {"type": "string", "description": "who it reports to (default: you)"},
-                       **role_props}, ["name", "harness", "duties"],
-                      lambda a: self._hired(me.hire(a["name"], a["harness"], a["duties"], a.get("model") or "",
-                                                    a.get("effort") or "", a.get("write_scope") or [],
-                                                    a.get("superior") or "")))
+                       "preset": {"type": "string", "enum": presets.names(), "description": "start from a role "
+                                  "in the owner's library (its program, model, duties, instructions and files); "
+                                  "anything else you give overrides it"},
+                       "instructions": {"type": "string", "description": "how it should work, beyond its duties"},
+                       **role_props}, ["name"],
+                      lambda a: self._hired(me.hire(a["name"], a.get("harness") or "", a.get("duties") or "",
+                                                    a.get("model") or "", a.get("effort") or "",
+                                                    a.get("write_scope"), a.get("superior") or "",
+                                                    a.get("preset") or "", a.get("instructions") or "")))
             self._add("change_agent",
                       "Change an agent below you: its duties, files, model or effort (a new model applies "
                       "from its next start), or whom it reports to (you or someone below you).",

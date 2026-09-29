@@ -21,6 +21,8 @@ def role_card(me: RoleSession) -> str:
     lines = [f"You are '{me.name}' in an agent team run by {team.owner} (the owner)."]
     if role and role.duties:
         lines.append(f"Your duties: {role.duties}")
+    if role and role.instructions:
+        lines += ["Your instructions (from the owner):", role.instructions]
     if superior == team.owner:
         lines.append(f"Your superior: {superior}, the owner: a person who reads your messages in the "
                      "agent-org UI. You are the team's leader.")

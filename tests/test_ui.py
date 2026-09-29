@@ -418,3 +418,16 @@ def test_save_a_team_once_and_start_new_projects_from_it(server, tmp_path):
     assert not any(t["mine"] for t in server.ok("/api/home")["templates"])
     status, _ = server.request("/api/delete-template", {"id": "solo"})
     assert status == 400  # built-in teams stay
+
+
+def test_role_presets_from_the_editor(server):
+    before = server.ok("/api/team")["presets"]
+    assert any(p["id"] == "reviewer" for p in before)
+    saved = server.ok("/api/save-preset", {"name": "Careful coder", "role": {
+        "harness": "codex", "model": "gpt-6-luna", "duties": "Code.", "instructions": "Run the tests.",
+        "write_scope": ["src/*"]}})
+    assert saved["preset"] == "my:Careful coder"
+    mine = next(p for p in server.ok("/api/team")["presets"] if p["id"] == "my:Careful coder")
+    assert mine["mine"] and mine["instructions"] == "Run the tests."
+    server.ok("/api/delete-preset", {"id": "my:Careful coder"})
+    assert server.request("/api/delete-preset", {"id": "coder"})[0] == 400

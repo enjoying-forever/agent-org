@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, gitops, launch, templates, usage, watchdog
+from . import doctor, gitops, launch, presets, templates, usage, watchdog
 from .hub import BRANCH_RULE, LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -438,7 +438,7 @@ class App:
         self.hub  # noqa: B018 - needs an open team
         data = yaml.safe_load(self.team_file.read_text(encoding="utf-8")) or {}
         return {"config": data, "harnesses": list(HARNESSES), "models": self.catalog.models,
-                "efforts": EFFORTS}
+                "efforts": EFFORTS, "presets": presets.catalogue()}
 
     # acting as the owner
 
@@ -533,6 +533,24 @@ class App:
             raise ApiError(str(e)) from None
         return {"template": template, "default": templates.default_template()}
 
+    def save_preset(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Keep one role's settings in the library, to reuse in any team."""
+        role = body.get("role")
+        if not isinstance(role, dict):
+            raise ApiError("send the role's settings")
+        try:
+            preset = presets.save(_str(body, "name"), role)
+        except ValueError as e:
+            raise ApiError(str(e)) from None
+        return {"preset": preset, "presets": presets.catalogue()}
+
+    def delete_preset(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            presets.delete(_str(body, "id"))
+        except KeyError:
+            raise ApiError("Only your own saved roles can be deleted.") from None
+        return {"presets": presets.catalogue()}
+
     def default_template(self, body: dict[str, Any]) -> dict[str, Any]:
         try:
             templates.set_default(_str(body, "id"))
@@ -592,6 +610,7 @@ POST_ROUTES = {
     "/api/team": App.save_team, "/api/review": App.review, "/api/history": App.enable_history,
     "/api/reassign": App.reassign, "/api/restart": App.restart, "/api/save-template": App.save_template,
     "/api/default-template": App.default_template, "/api/delete-template": App.delete_template,
+    "/api/save-preset": App.save_preset, "/api/delete-preset": App.delete_preset,
 }
 
 

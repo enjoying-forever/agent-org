@@ -470,3 +470,14 @@ dialog.wide { width: min(760px, calc(100vw - 32px)); }
 .move-row { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .move-row > button.link { flex: 1; text-align: left; }
 .problem.limit .picon { background: color-mix(in srgb, var(--help) 16%, var(--panel)); color: var(--help); }
+
+/* role presets */
+select.add-role { width: auto; font-weight: 600; }
+.preset-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: -4px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--border); font-size: 12.5px; }
+.chip button.link { padding: 0 4px; color: var(--muted); }
+.chip button.link:hover { color: var(--danger); }
+/* getting started */
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#project { font-weight: 600; }

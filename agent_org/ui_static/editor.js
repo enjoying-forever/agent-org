@@ -30,7 +30,8 @@ function toDraft(config) {
     })),
     roles: Object.entries(roles || {}).map(([name, r]) => ({
       name, superior: r.superior ?? '', harness: r.harness ?? 'claude', model: r.model ?? '',
-      effort: r.effort ?? '', duties: r.duties ?? '', write_scope: (r.write_scope || []).join(', '),
+      effort: r.effort ?? '', duties: r.duties ?? '', instructions: r.instructions ?? '',
+      write_scope: (r.write_scope || []).join(', '),
     })),
     tiers: Object.entries(consultants || {}).map(([name, t]) => ({
       name, harness: t.harness ?? 'claude', model: t.model ?? '', effort: t.effort ?? '',
@@ -46,6 +47,7 @@ function fromDraft(d) {
     if (String(r.model).trim()) spec.model = String(r.model).trim();
     if (String(r.effort).trim()) spec.effort = String(r.effort).trim();
     if (r.duties.trim()) spec.duties = r.duties.trim();
+    if ((r.instructions || '').trim()) spec.instructions = r.instructions.trim();
     spec.write_scope = r.write_scope.split(',').map((s) => s.trim()).filter(Boolean);
     roles[r.name.trim()] = spec;
   }
@@ -173,6 +175,8 @@ function renderEditor() {
         h('span', { class: 'harness' }, r.harness),
         h('b', {}, r.name || '(unnamed)'),
         r === leader ? h('span', { class: 'tag' }, 'leader') : h('button', { class: 'small', onclick: () => makeLeader(r) }, 'Make leader'),
+        h('button', { class: 'small', title: 'Keep this role (program, model, duties, instructions, files) '
+          + 'to reuse in any team', onclick: () => savePreset(r) }, 'Save as preset…'),
         h('button', { class: 'small danger', onclick: () => removeRole(r) }, 'Remove')),
       h('div', { class: 'grid' },
         h('label', {}, 'Name', h('input', {
@@ -190,8 +194,13 @@ function renderEditor() {
         h('label', {}, 'Effort', bound(r, 'effort', { list: `efforts-${r.harness}`, placeholder: 'default' })),
         h('label', { class: 'wide' }, 'Files it may write (comma separated, * matches anything)',
           bound(r, 'write_scope', { class: 'mono', placeholder: 'e.g. src/*, tests/*   (empty: edits nothing)' })),
-        h('label', { class: 'wide' }, 'Duties', h('textarea', {
+        h('label', { class: 'wide' }, 'Duties (one line: what it is for)', h('textarea', {
           rows: 2, value: r.duties, oninput: (e) => { r.duties = e.target.value; touch(); },
+        })),
+        h('label', { class: 'wide' }, 'Instructions (its prompt: how to work, what to check - optional)', h('textarea', {
+          rows: 3, value: r.instructions || '', placeholder: 'e.g. Follow the existing code style. Run the tests before '
+            + 'you finish, and say what you ran.',
+          oninput: (e) => { r.instructions = e.target.value; touch(); },
         }))));
   });
   const tierCards = d.tiers.map((t) => h('div', { class: `card role-card h-${t.harness}` },
@@ -248,6 +257,24 @@ function renderEditor() {
           onchange: (e) => { d.commit_on_accept = e.target.checked; touch(); },
         }), 'Commit each accepted task to git (when the project keeps history)'))),
     h('div', { class: 'section-head' },
+      h('h2', {}, `Roles (${d.roles.length})`),
+      presetPicker()),
+    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
+      'Exactly one role reports to you: that is your leader. Use "Make leader" to switch. '
+      + 'Put strong models high in the tree and cheaper ones at the leaves. "Save as preset" keeps a role '
+      + 'to reuse in any team.'),
+    (E.meta.presets || []).some((p) => p.mine) && h('div', { class: 'preset-chips' },
+      h('span', { class: 'muted small' }, 'Your presets:'),
+      (E.meta.presets || []).filter((p) => p.mine).map((p) => h('span', { class: 'chip' }, p.title,
+        h('button', { class: 'link', title: 'Delete this preset', onclick: () => deletePreset(p) }, '✕')))),
+    ...roleCards,
+    h('div', { class: 'section-head' },
+      h('h2', {}, `Consultant tiers (${d.tiers.length})`),
+      h('button', { onclick: addTier }, '+ Add tier')),
+    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
+      'When a subordinate asks for help, its superior can summon one of these as a temporary helper.'),
+    ...tierCards,
+    h('div', { class: 'section-head' },
       h('h2', {}, `Checks (${d.checks.length})`),
       h('button', { onclick: () => { d.checks.push({ name: '', run: '', when: '', timeout: 300 }); touch(); renderEditor(); } }, '+ Add check')),
     h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
@@ -261,20 +288,7 @@ function renderEditor() {
         h('label', {}, 'Time limit (seconds)', bound(c, 'timeout', { type: 'number', min: 1 })),
         h('div', { class: 'wide' }, h('button', {
           class: 'small danger', onclick: () => { d.checks.splice(d.checks.indexOf(c), 1); touch(); renderEditor(); },
-        }, 'Remove check'))))),
-    h('div', { class: 'section-head' },
-      h('h2', {}, `Roles (${d.roles.length})`),
-      h('button', { onclick: addRole }, '+ Add role')),
-    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
-      'Exactly one role reports to you: that is your leader. Use "Make leader" to switch. '
-      + 'Put strong models high in the tree and cheaper ones at the leaves.'),
-    ...roleCards,
-    h('div', { class: 'section-head' },
-      h('h2', {}, `Consultant tiers (${d.tiers.length})`),
-      h('button', { onclick: addTier }, '+ Add tier')),
-    h('p', { class: 'muted', style: { margin: '-8px 0 0' } },
-      'When a subordinate asks for help, its superior can summon one of these as a temporary helper.'),
-    ...tierCards);
+        }, 'Remove check'))))));
   renderEditorSide();
 }
 
@@ -320,16 +334,54 @@ function removeRole(r) {
   renderEditor();
 }
 
-function addRole() {
+function addRole(preset) {
   const d = E.draft;
-  let n = d.roles.length + 1;
-  while (d.roles.some((r) => r.name === `role-${n}`)) n += 1;
+  const base = preset ? preset.id.replace(/^my:/, '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-') : 'role';
+  let name = base;
+  for (let n = 2; d.roles.some((r) => r.name === name); n += 1) name = `${base}-${n}`;
   const leader = d.roles.find((r) => r.superior === d.owner);
-  d.roles.push({ name: `role-${n}`, superior: leader ? leader.name : d.owner, harness: 'codex',
-    model: 'gpt-6-luna', effort: 'medium', duties: '', write_scope: '' });
+  const from = preset || { harness: 'codex', model: 'gpt-6-luna', effort: 'medium' };
+  d.roles.push({ name, superior: leader ? leader.name : d.owner, harness: from.harness,
+    model: from.model || '', effort: from.effort || '', duties: from.duties || '',
+    instructions: from.instructions || '', write_scope: (from.write_scope || []).join(', ') });
   touch();
   renderEditor();
   $('#editor').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function savePreset(r) {
+  const name = prompt(`Save "${r.name}" as a role preset. Name for it:`, r.name);
+  if (name === null || !name.trim()) return;
+  const role = { harness: r.harness, model: r.model, effort: r.effort, duties: r.duties, instructions: r.instructions,
+    write_scope: r.write_scope.split(',').map((x) => x.trim()).filter(Boolean) };
+  const res = await act(api('/api/save-preset', { name: name.trim(), role }),
+    () => `Saved the preset "${name.trim()}". Pick it under "Add role" in any team.`);
+  if (res) { E.meta.presets = res.presets; renderEditor(); }
+}
+
+async function deletePreset(p) {
+  if (!confirm(`Delete your role preset "${p.title}"? Roles already made from it stay as they are.`)) return;
+  const res = await act(api('/api/delete-preset', { id: p.id }), () => `Deleted "${p.title}".`);
+  if (res) { E.meta.presets = res.presets; renderEditor(); }
+}
+
+function presetPicker() {
+  const list = E.meta.presets || [];
+  const label = (p) => `${p.title} - ${p.harness}${p.model ? ` ${p.model}` : ''}`;
+  return h('select', {
+    class: 'add-role', title: 'Add a role: blank, or from a preset',
+    onchange: (e) => {
+      const id = e.target.value;
+      e.target.value = '';
+      if (id === 'blank') addRole();
+      else if (id) addRole(list.find((p) => p.id === id));
+    },
+  },
+  h('option', { value: '' }, '+ Add role…'),
+  h('option', { value: 'blank' }, 'Blank role'),
+  list.some((p) => p.mine) && h('optgroup', { label: 'Your presets' },
+    list.filter((p) => p.mine).map((p) => h('option', { value: p.id }, label(p)))),
+  h('optgroup', { label: 'Ready-made' }, list.filter((p) => !p.mine).map((p) => h('option', { value: p.id }, label(p)))));
 }
 
 function addTier() {

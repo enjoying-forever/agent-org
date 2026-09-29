@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
-from . import gitops, safety, verify
+from . import gitops, presets, safety, verify
 import yaml
 
 from .filelock import file_lock
@@ -860,10 +860,29 @@ class RoleSession:
             raise PermissionDenied("consultants do not change the team")
         return team
 
-    def hire(self, name: str, harness: str, duties: str, model: str = "", effort: str = "",
-             write_scope: list[str] | tuple[str, ...] = (), superior: str = "") -> Role:
-        """Add an agent under yourself (or under someone below you); it starts at once."""
+    def hire(self, name: str, harness: str = "", duties: str = "", model: str = "", effort: str = "",
+             write_scope: list[str] | tuple[str, ...] | None = None, superior: str = "", preset: str = "",
+             instructions: str = "") -> Role:
+        """Add an agent under yourself (or under someone below you); it starts at once.
+
+        With a `preset` (a role from the owner's library) its settings are the starting point;
+        whatever else is given overrides them.
+        """
         team = self._may_change_team()
+        if preset:
+            try:
+                base = presets.get(preset)
+            except KeyError:
+                raise HubError(f"there is no role preset '{preset}'; known: {', '.join(presets.names())}") from None
+            harness = harness or base.get("harness", "")
+            duties = duties or base.get("duties", "")
+            model = model or base.get("model", "")
+            effort = effort or base.get("effort", "")
+            instructions = instructions or base.get("instructions", "")
+            write_scope = base.get("write_scope", []) if write_scope is None else write_scope
+        write_scope = write_scope or []
+        if not duties.strip():
+            raise HubError("say what the new agent is for (duties), or hire from a preset")
         superior = superior or self.name
         if superior != self.name and not team.is_above(self.name, superior):
             raise PermissionDenied(f"you can only hire under yourself or someone below you, not under {superior}")
@@ -883,6 +902,8 @@ class RoleSession:
             spec["model"] = model.strip()
         if effort.strip():
             spec["effort"] = effort.strip()
+        if instructions.strip():
+            spec["instructions"] = _text(instructions)[:8000]
         self.hub.edit_team(lambda c: c.setdefault("roles", {}).__setitem__(name, spec))
         role = self.hub.team.roles[name]
         self._announce(f"hired {name} ({harness}{', ' + model if model else ''}) under {superior}: {duties[:200]}")

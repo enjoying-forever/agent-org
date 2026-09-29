@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 HARNESSES = ("claude", "codex", "grok", "antigravity")
-ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
+ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "instructions", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
 CHECK_KEYS = {"name", "run", "when", "timeout"}
 TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants", "checks",
@@ -34,6 +34,7 @@ class Role:
     duties: str = ""
     write_scope: tuple[str, ...] = ()
     tier: str | None = None  # set for temporary consultants
+    instructions: str = ""  # the role's own prompt: how to work, what to check (beyond its duties)
 
     @property
     def is_consultant(self) -> bool:
@@ -322,4 +323,5 @@ def _parse_role(name: object, spec: object) -> Role:
         effort=None if effort is None else str(effort),
         duties=str(spec.get("duties", "")).strip(),
         write_scope=tuple(scope),
+        instructions=str(spec.get("instructions") or "").strip()[:8000],
     )

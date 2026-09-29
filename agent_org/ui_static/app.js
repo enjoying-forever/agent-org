@@ -150,8 +150,9 @@ function applyState(state) {
   const first = S.state === null;
   S.state = state;
   S.stateKey = key;
-  $('#project').textContent = state.project_root;
-  $('#project').title = `team file: ${state.team_file}`;
+  const folder = state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
+  $('#project').textContent = folder;
+  $('#project').title = `project: ${state.project_root}\nteam file: ${state.team_file}`;
   renderChart();
   renderGuide();
   renderProblems();
@@ -306,8 +307,16 @@ function renderGuide() {
       + 'so the result can be checked.' },
   ];
   const g = $('#guide');
-  g.hidden = steps.every((s) => s.done);
-  g.replaceChildren(h('b', {}, 'Getting started'),
+  const key = `agent-org-guide-hidden:${st.team_file}`;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(key) === '1'; } catch { /* storage off: show it */ }
+  g.hidden = dismissed || steps.every((s) => s.done);
+  g.replaceChildren(
+    h('div', { class: 'guide-head' }, h('b', {}, 'Getting started'),
+      h('button', { class: 'small', title: 'Hide these steps for this team', onclick: () => {
+        try { localStorage.setItem(key, '1'); } catch { /* shown again next load */ }
+        g.hidden = true;
+      } }, 'Hide')),
     h('ol', {}, steps.map((s) => h('li', { class: s.done ? 'done' : '' }, s.text))));
 }
 
@@ -573,7 +582,8 @@ function renderInboxBadge() {
   $('#inbox-badge').textContent = n;
   $('#inbox-badge').hidden = !n;
   $('#mark-read').hidden = !n;
-  document.title = n ? `(${n}) agent-org` : 'agent-org';
+  const name = $('#project').textContent;
+  document.title = `${n ? `(${n}) ` : ''}${name ? `${name} · ` : ''}agent-org`;
 }
 
 function setCompose(mode) {

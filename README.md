@@ -162,6 +162,18 @@ consultants, checks and settings) and can make it your **default**. When you cre
 for a new project, your saved teams are listed first and the default is already chosen:
 pick the folder and click *Create team*. *Make default* and *Delete* are next to each.
 
+## A library of roles
+
+Each role has short **duties** (what it is for) and optional **instructions** - its own
+prompt: how to work, style rules, what to check. Both go into the agent's role card.
+
+**Save as preset…** on any role in *Edit team* keeps its program, model, effort, duties,
+instructions and files. In any team, **+ Add role…** offers your presets and ready-made
+ones (planner, coder, reviewer, tester, researcher, Gemini coder), filled in with one click;
+your presets are listed above the roles, each with ✕ to delete it. Managers can hire from
+the library too: `hire_agent(name, preset="reviewer")`, overriding whatever they want.
+Presets are kept in `~/.agent-org/roles/`.
+
 ## The team can change while it runs
 
 The leader, and any agent with people below it, can:
