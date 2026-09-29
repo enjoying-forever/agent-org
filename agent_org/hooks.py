@@ -156,12 +156,13 @@ def stop_wait() -> float:
 def on_post_tool(me: RoleSession, payload: dict[str, Any]):
     me.store.touch(me.name)  # progress, for the watchdog
     me.store.renew(me.name)  # an agent at work keeps its file leases
+    synced = me.hub.sync_role(me.name)  # branch mode: keep its copy close to main
     new = me.store.unnoticed(me.name)
-    if not new:
+    if not new and not synced:
         return None
     urgent = [m for m in new if m.urgent]
     rest = [m for m in new if not m.urgent]
-    parts = []
+    parts = [synced] if synced else []
     if urgent:  # law 9: urgent messages interrupt the current work, in full
         me.store.mark_read([m.id for m in urgent])
         parts.append("agent-org: URGENT message(s) for you. Deal with them before you continue:\n\n"
@@ -200,6 +201,8 @@ def deny(reason: str) -> dict[str, Any]:
 
 
 def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
+    if me.hub.branches:
+        return on_pre_edit_branch(me, payload)
     root = me.hub.base_team.project_root
     cwd = Path(field(payload, "cwd") or root)
     claimed = []
@@ -230,6 +233,29 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext":
                 f"agent-org: you now hold the write lock on {', '.join(claimed)}; "
                 "release_file it when you are done."}}
+    return None
+
+
+def on_pre_edit_branch(me: RoleSession, payload: dict[str, Any]):
+    """Branch mode: an agent edits its own copy freely, within its write scope; no leases."""
+    root = me.hub.root_of(me.name)
+    cwd = Path(field(payload, "cwd") or root)
+    for raw in edited_paths(payload):
+        full = (cwd / raw).resolve()
+        try:
+            rel = full.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            main = me.hub.base_team.project_root.resolve()
+            if full.is_relative_to(main):
+                return deny(f"Edit your own copy of the project in {root}, not the shared main folder: your "
+                            "work reaches main when you finish the task (or share_work).")
+            continue  # outside the project: not the team's business
+        if rel == ".git" or rel.startswith(".git/"):
+            return deny("Leave git's own files alone; the hub handles commits and merges.")
+        if not me._in_scope(me.team, me.name, rel):
+            return deny(f"{rel} is outside the files you may write ({', '.join(me._scope(me.team, me.name)) or 'none'}). "
+                        f"Ask {me.superior} if it needs changing.")
+        me.note_edit(rel)
     return None
 
 

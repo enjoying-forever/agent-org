@@ -39,6 +39,11 @@ def role_card(me: RoleSession) -> str:
         lines.append(f"{'  ' * depth}- {name} ({r.harness}): {r.duties or '-'}{you}")
     scope = ", ".join(role.write_scope) if role else "everything"
     lines.append(f"Files you may write: {scope or 'none - you do not edit files'}")
+    if me.hub.branches:
+        lines.append(f"Your own copy of the project: {me.hub.root_of(me.name)} (git branch "
+                     f"agent/{me.hub.branch_role(me.name)}). Work only there. finish_task(done) puts your work "
+                     "into main for everyone; share_work does it earlier, for things others need now (an "
+                     "interface, a plan). Your copy takes in main's new work by itself as you go.")
     if team.checks:
         lines.append("The team's checks - finish_task(done) is refused until those that apply pass, so run "
                      "them before you finish, and write tasks whose results can pass them:")
@@ -46,7 +51,7 @@ def role_card(me: RoleSession) -> str:
     lines += [
         "",
         f"THE MESSAGE LAW (the hub enforces it; you work through the '{SERVER_NAME}' tools):",
-        law_text(),
+        law_text(team.settings.branches),
         "",
         "How to work:",
         f"- People only receive what you send with the {SERVER_NAME} tools. Text you write in your own "

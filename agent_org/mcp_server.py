@@ -164,6 +164,13 @@ class Tools:
                        "tier": {"type": "string", "enum": list(team.tiers)},
                        "brief": {"type": "string", "description": "your notes for the consultant"}},
                       ["help_id", "tier"], self._summon)
+        if me.hub.branches:
+            self._add("share_work",
+                      "Put your work so far into main now, without finishing a task - for something others "
+                      "need before you are done (an interface, a plan, shared types). The hub merges the "
+                      "latest main into your copy, runs the checks, and lands your work.",
+                      {"summary": {"type": "string", "description": "what you are sharing, in one line"}},
+                      ["summary"], lambda a: f"Shared: your work is in main as {me.share_work(a['summary'])}.")
         self._add("dismiss_consultant",
                   "Dismiss a consultant working for you (or below you) once its problem is solved. "
                   "Files it holds go back to the agent it helped.",

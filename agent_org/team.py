@@ -13,7 +13,8 @@ ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
 CHECK_KEYS = {"name", "run", "when", "timeout"}
 TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants", "checks",
-             "autostart", "max_running", "commit_on_accept"}
+             "autostart", "max_running", "commit_on_accept", "isolation"}
+ISOLATION = ("leases", "branches")  # one writer per file, or every agent on its own git branch
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 CONSULTANT_PREFIX = "consultant-"  # names of temporary consultant roles: consultant-1, consultant-2, ...
 
@@ -70,6 +71,11 @@ class Settings:
     autostart: bool = False       # start an agent by itself when it has work and is not running
     max_running: int = 0          # most agents running at once (0: no limit)
     commit_on_accept: bool = True  # commit a task's files when its result is accepted
+    isolation: str = "leases"     # "branches": each agent works in its own git worktree
+
+    @property
+    def branches(self) -> bool:
+        return self.isolation == "branches"
 
 
 class Team:
@@ -137,8 +143,11 @@ class Team:
         max_running = data.get("max_running", 0)
         if not isinstance(max_running, int) or isinstance(max_running, bool) or max_running < 0:
             raise TeamError("'max_running' must be a whole number (0 means no limit)")
+        isolation = data.get("isolation", "leases")
+        if isolation not in ISOLATION:
+            raise TeamError(f"'isolation' must be one of {list(ISOLATION)}")
         settings = Settings(autostart=bool(data.get("autostart", False)), max_running=max_running,
-                            commit_on_accept=bool(data.get("commit_on_accept", True)))
+                            commit_on_accept=bool(data.get("commit_on_accept", True)), isolation=isolation)
         return cls(owner, project_root, database, roles, tiers, checks, settings)
 
     def with_roles(self, extra: list[Role]) -> Team:

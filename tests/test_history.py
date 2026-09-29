@@ -76,7 +76,7 @@ def test_a_failing_check_keeps_the_task_open(tmp_path):
     task = hub.session("tech-lead").assign_task("worker-a", "Build it")
     worker = hub.session("worker-a")
     worker.read_inbox()
-    with pytest.raises(HubError, match="(?s)is not done yet: tests FAILED.*2 tests failed.*finish_task again"):
+    with pytest.raises(HubError, match="(?s)is not done yet: tests FAILED.*2 tests failed.*try again"):
         worker.finish_task(task.id, "built")
     assert hub.store.get_task(task.id).state == "working"
     worker.finish_task(task.id, "cannot make the tests pass", outcome="blocked")  # blocked needs no checks
@@ -95,7 +95,7 @@ def test_agents_see_the_checks_before_they_run_into_them(tmp_path):
     worker.claim("src/a.py")
     with pytest.raises(HubError) as refused:
         worker.finish_task(task.id, "built")
-    assert f"--- tests: `{fail}` (run in the project folder) ---" in str(refused.value)  # what to run to see why
+    assert f"--- tests: `{fail}` (run in {hub.base_team.project_root}) ---" in str(refused.value)  # what to run to see why
     hub.close()
 
 

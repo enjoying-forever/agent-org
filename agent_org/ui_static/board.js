@@ -169,13 +169,13 @@ async function loadChanges(id) {
   try { c = await api(`/api/task-changes?id=${id}`); } catch { return; }
   const box = document.getElementById('task-changes');
   if (!box) return;
-  if (!c.files.length) {
+  if (!c.files.length && !c.diff) {
     fill(box, h('span', { class: 'muted small' }, 'No file changes recorded for this task.'));
     return;
   }
   fill(box,
-    h('b', {}, `Changes (${plural(c.files.length, 'file')})`),
-    h('div', { class: 'mono small' }, c.files.join(', ')),
+    h('b', {}, c.files.length ? `Changes (${plural(c.files.length, 'file')})` : 'Changes'),
+    c.files.length ? h('div', { class: 'mono small' }, c.files.join(', ')) : null,
     c.history
       ? (c.diff ? diffEl(c.diff) : h('div', { class: 'muted small' }, 'No differences from the last commit.'))
       : h('div', { class: 'history-off' },

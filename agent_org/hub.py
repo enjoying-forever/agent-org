@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -77,8 +78,25 @@ LAW = [
 ]
 
 
-def law_text() -> str:
-    return "\n".join(f"{i}. {title}. {rule}" for i, (title, rule) in enumerate(LAW, 1))
+BRANCH_RULE = ("Your own copy", "You work in your own copy of the project, on git branch agent/<you>: edit any "
+               "file in your scope, no locks, no waiting. When you finish a task as done (or call share_work), the "
+               "hub merges the latest main into your copy, runs the checks, and puts your work into main for "
+               "everyone. Where you and someone else changed the same lines, you resolve the conflict markers.")
+
+
+def law_text(branches: bool = False) -> str:
+    rules = [BRANCH_RULE if branches and title == "One writer per file" else (title, rule) for title, rule in LAW]
+    return "\n".join(f"{i}. {title}. {rule}" for i, (title, rule) in enumerate(rules, 1))
+
+
+GIT_ERRORS = (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError, TimeoutError, OSError)
+
+
+def conflict_text(files: list[str]) -> str:
+    return (f"Your work and main both changed the same lines in {', '.join(files)}. Everything else merged; "
+            "those spots in your copy now hold both versions between <<<<<<< and >>>>>>> markers (the original "
+            "text in the middle, after |||||||). Edit each spot to the right result - `git log main -p -- <file>` "
+            "shows who changed what - then try again.")
 
 
 class HubError(Exception):
@@ -157,6 +175,72 @@ class Hub:
         if not active:
             return self.base_team
         return self.base_team.with_roles([consultant_role(c) for c in active])
+
+    # branches: every agent in its own worktree
+
+    @property
+    def branches(self) -> bool:
+        return self.base_team.settings.branches
+
+    def branch_role(self, role: str) -> str:
+        """Whose copy `role` works in: its own, or - for a consultant - the agent it helps."""
+        team = self.team
+        seen = set()
+        while role in team.roles and team.roles[role].is_consultant and role not in seen:
+            seen.add(role)
+            role = team.roles[role].superior
+        return role
+
+    def root_of(self, role: str) -> Path:
+        """The folder `role` works in: its own worktree in branch mode, else the project folder."""
+        if not self.branches or role == self.base_team.owner:
+            return self.base_team.project_root
+        return gitops.worktree_path(self.base_team.project_root, self.branch_role(role))
+
+    def prepare_root(self, role: str) -> Path:
+        """Make sure the role's folder exists (in branch mode: history on, and its worktree)."""
+        root = self.base_team.project_root
+        if not self.branches or role == self.base_team.owner:
+            return root
+        try:
+            if not gitops.is_own_repo(root):
+                gitops.init(root)
+                self.event("git", self.base_team.owner, "turned history on: each agent works on its own branch")
+            return gitops.ensure_worktree(root, self.branch_role(role))
+        except GIT_ERRORS as e:
+            raise HubError(f"could not set up {role}'s copy of the project: {e}") from None
+
+    def sync_role(self, role: str) -> str:
+        """Branch mode: take the latest main into the role's copy when main has moved on.
+
+        Returns a line for the agent ('' when nothing happened). A merge that would conflict is
+        left for the agent's next finish_task / share_work, and only mentioned once.
+        """
+        if not self.branches:
+            return ""
+        owner = self.branch_role(role)
+        root, wt = self.base_team.project_root, self.root_of(role)
+        if not (wt / ".git").exists():
+            return ""
+        try:
+            main = gitops.main_branch(root)
+            now = gitops.head(root, main)
+            if (not now or gitops.merging(wt) or self.store.get_setting(f"synced:{owner}") == now
+                    or self.store.get_setting(f"sync-conflict:{owner}") == now):
+                return ""
+            gitops.commit_all(wt, f"{owner}: work in progress (before taking in main)")
+            changed, conflicts = gitops.sync(wt, main, abort_on_conflict=True)
+        except GIT_ERRORS:
+            return ""
+        if conflicts:
+            self.store.set_setting(f"sync-conflict:{owner}", now)
+            return (f"agent-org: main has new work that touches the same lines as yours in {', '.join(conflicts)}. "
+                    "Carry on; you will settle those spots when you finish (or share_work).")
+        self.store.set_setting(f"synced:{owner}", now)
+        if not changed:
+            return ""
+        return (f"agent-org: your copy now includes the latest main (changed: {', '.join(changed[:12])}"
+                f"{' ...' if len(changed) > 12 else ''}). Re-read those files before you edit them.")
 
     def session(self, name: str) -> RoleSession:
         if not self.team.is_member(name):
@@ -351,6 +435,7 @@ class RoleSession:
                 if task is not None and task.assignee == self.name and task.state == "open":
                     self.store.update_task(task.id, state="working", started_at=time.time())
                     self.hub.event("task", self.name, f"started #{task.id}: {task.title}", task.id)
+                    self.hub.sync_role(self.name)  # a new task starts from the latest main
         return messages
 
     def wait_for_messages(
@@ -449,19 +534,17 @@ class RoleSession:
         if task.state not in ("open", "working", "blocked"):
             raise HubError(f"task #{task_id} is already {task.state}")
         result = _text(result)
-        checks = ""
-        if outcome == "done" and self.team.checks:
-            outcomes = verify.run(self.team, self.store.task_files(task_id))
-            failed = [o for o in outcomes if not o.ok]
-            checks = verify.summary(outcomes)
-            if failed:
-                self.hub.event("check", self.name, f"#{task.id} checks failed: {checks}", task.id)
-                details = "\n\n".join(f"--- {o.name}: `{o.command}` (run in the project folder) ---\n{o.output}"
-                                        for o in failed)
-                raise HubError(f"task #{task_id} is not done yet: {checks}.\n\n{details}\n\nRun the command "
-                               "yourself to see what it expects, fix it, and finish_task again - or close the "
-                               "task as blocked or failed and say why.")
-        task = self.store.update_task(task_id, state=outcome, result=result, checks=checks)
+        checks, landed = "", {}
+        if self.hub.branches and outcome == "done":
+            commit, checks = self._integrate(f"task #{task.id}: {task.title}", self.store.task_files(task_id),
+                                             f"task #{task_id} is not done yet", task.id)
+            landed = {"commit_id": commit} if commit else {}
+        elif self.hub.branches:
+            self._save_work(f"task #{task.id} ({outcome})")
+        elif outcome == "done":
+            checks = self._checks(self.store.task_files(task_id), self.hub.base_team.project_root,
+                                  f"task #{task_id} is not done yet", task.id)
+        task = self.store.update_task(task_id, state=outcome, result=result, checks=checks, **landed)
         head = {"done": "is DONE - please review it", "blocked": "is BLOCKED", "failed": "FAILED",
                 "rejected": "was REJECTED"}[outcome]
         self.store.add_message(self.name, task.assigner, "result",
@@ -473,6 +556,76 @@ class RoleSession:
         elif outcome in ("failed", "rejected"):
             self.hub.stall_dependents(task)
         return task
+
+    def _checks(self, files: list[str], cwd: Path, refusal: str, task_id: int | None) -> str:
+        """Run the team's checks that apply to `files` in `cwd`; refuse with their output if one fails."""
+        if not self.team.checks:
+            return ""
+        outcomes = verify.run(self.team, files, cwd)
+        failed = [o for o in outcomes if not o.ok]
+        checks = verify.summary(outcomes)
+        if failed:
+            self.hub.event("check", self.name, f"checks failed: {checks}", task_id)
+            details = "\n\n".join(f"--- {o.name}: `{o.command}` (run in {cwd}) ---\n{o.output}" for o in failed)
+            raise HubError(f"{refusal}: {checks}.\n\n{details}\n\nRun the command yourself to see what it "
+                           "expects, fix it, and try again - or close the task as blocked or failed and say why.")
+        return checks
+
+    def _save_work(self, what: str) -> None:
+        """Branch mode: commit whatever is in the role's copy, so nothing is lost."""
+        try:
+            gitops.commit_all(self.hub.root_of(self.name), f"{self.hub.branch_role(self.name)}: {what}")
+        except GIT_ERRORS:
+            pass
+
+    def _integrate(self, message: str, files: list[str], refusal: str, task_id: int | None) -> tuple[str, str]:
+        """Branch mode: commit this role's work, merge the latest main into it, run the checks on the
+        result, and put it into main. Returns (commit in main, checks summary)."""
+        hub = self.hub
+        root, wt = hub.base_team.project_root, hub.root_of(self.name)
+        branch = gitops.BRANCH_PREFIX + hub.branch_role(self.name)
+        if not (wt / ".git").exists():
+            raise HubError(f"{self.name} has no copy of the project yet; restart it from the agent-org page")
+        try:
+            main = gitops.main_branch(root)
+            if gitops.merging(wt):
+                left = gitops.with_markers(wt, gitops.conflicted(wt) or
+                                           gitops.git(wt, "diff", "--name-only", "HEAD").stdout.split())
+                if left:
+                    raise HubError(f"{refusal}: {', '.join(left)} still hold conflict markers "
+                                   "(<<<<<<< / >>>>>>>). Settle each spot, then try again.")
+            gitops.commit_all(wt, f"{hub.branch_role(self.name)}: {message}")
+            _, conflicts = gitops.sync(wt, main, abort_on_conflict=False)
+            if conflicts:
+                hub.event("git", self.name, f"conflicts with main in {', '.join(conflicts)}", task_id)
+                raise HubError(f"{refusal}. {conflict_text(conflicts)}")
+            changed = gitops.git(wt, "diff", "--name-only", f"{main}...HEAD").stdout.split()
+            checks = self._checks(sorted(set(files) | set(changed)), wt, refusal, task_id)
+            with gitops.land_lock(root):
+                commit, why = gitops.land(root, branch, message)
+                if commit is None:  # main moved on while the checks ran: take it in and try once more
+                    _, conflicts = gitops.sync(wt, main, abort_on_conflict=False)
+                    if conflicts:
+                        raise HubError(f"{refusal}. {conflict_text(conflicts)}")
+                    commit, why = gitops.land(root, branch, message)
+                if commit is None:
+                    raise HubError(f"{refusal}: your work could not go into main: {why}")
+                gitops.sync(wt, main, abort_on_conflict=True)  # a fast-forward: your copy = main again
+                hub.store.set_setting(f"synced:{hub.branch_role(self.name)}", gitops.head(root, main))
+        except GIT_ERRORS as e:
+            raise HubError(f"{refusal}: git failed: {e}") from None
+        hub.event("git", self.name, f"merged into main as {commit}: {message}", task_id)
+        return commit, checks
+
+    def share_work(self, summary: str) -> str:
+        """Branch mode: put your work so far into main now, without finishing a task (after the checks)."""
+        self.team  # noqa: B018
+        if not self.hub.branches:
+            raise HubError("this team works in one shared folder: your saved edits are already visible to everyone")
+        line = _text(summary).splitlines()[0][:200]
+        commit, _ = self._integrate(f"{self.hub.branch_role(self.name)} shares: {line}", [],
+                                    "your work was not shared", None)
+        return commit
 
     def review_task(self, task_id: int, accept: bool, feedback: str = "") -> Task:
         """Accept a done task, or send it back to its assignee with what to change."""
@@ -488,7 +641,7 @@ class RoleSession:
         if accept:
             task = self.store.update_task(task_id, state="accepted")
             self.hub.event("task", self.name, f"accepted #{task.id}: {task.title}", task.id)
-            return self._commit(task)
+            return task if self.hub.branches else self._commit(task)  # branches: it is in main already
         feedback = _text(feedback) if feedback.strip() else ""
         if not feedback:
             raise HubError("say what has to change: sending a task back needs feedback")
@@ -789,7 +942,10 @@ class RoleSession:
     def _scope(self, team: Team, name: str) -> tuple[str, ...]:
         if name == team.owner:
             return ("**",)
-        return team.roles[name].write_scope
+        role = team.roles[name]
+        if role.is_consultant and self.hub.branches:  # it works in the copy of the agent it helps
+            return self._scope(team, self.hub.branch_role(name))
+        return role.write_scope
 
     def _in_scope(self, team: Team, name: str, rel: str) -> bool:
         # '*' matches across folders here, so 'src/*' and 'src/**' both cover all of src.

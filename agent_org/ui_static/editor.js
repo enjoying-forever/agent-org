@@ -9,13 +9,14 @@ const E = { draft: null, meta: null, dirty: false };
 function toDraft(config) {
   const {
     owner = 'you', project_root = '.', roles = {}, consultants = {}, checks = [],
-    autostart = false, max_running = 0, commit_on_accept = true, ...extra
+    autostart = false, max_running = 0, commit_on_accept = true, isolation = 'leases', ...extra
   } = config || {};
   return {
     owner: String(owner),
     project_root: String(project_root),
     extra,
     autostart: Boolean(autostart),
+    branches: isolation === 'branches',
     max_running: Number(max_running) || 0,
     commit_on_accept: commit_on_accept !== false,
     checks: (checks || []).map((c) => ({
@@ -45,6 +46,7 @@ function fromDraft(d) {
   }
   const config = { owner: d.owner.trim(), project_root: d.project_root.trim() || '.', ...d.extra };
   if (d.autostart) config.autostart = true;
+  if (d.branches) config.isolation = 'branches';
   if (Number(d.max_running) > 0) config.max_running = Math.round(Number(d.max_running));
   if (!d.commit_on_accept) config.commit_on_accept = false;
   const checks = d.checks.filter((c) => c.run.trim()).map((c) => {
@@ -206,6 +208,12 @@ function renderEditor() {
           onchange: renderEditor,
         })),
         h('label', { class: 'wide' }, 'Project folder the agents work in', bound(d, 'project_root', { class: 'mono' })),
+        h('label', { class: 'inline wide', title: 'Each agent edits its own copy of the project (a git '
+          + 'worktree on its own branch). Finished work merges into main at once; changes to different parts of '
+          + 'a file merge by themselves, and agents only settle edits to the very same lines. History is turned on.' },
+        h('input', {
+          type: 'checkbox', checked: d.branches, onchange: (e) => { d.branches = e.target.checked; touch(); },
+        }), 'Agents work on their own git branches, so several can change one file at once (instead of one writer per file)'),
         h('label', { class: 'inline wide' }, h('input', {
           type: 'checkbox', checked: d.autostart, onchange: (e) => { d.autostart = e.target.checked; touch(); },
         }), 'Start agents automatically when they get work (while this page is open)'),

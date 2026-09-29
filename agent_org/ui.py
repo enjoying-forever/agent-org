@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 from . import doctor, gitops, launch, templates, usage, watchdog
-from .hub import LAW, Hub, HubError, describe_stuck
+from .hub import BRANCH_RULE, LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
 
@@ -223,8 +223,17 @@ class App:
         return {"history": state}
 
     def task_changes(self, task_id: int) -> dict[str, Any]:
-        self.me.task_details(task_id)  # the owner may see every task; this checks it exists
+        task, _ = self.me.task_details(task_id)  # the owner may see every task; this checks it exists
         files = self.hub.store.task_files(task_id)
+        if self.hub.branches:  # landed: the merge into main; still working: its branch against main
+            root = self.hub.base_team.project_root
+            try:
+                diff = (gitops.commit_diff(root, task.commit_id) if task.commit_id
+                        else gitops.branch_diff(self.hub.root_of(task.assignee), gitops.main_branch(root))
+                        if (self.hub.root_of(task.assignee) / ".git").exists() else "")
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                diff = ""
+            return {"files": files, "history": True, "diff": diff, "branch": True}
         return {"files": files, "history": self.history(),
                 "diff": gitops.diff(self.hub.base_team.project_root, files) if self.history() else ""}
 
@@ -381,6 +390,7 @@ class App:
             "history": self.history(),
             "settings": {"autostart": team.settings.autostart, "max_running": team.settings.max_running,
                          "commit_on_accept": team.settings.commit_on_accept,
+                         "isolation": team.settings.isolation,
                          "checks": [c.name for c in team.checks]},
             "last_event": store.last_event_id(),
             "owner_unread": unread.get(team.owner, 0),
@@ -410,7 +420,9 @@ class App:
         return {"messages": [_message(m) for m in self.hub.store.messages_after(after)]}
 
     def law(self) -> dict[str, Any]:
-        return {"law": [{"title": t, "rule": r} for t, r in LAW]}
+        branches = self._hub is not None and self.hub.branches
+        rules = [BRANCH_RULE if branches and t == "One writer per file" else (t, r) for t, r in LAW]
+        return {"law": [{"title": t, "rule": r} for t, r in rules]}
 
     def team_config(self) -> dict[str, Any]:
         self.hub  # noqa: B018 - needs an open team

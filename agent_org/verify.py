@@ -38,14 +38,14 @@ def applies(check: CheckSpec, files: list[str]) -> bool:
     return any(fnmatchcase(f.lower(), w.lower().removeprefix("./")) for f in files for w in check.when)
 
 
-def run(team: Team, files: list[str]) -> list[Outcome]:
-    """Run every check that applies to a task which changed `files`."""
+def run(team: Team, files: list[str], cwd: Path | None = None) -> list[Outcome]:
+    """Run every check that applies to a task which changed `files`, in `cwd` (the project folder)."""
     outcomes = []
     for check in team.checks:
         if not applies(check, files):
             continue
         try:
-            code, output = command(check.run, team.project_root, check.timeout)
+            code, output = command(check.run, cwd or team.project_root, check.timeout)
         except OSError as e:
             outcomes.append(Outcome(check.name, False, f"could not run: {e}", check.run))
             continue

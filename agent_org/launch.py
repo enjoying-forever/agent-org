@@ -44,6 +44,7 @@ class Launch:
     args: list[str]
     env: dict[str, str] = field(default_factory=dict)
     setup: list[list[str]] = field(default_factory=list)  # commands run first, in the project folder
+    cwd: Path | None = None  # where it works (branch mode: its own worktree); default the project folder
 
 
 def kickoff(role: str) -> str:
@@ -88,7 +89,7 @@ def resumable_session(hub: Hub, role: str) -> str | None:
         if own and sessions.exists(spec.harness, own):  # the record named a helper conversation: fix it
             hub.store.record_session_id(role, spec.harness, own)
             return own
-    found = sessions.find(spec.harness, hub.base_team.project_root, role)
+    found = sessions.find(spec.harness, hub.root_of(role), role)
     if found and sessions.exists(spec.harness, found):
         hub.store.record_session_id(role, spec.harness, found)
         return found
@@ -299,7 +300,7 @@ def antigravity_plugin(project_root: Path) -> Path:
 def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
                        resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
-    antigravity_plugin(hub.base_team.project_root)
+    antigravity_plugin(hub.root_of(role))
     cli: list[str] = []
     if spec.model:
         cli += ["--model", spec.model]
@@ -342,7 +343,7 @@ def role_script(launch: Launch, team: Team, team_file: Path) -> str:
         f"# agent-org: role '{launch.role}' on {launch.harness}. Written by agent_org.launch; rerunning it overwrites this.",
         f"$Host.UI.RawUI.WindowTitle = {ps(launch.role)}",
         *(f"$env:{name} = {ps(value)}" for name, value in env.items()),
-        f"Set-Location -LiteralPath {ps(str(team.project_root))}",
+        f"Set-Location -LiteralPath {ps(str(launch.cwd or team.project_root))}",
         *(" ".join(["&", *(ps(a) for a in cmd), "| Out-Null"]) for cmd in launch.setup),
         f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args),
         "",
@@ -383,14 +384,16 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
         raise HubError(f"{spec.harness} is not supported yet")
     out = team.database.parent / "launch" / role
     out.mkdir(parents=True, exist_ok=True)
+    cwd = hub.prepare_root(role)  # branch mode: its own worktree
     resume, new_id = plan_session(hub, role, fresh)
     launch = BUILDERS[spec.harness](hub, team_file, role, out, resume, new_id)
+    launch.cwd = cwd
     if not resume:
         hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
     script.write_text(role_script(launch, team, team_file), encoding="utf-8")
     title = f"{role} ({spec.tier})" if spec.is_consultant else role
-    return tab_command(title, TAB_COLORS[spec.harness], team.project_root, script)
+    return tab_command(title, TAB_COLORS[spec.harness], cwd, script)
 
 
 def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
