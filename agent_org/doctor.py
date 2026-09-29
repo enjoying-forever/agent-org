@@ -114,20 +114,11 @@ def check_antigravity(harnesses: set[str]) -> list[Check]:
 
 
 def check_zcode(harnesses: set[str]) -> list[Check]:
-    """ZCode's desktop app, whose bundled command-line agent the team runs, and its Z.AI sign-in."""
+    """The ZCode desktop app, which a zcode role runs in (on the user's own sign-in in the app)."""
     from .launch import zcode_program
-    from .sessions import home
-    needed = "zcode" in harnesses
     found = zcode_program()
-    checks = [Check("ZCode", found is not None, "installed" if found else "not installed",
-                    "Install ZCode from zcode.z.ai (the desktop app includes the command-line agent).",
-                    needed=needed)]
-    if found and needed and not (home() / ".zcode" / "cli" / "config.json").exists():
-        checks.append(Check("ZCode sign-in", False, "ZCode may not be signed in",
-                            r"""In PowerShell run:  $env:ELECTRON_RUN_AS_NODE='1'; & "$env:LOCALAPPDATA\Programs"""
-                            r"""\ZCode\ZCode.exe" "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" login""",
-                            needed=needed))
-    return checks
+    return [Check("ZCode", found is not None, "installed" if found else "not installed",
+                  "Install ZCode from zcode.z.ai and sign in inside the app.", needed="zcode" in harnesses)]
 
 
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:

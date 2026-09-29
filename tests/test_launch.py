@@ -250,34 +250,42 @@ def fake_zcode(tmp_path, monkeypatch):
     (base / "ZCode.exe").write_bytes(b"")
     (base / "resources" / "glm" / "zcode.cjs").write_text("", encoding="utf-8")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
-    home = tmp_path / "home"
-    (home / ".zcode" / "cli").mkdir(parents=True)
-    (home / ".zcode" / "cli" / "config.json").write_text(json.dumps(
-        {"provider": {"zai": {"apiKey": "x"}}, "mcp": {"servers": {"mine": {"type": "stdio", "command": "x"}}}}),
-        encoding="utf-8")
-    monkeypatch.setattr(launch.sessions, "home", lambda: home)
     return base
 
 
-def test_zcode_runs_its_bundled_agent_with_our_settings(team_file, tmp_path, monkeypatch):
+def test_zcode_role_is_the_desktop_app_set_up_for_the_project(team_file, tmp_path, monkeypatch):
     base = fake_zcode(tmp_path, monkeypatch)
     data = yaml.safe_load(team_file.read_text(encoding="utf-8"))
     data["roles"]["worker-b"]["harness"] = "zcode"
     team_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    project = team_file.parent / "project"
+    (project / ".zcode").mkdir()
+    (project / ".zcode" / "config.json").write_text(json.dumps({"permission": {"mode": "build"}, "hooks": {
+        "events": {"Stop": [{"hooks": [{"type": "command", "command": "mine.cmd"}]}]}}}), encoding="utf-8")
     hub = Hub.open(team_file)
     try:
-        out = tmp_path / "out"
-        out.mkdir()
-        built = launch.zcode_launch(hub, team_file, "worker-b", out)
-        assert built.command == str(base / "ZCode.exe") and built.env["ELECTRON_RUN_AS_NODE"] == "1"
-        assert built.args[0].endswith("zcode.cjs") and built.args[-2] == "--prompt" and "worker-b" in built.args[-1]
-        settings = json.loads((out / "zcode.json").read_text(encoding="utf-8"))
-        assert settings["provider"] == {"zai": {"apiKey": "x"}}  # the user's own config is kept
-        assert set(settings["mcp"]["servers"]) == {"mine", "org"}
-        stop = settings["hooks"]["events"]["Stop"][0]["hooks"][0]
-        assert stop["timeoutMs"] == (launch.ZCODE_STOP_WAIT + 60) * 1000 and "timeout" not in stop
-        assert int(built.env["AGENT_ORG_STOP_WAIT"]) < stop["timeoutMs"] / 1000
-        resumed = launch.zcode_launch(hub, team_file, "worker-b", out, resume="sess_abc12345")
-        assert resumed.args[resumed.args.index("--resume") + 1] == "sess_abc12345"
+        built = launch.zcode_launch(hub, team_file, "worker-b", tmp_path)
+        assert built.command == str(base / "ZCode.exe") and built.args == [str(project)]
+        assert built.setup[0][0] == "Set-Clipboard" and "worker-b" in built.setup[0][1]
+        config = json.loads((project / ".zcode" / "config.json").read_text(encoding="utf-8"))
+        assert config["permission"] == {"mode": "build"}  # the user's own settings stay
+        server = config["mcp"]["servers"]["org"]
+        assert server["args"][-4:] == ["--team", str(team_file), "--role", "worker-b"]
+        stop = config["hooks"]["events"]["Stop"]
+        assert stop[0]["hooks"][0]["command"] == "mine.cmd"  # their hook kept, ours added
+        ours = stop[1]["hooks"][0]
+        assert "org_hook.py stop --team" in ours["command"] and "--role worker-b" in ours["command"]
+        assert ours["timeoutMs"] == (launch.ZCODE_STOP_WAIT + 60) * 1000
+        launch.zcode_launch(hub, team_file, "worker-b", tmp_path)  # again: ours replaced, not doubled
+        again = json.loads((project / ".zcode" / "config.json").read_text(encoding="utf-8"))
+        assert len(again["hooks"]["events"]["Stop"]) == 2
     finally:
         hub.close()
+
+
+def test_only_one_zcode_role(team_file):
+    from agent_org.team import Team, TeamError
+    data = yaml.safe_load(team_file.read_text(encoding="utf-8"))
+    data["roles"]["worker-a"]["harness"] = data["roles"]["worker-b"]["harness"] = "zcode"
+    with pytest.raises(TeamError, match="only one role can use zcode"):
+        Team.from_dict(data, base_dir=team_file.parent)

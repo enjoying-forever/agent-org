@@ -130,6 +130,12 @@ class Team:
         if not isinstance(raw_tiers, dict):
             raise TeamError("'consultants' must be a mapping of tier name to settings")
         tiers = {name: _parse_tier(name, spec) for name, spec in raw_tiers.items()}
+        # A ZCode role is the desktop app, set up through the project's one .zcode/config.json.
+        zcode = [name for name, r in roles.items() if r.harness == "zcode"]
+        if len(zcode) > 1:
+            raise TeamError(f"only one role can use zcode (the ZCode desktop app); now {', '.join(zcode)} do")
+        if any(t.harness == "zcode" for t in tiers.values()):
+            raise TeamError("consultant tiers cannot use zcode: the ZCode desktop app is opened by hand")
         raw_checks = data.get("checks") or []
         if not isinstance(raw_checks, list):
             raise TeamError("'checks' must be a list of {name, run} entries")
