@@ -107,8 +107,9 @@ def test_what_a_post_must_look_like(web):
     assert web.request("POST", "/api/send", body, {**ok, "Sec-Fetch-Site": "cross-site"})[0] == 403
     assert web.request("POST", "/api/send", body, {**ok, "Origin": web.origin, "Sec-Fetch-Site": "same-origin"})[0] == 200
     # bodies: too large, of unknown size, not an object, not JSON
-    big = json.dumps({"text": "x" * (ui.MAX_BODY + 10)}).encode()
-    assert web.request("POST", "/api/send", headers=ok, raw=big)[0] == 413
+    # a body declared too large is refused before anything is read (so only the size is sent here)
+    too_big = {**ok, "Content-Length": str(ui.MAX_BODY + 10)}
+    assert web.request("POST", "/api/send", headers=too_big, raw=b"{}")[0] == 413
     assert web.request("POST", "/api/send", headers={**ok, "Transfer-Encoding": "chunked"}, raw=b"")[0] == 411
     assert web.request("POST", "/api/send", headers=ok, raw=b"[1, 2]")[0] == 400
     assert web.request("POST", "/api/send", headers=ok, raw=b"{not json")[0] == 400

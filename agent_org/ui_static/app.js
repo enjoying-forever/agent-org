@@ -342,20 +342,27 @@ function roleCard(r) {
   const s = r.status;
   const cls = ['node', `h-${r.harness}`, r.tier && 'consultant', S.selected === r.name && 'selected'];
   return h('div', { class: cls.filter(Boolean).join(' '), title: r.duties || '', onclick: () => openDrawer(r.name) },
-    h('div', { class: 'name' }, h('span', { class: 'nm' }, r.name), h('span', { class: 'harness' }, r.harness)),
+    h('div', { class: 'name' }, runningDot(r), h('span', { class: 'nm' }, r.name), h('span', { class: 'harness' }, r.harness)),
     h('div', { class: 'model' }, modelLine(r)),
     r.tier && h('div', {}, h('span', { class: 'tag' }, `consultant · ${r.tier} · #${r.help_id}`)),
-    h('div', {},
+    h('div', { class: 'task', title: s && s.task ? s.task : '' },
       h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'not started'),
-      s && h('span', { class: 'muted', style: { fontSize: '11px', marginLeft: '6px' } }, ago(s.updated_at))),
-    s && s.task && h('div', { class: 'task' }, s.task),
+      s && s.task ? ` ${s.task}` : ''),
     r.stuck && h('div', { class: `stuck-badge ${r.stuck.kind}`, title: r.stuck.text }, r.stuck.describe),
     h('div', { class: 'meta' },
-      runningEl(r),
+      s && h('span', { title: `status updated ${fmtTime(s.updated_at)}` }, ago(s.updated_at)),
       r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'task')) : null,
-      h('span', { class: r.unread ? 'hot' : '' }, `${r.unread} unread`),
+      r.unread ? h('span', { class: 'hot' }, `${r.unread} unread`) : null,
       r.locks.length ? h('span', {}, plural(r.locks.length, 'file')) : null,
       r.usage && h('span', { title: usageText(r.usage) }, shortUsage(r.usage))));
+}
+
+/** The session at a glance: green running, grey stopped, red when two sessions share the role. */
+function runningDot(r) {
+  const [cls, why] = !r.online ? ['off', 'Not running'] : r.online > 1
+    ? ['dup', `${r.online} sessions share this role and split its messages: stop it and start it again`]
+    : ['on', 'Running'];
+  return h('span', { class: `run-dot ${cls}`, title: why });
 }
 
 function fmtNum(n) {

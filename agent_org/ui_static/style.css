@@ -481,3 +481,10 @@ select.add-role { width: auto; font-weight: 600; }
 /* getting started */
 .guide-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #project { font-weight: 600; }
+
+/* compact org chart cards */
+.node .task { -webkit-line-clamp: 1; }
+.node .task .state { margin-right: 2px; }
+.run-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--idle); }
+.run-dot.on { background: var(--working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 22%, transparent); }
+.run-dot.dup { background: var(--danger); }
