@@ -16,7 +16,9 @@ subscription you already have, and you watch and steer everything from one web p
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
    - Antigravity needs you to have run `agy` once yourself and finished its Google
-     sign-in (including any account check it asks for).
+     sign-in (including any account check it asks for). Its tabs show the agent's work
+     but take no typing (Antigravity loads agent-org's tools only in that mode); talk to
+     it from the page, like to any agent.
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
    saying what you want, and fill in **Done when**: how anyone can check it is
    finished (for example "the page shows today's top 10 stories").

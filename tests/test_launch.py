@@ -198,7 +198,7 @@ def test_antigravity_gets_a_project_plugin_and_starts_interactively(team_file):
     stop = hooks["Stop"][0]["command"]
     assert '"' not in stop and stop.endswith("org_hook.py stop agy")  # runs as it is in cmd /c
     script = (base / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    assert "& 'agy' '--prompt-interactive' 'You are the ''worker-b'' agent" in script
+    assert "& 'agy' '--print-timeout' '0s' '-p' 'You are the ''worker-b'' agent" in script  # print mode loads the plugin
 
 
 def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
@@ -215,7 +215,7 @@ def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
     finally:
         hub.close()
     script = (team_file.parent / ".agent-org" / "launch" / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    assert f"'--conversation' '{sid}' '--prompt-interactive' 'agent-org: the team was restarted" in script
+    assert f"'--conversation' '{sid}' '--print-timeout' '0s' '-p' 'agent-org: the team was restarted" in script
     assert tab
 
 

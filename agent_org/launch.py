@@ -313,7 +313,10 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
     if resume:
         cli += ["--conversation", resume]
     # Antigravity has no flag for extra instructions: the kickoff sends it to my_role.
-    cli += ["--prompt-interactive", resume_kickoff(role) if resume else kickoff(role)]
+    # Print mode, not --prompt-interactive: the interactive CLI does not load the project's
+    # plugin (no org tools, no hooks - checked in its own logs), print mode does. The tab
+    # still shows its work, and the Stop hook keeps it going as messages arrive.
+    cli += ["--print-timeout", "0s", "-p", resume_kickoff(role) if resume else kickoff(role)]
     return Launch(role, "antigravity", "agy", cli)
 
 
