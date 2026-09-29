@@ -113,6 +113,23 @@ def check_antigravity(harnesses: set[str]) -> list[Check]:
     return checks
 
 
+def check_zcode(harnesses: set[str]) -> list[Check]:
+    """ZCode's desktop app, whose bundled command-line agent the team runs, and its Z.AI sign-in."""
+    from .launch import zcode_program
+    from .sessions import home
+    needed = "zcode" in harnesses
+    found = zcode_program()
+    checks = [Check("ZCode", found is not None, "installed" if found else "not installed",
+                    "Install ZCode from zcode.z.ai (the desktop app includes the command-line agent).",
+                    needed=needed)]
+    if found and needed and not (home() / ".zcode" / "cli" / "config.json").exists():
+        checks.append(Check("ZCode sign-in", False, "ZCode may not be signed in",
+                            r"""In PowerShell run:  $env:ELECTRON_RUN_AS_NODE='1'; & "$env:LOCALAPPDATA\Programs"""
+                            r"""\ZCode\ZCode.exe" "$env:LOCALAPPDATA\Programs\ZCode\resources\glm\zcode.cjs" login""",
+                            needed=needed))
+    return checks
+
+
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:
     """All checks, in parallel. `harnesses`: the ones the open team uses (all if None)."""
     used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}  # agy: only if used
@@ -129,4 +146,5 @@ def run_checks(harnesses: set[str] | None = None) -> list[Check]:
         codex = pool.submit(check_codex, used)
         grok = pool.submit(check_grok, used)
         antigravity = pool.submit(check_antigravity, used)
-        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result()]
+        zcode = pool.submit(check_zcode, used)
+        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result(), *zcode.result()]

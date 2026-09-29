@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-HARNESSES = ("claude", "codex", "grok", "antigravity")
+HARNESSES = ("claude", "codex", "grok", "antigravity", "zcode")
 ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
 CHECK_KEYS = {"name", "run", "when", "timeout"}

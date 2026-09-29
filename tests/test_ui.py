@@ -89,7 +89,7 @@ def test_state_lists_the_tree(server):
     assert state["owner"] == "you" and state["leader"] == "leader"
     assert [r["name"] for r in state["roles"]] == ["leader", "tech-lead", "researcher", "worker-a", "worker-b"]
     assert [t["name"] for t in state["tiers"]] == ["medium", "high"]
-    assert state["launchable"] == ["claude", "codex", "grok", "antigravity"]
+    assert state["launchable"] == ["claude", "codex", "grok", "antigravity", "zcode"]
 
 
 def test_owner_messages_and_inbox(server):
@@ -155,7 +155,7 @@ def test_launch_opens_tabs_for_supported_roles(server):
 def test_team_editor_round_trip(server):
     data = server.ok("/api/team")
     assert data["config"]["owner"] == "you"
-    assert data["harnesses"] == ["claude", "codex", "grok", "antigravity"]
+    assert data["harnesses"] == ["claude", "codex", "grok", "antigravity", "zcode"]
     config = data["config"]
     config["roles"]["worker-c"] = {"superior": "tech-lead", "harness": "codex", "write_scope": ["docs/*"]}
     saved = server.ok("/api/team", {"config": config})

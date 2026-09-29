@@ -233,7 +233,8 @@ def test_antigravity_answers_are_translated():
     assert hooks.for_antigravity("pre-edit", denied) == {"decision": "deny", "reason": "held"}
     notice = {"hookSpecificOutput": {"additionalContext": "2 new messages"}}
     assert hooks.for_antigravity("invocation", notice) == {"injectSteps": [{"ephemeralMessage": "2 new messages"}]}
-    assert hooks.for_antigravity("pre-edit", None) == {}  # always answer
+    assert hooks.for_antigravity("pre-edit", None) == {"decision": "allow"}  # a pre-tool answer needs a decision
+    assert hooks.for_antigravity("stop", None) == {}
 
 
 def test_antigravity_tool_calls_are_read(hub, team):

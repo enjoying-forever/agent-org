@@ -16,6 +16,7 @@
   --codex: #10a37f;
   --grok: #7a7f87;
   --antigravity: #4285f4;
+  --zcode: #7c5cff;
   --owner: #d99a00;
 
   --working: #16a34a;
@@ -183,6 +184,7 @@ label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color:
 .h-codex { --harness: var(--codex); }
 .h-grok { --harness: var(--grok); }
 .h-antigravity { --harness: var(--antigravity); }
+.h-zcode { --harness: var(--zcode); }
 .tag { display: inline-block; font-size: 11px; border: 1px dashed var(--line); border-radius: 5px; padding: 0 6px; color: var(--muted); }
 
 .state { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--state, var(--idle)); }

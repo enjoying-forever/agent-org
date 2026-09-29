@@ -256,12 +256,14 @@ HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit,
 def for_antigravity(event: str, out: dict[str, Any] | None) -> dict[str, Any]:
     """Antigravity's hooks speak a different dialect: translate our answer, and always answer."""
     if not out:
-        return {}
+        return {"decision": "allow"} if event == "pre-edit" else {}
     spec = out.get("hookSpecificOutput") or {}
     if event == "stop" and out.get("decision") == "block":
         return {"decision": "continue", "reason": out.get("reason", "")}
     if event == "pre-edit" and spec.get("permissionDecision") == "deny":
         return {"decision": "deny", "reason": spec.get("permissionDecisionReason", "")}
+    if event == "pre-edit":
+        return {"decision": "allow"}  # the lease is held; a missing decision would count as "deny"
     if event == "invocation" and spec.get("additionalContext"):
         return {"injectSteps": [{"ephemeralMessage": spec["additionalContext"]}]}
     return {}
@@ -290,8 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     antigravity = "agy" in argv[1:]
     team_file, role = os.environ.get("AGENT_ORG_TEAM"), os.environ.get("AGENT_ORG_ROLE")
     if event not in HANDLERS or not team_file or not role:
-        if antigravity:
-            sys.stdout.write("{}")  # Antigravity expects an answer from every hook
+        if antigravity:  # Antigravity expects an answer from every hook; outside our tabs, change nothing
+            sys.stdout.write('{"decision": "ask"}' if event == "pre-edit" else "{}")
         return 0
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")

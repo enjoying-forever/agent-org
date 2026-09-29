@@ -235,3 +235,24 @@ def test_codex_auto_review_is_never_taken_for_the_agent(team_file, fake_home):
         assert launch.resumable_session(hub, "worker-a") == MAIN  # searching skips the reviewer too
     finally:
         hub.close()
+
+
+def test_zcode_sessions_live_in_its_database(team_file, fake_home):
+    import sqlite3
+    db_path = fake_home / ".zcode" / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    db = sqlite3.connect(db_path)
+    db.execute("CREATE TABLE session (id TEXT, parent_id TEXT, directory TEXT, time_updated INTEGER)")
+    db.execute("CREATE TABLE part (id TEXT, session_id TEXT, data TEXT)")
+    project = str(team_file.parent / "project")
+    db.executemany("INSERT INTO session VALUES (?, ?, ?, ?)", [
+        ("sess_old00001", None, project, 1), ("sess_new00002", None, project, 2),
+        ("sess_other0003", None, "C:\elsewhere", 3), ("sess_child004", "sess_new00002", project, 4)])
+    db.executemany("INSERT INTO part VALUES (?, ?, ?)", [
+        ("p1", "sess_old00001", '{"text": "You are the \'worker-b\' agent in a team"}'),
+        ("p2", "sess_new00002", '{"text": "something else"}'),
+        ("p3", "sess_child004", '{"text": "You are the \'worker-b\' agent in a team"}')])
+    db.commit()
+    db.close()
+    assert sessions.exists("zcode", "sess_old00001") and not sessions.exists("zcode", "sess_missing01")
+    assert sessions.find("zcode", team_file.parent / "project", "worker-b") == "sess_old00001"

@@ -32,7 +32,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PACKAGE_ROOT / "org_hook.py"
 WINDOW = "agent-org"
 WAIT_LIMIT = 3600  # seconds a single wait_for_messages call may take; harness tool timeouts are set to this
-TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4",
+TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4", "zcode": "#7C5CFF",
               "owner": "#F2C94C"}
 
 
@@ -259,6 +259,10 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "grok", "grok", cli, {"GROK_DISABLE_AUTOUPDATER": "1"}, setup=[register])
 
 
+AGY_EDIT_MATCHER = ("write_to_file|replace_file_content|multi_replace_file_content|code_action|file_change|"
+                    "propose_code|edit_notebook")
+
+
 def antigravity_plugin(project_root: Path) -> Path:
     """Write agent-org's Antigravity plugin into the project: its MCP server and hooks.
 
@@ -280,7 +284,9 @@ def antigravity_plugin(project_root: Path) -> Path:
         "plugin.json": {"name": "agent-org"},
         "mcp_config.json": {"mcpServers": {SERVER_NAME: {"command": command, "args": args, "env": env}}},
         "hooks.json": {"agent-org": {
-            "PreToolUse": [{"matcher": "*", "hooks": [run("pre-edit", 30)]}],
+            # only edits: a PreToolUse answer must carry a decision, so hooking every tool
+            # would replace Antigravity's own permission handling for all of them
+            "PreToolUse": [{"matcher": AGY_EDIT_MATCHER, "hooks": [run("pre-edit", 30)]}],
             "PreInvocation": [run("invocation", 30)],
             "Stop": [run("stop", STOP_WAIT + 300)],
         }},
@@ -306,8 +312,63 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "antigravity", "agy", cli)
 
 
+ZCODE_STOP_WAIT = 540  # seconds; ZCode may cap a hook's run time at 10 minutes
+
+
+def zcode_program() -> tuple[Path, Path] | None:
+    """ZCode's desktop app and the command-line agent bundled with it (run on the app's own Node)."""
+    base = Path(os.environ.get("LOCALAPPDATA") or sessions.home() / "AppData" / "Local") / "Programs" / "ZCode"
+    exe, script = base / "ZCode.exe", base / "resources" / "glm" / "zcode.cjs"
+    return (exe, script) if exe.exists() and script.exists() else None
+
+
+def zcode_settings(hub: Hub, role: str, out: Path) -> Path:
+    """The role's ZCode settings: the user's own config, plus the 'org' MCP server and our hooks.
+
+    `--settings` replaces ~/.zcode/cli/config.json for the session, so it starts from a copy.
+    """
+    spec = hub.team.roles[role]
+    user = sessions.home() / ".zcode" / "cli" / "config.json"
+    try:
+        config = json.loads(user.read_text(encoding="utf-8")) if user.exists() else {}
+    except (OSError, ValueError):
+        config = {}
+    command, args, env = mcp_server()
+    mcp = dict(config.get("mcp") or {})
+    mcp["servers"] = {**(mcp.get("servers") or {}),
+                      SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}
+    config["mcp"] = mcp
+    events = hook_table(None)
+    for groups in events.values():
+        for group in groups:
+            for handler in group["hooks"]:
+                handler["timeoutMs"] = min(int(handler.pop("timeout")), ZCODE_STOP_WAIT + 60) * 1000
+    config["hooks"] = {"enabled": True, "events": events}
+    if spec.model:
+        config["model"] = spec.model  # ZCode wants "provider/model"
+    path = out / "zcode.json"
+    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def zcode_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                 resume: str | None = None, new_id: str | None = None) -> Launch:
+    """ZCode's terminal UI cannot be handed a first prompt, so the agent runs in prompt mode:
+    its work shows in the tab, and the Stop hook keeps it going as messages arrive."""
+    found = zcode_program()
+    if found is None:
+        raise HubError("ZCode is not installed (expected it in %LOCALAPPDATA%\\Programs\\ZCode)")
+    exe, script = found
+    cli = [str(script), "--settings", str(zcode_settings(hub, role, out)), "--max-turns", "100000"]
+    if resume:
+        cli += ["--resume", resume]
+    cli += ["--prompt", resume_kickoff(role) if resume else kickoff(role)]
+    return Launch(role, "zcode", str(exe), cli,
+                  {"ELECTRON_RUN_AS_NODE": "1", "AGENT_ORG_STOP_WAIT": str(ZCODE_STOP_WAIT)})
+
+
 BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch,
-            "antigravity": antigravity_launch}
+            "antigravity": antigravity_launch, "zcode": zcode_launch}
 
 
 def toml(value: object) -> str:
@@ -425,7 +486,7 @@ def open_tab(tab: list[str]) -> None:
     subprocess.run([wt, *tab[1:]], check=True, stdin=subprocess.DEVNULL)
 
 
-HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}
+HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe", "zcode.exe"}
 
 
 def program_name(pid: int) -> str:

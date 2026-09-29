@@ -3,6 +3,7 @@
 - Claude Code: ~/.claude/projects/<folder>/<session id>.jsonl
 - Codex:       ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<time>-<session id>.jsonl
 - Grok:        ~/.grok/sessions/<folder>/<session id>/
+- ZCode:       rows of ~/.zcode/cli/db/db.sqlite (ids like sess_...)
 """
 
 from __future__ import annotations
@@ -10,12 +11,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote
 
-UUID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
+UUID_RE = re.compile(r"^[0-9A-Za-z_-]{8,80}$")  # uuids, and ZCode's sess_... ids; nothing a glob expands
 CAN_CHOOSE_ID = ("claude", "grok")  # these accept an id for a new conversation; Codex picks its own
 SCAN_BYTES = 400_000  # how far into a conversation file to look for the role's first prompt
 SCAN_DAYS = 45  # how old a Codex conversation may be to still be found by searching
@@ -47,7 +49,44 @@ def exists(harness: str, session_id: str | None) -> bool:
         return any(p.is_dir() for p in (home() / ".grok" / "sessions").glob(f"*/{session_id}"))
     if harness == "antigravity":
         return any((home() / ".gemini" / "antigravity-cli" / "conversations").glob(f"{session_id}.*"))
+    if harness == "zcode":
+        return bool(zcode_query("SELECT 1 FROM session WHERE id = ?", (session_id,)))
     return False
+
+
+def zcode_db() -> Path:
+    return home() / ".zcode" / "cli" / "db" / "db.sqlite"
+
+
+def zcode_query(sql: str, args: tuple = ()) -> list[sqlite3.Row]:
+    """Read ZCode's session database (read-only); [] if it is missing or busy."""
+    path = zcode_db()
+    if not path.exists():
+        return []
+    try:
+        db = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5)
+        db.row_factory = sqlite3.Row
+        try:
+            return db.execute(sql, args).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return []
+
+
+def _zcode_find(project_root: Path, wanted: tuple[str, ...]) -> str | None:
+    """The newest ZCode session in this project whose first messages carry the role's kickoff."""
+    root = str(project_root).lower().rstrip("\\/")
+    sessions = [r for r in zcode_query("SELECT * FROM session") if not r["parent_id"]
+                and str(r["directory"] or "").lower().rstrip("\\/") == root]
+    order = "time_updated" if sessions and "time_updated" in sessions[0].keys() else "rowid"
+    sessions.sort(key=lambda r: r[order] if order in r.keys() else 0, reverse=True)
+    for row in sessions:
+        parts = zcode_query("SELECT data FROM part WHERE session_id = ? ORDER BY rowid LIMIT 40", (row["id"],))
+        text = " ".join(str(p["data"]) for p in parts)
+        if any(m in text for m in wanted):
+            return str(row["id"])
+    return None
 
 
 def codex_meta(session_id: str) -> dict | None:
@@ -99,6 +138,8 @@ def find(harness: str, project_root: Path, role: str) -> str | None:
     or a Codex agent whose hooks were not trusted yet.
     """
     wanted = markers(role)
+    if harness == "zcode":
+        return _zcode_find(project_root, wanted)
     # Antigravity keeps every project's conversations together: also require this project's path.
     places = ((str(project_root), str(project_root).replace("\\", "\\\\"), project_root.as_posix())
               if harness == "antigravity" else ())
