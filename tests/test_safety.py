@@ -126,3 +126,13 @@ def test_antigravity_keeps_asking_about_commands_that_pass():
     edit = {"toolCall": {"name": "write_to_file", "args": {"TargetFile": "a.py"}}}
     assert hooks.for_antigravity("pre-edit", None, run) == {"decision": "ask"}  # its own permission check runs
     assert hooks.for_antigravity("pre-edit", None, edit) == {"decision": "allow"}
+
+
+@pytest.mark.parametrize("command", ["git stash list", "git stash show -p", "git stash pop"])
+def test_looking_at_stashes_is_fine(command):
+    assert safety.check_command(command, ROOT, shared_folder=True) is None
+
+
+@pytest.mark.parametrize("command", ["git stash", "git stash push -m wip", "git stash -u", "git stash && git pull"])
+def test_stashing_a_shared_folder_is_not(command):
+    assert safety.check_command(command, ROOT, shared_folder=True)

@@ -55,7 +55,7 @@ ALWAYS = [
 ]
 SHARED_FOLDER = [
     (re.compile(r"\bgit\s+(reset\s+[^\n]*--hard|clean\s+-[a-z]*[fdx]|checkout\s+(--\s+)?\.(\s|$)|"
-                r"restore\s+[^\n]*\.(\s|$)|stash(\s|$))", re.I),
+                r"restore\s+[^\n]*\.(\s|$)|stash(\s+(push|save|-[a-z]+)\b[^\n]*)?\s*($|[;&|]))", re.I),
      "In the shared project folder that would throw away other agents' unsaved work. Undo only your own "
      "changes, file by file."),
 ]
