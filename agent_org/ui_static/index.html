@@ -8,27 +8,36 @@
 </head>
 <body>
   <header class="bar">
-    <div class="brand"><b>agent-org</b><span id="project" class="muted"></span></div>
+    <div class="brand"><span class="logo" aria-hidden="true"></span><b>agent-org</b><span id="project"></span></div>
     <nav class="views" id="views" hidden>
       <button data-view="team" class="active">Team</button>
-      <button data-view="board">Board <span id="board-count" class="muted"></span></button>
+      <button data-view="board">Board <span id="board-count" class="count"></span></button>
+      <button data-view="roles">Roles</button>
       <button data-view="editor">Edit team</button>
     </nav>
     <div class="spacer"></div>
     <span id="conn" class="conn" hidden>connecting</span>
-    <button id="law-btn" title="The rules every agent follows">The law</button>
-    <button id="checks-btn" title="Check that Claude, Codex and Grok are ready">Setup</button>
-    <button id="switch-btn" hidden title="Open or create another team">Switch team</button>
-    <button id="stop-all" hidden class="danger" title="Stop every running agent">Stop all</button>
+    <button id="market-btn" class="ghost" title="Browse the Role Market">Role Market</button>
     <button id="launch-all" hidden class="primary" title="Start every agent that is not running">Launch team</button>
+    <details class="menu" id="more-menu">
+      <summary class="btn">More</summary>
+      <div class="menu-list">
+        <button id="law-btn" title="The rules every agent follows">The law</button>
+        <button id="checks-btn" title="Check that Claude, Codex, Grok and Antigravity are ready">Setup check</button>
+        <button id="switch-btn" hidden title="Open or create another team">Switch team</button>
+        <hr>
+        <button id="stop-all" hidden class="danger" title="Stop every running agent">Stop all agents</button>
+      </div>
+    </details>
   </header>
 
   <!-- welcome: open or create a team -->
   <main id="view-home" class="home" hidden>
     <section class="home-col">
       <h1>Welcome to agent-org</h1>
-      <p class="muted lead">Run a team of AI agents (Claude, Codex, Grok) that plan, split work, write code
-        and report back to you. Start by opening a team or creating one.</p>
+      <p class="lead">Run a team of AI agents - Claude, Codex, Grok and Antigravity - that plan, split work,
+        write code and report back to you. Open a team, or create one from ready-made teams or from roles
+        in the <button class="link" id="home-market">Role Market</button>.</p>
       <p><button id="shortcut-btn" class="small">Add an agent-org shortcut to the desktop</button></p>
       <div class="card" id="recent-card">
         <h2>Open a recent team</h2>
@@ -46,6 +55,7 @@
         <p>Pick the project folder the agents will work in, then a starting team. You can change everything later.</p>
         <label>Project folder<div class="row"><input id="create-path" placeholder="E:\projects\my-app"><button id="create-browse">Browse...</button></div></label>
         <div id="templates" class="templates"></div>
+        <div id="builder" class="builder" hidden></div>
         <button id="create-go" class="primary">Create team</button>
       </div>
       <div class="card">
@@ -133,7 +143,72 @@
     </aside>
   </main>
 
+  <main id="view-roles" class="roles-view" hidden>
+    <div class="roles-inner">
+      <div class="roles-top">
+        <div class="grow">
+          <button id="roles-back" class="ghost small" hidden>&larr; Back</button>
+          <h1>Role Market</h1>
+          <p>Packaged roles: a program and model, a reasoning level, its tasks and its prompt. Place one in your
+            team, build a new team from them, or make your own and share it as a file.</p>
+        </div>
+        <div class="roles-tools">
+          <input id="roles-search" type="search" placeholder="Search roles">
+          <select id="roles-filter" title="Only roles on this program"></select>
+          <button id="roles-import" title="Add a role from a .role.yaml file">Import…</button>
+          <input id="roles-file" type="file" accept=".yaml,.yml,.json,.txt" hidden>
+          <button id="roles-new" class="primary">New role</button>
+        </div>
+      </div>
+      <div id="roles-grid" class="roles-grid"></div>
+    </div>
+  </main>
+
   <div id="drawer" class="drawer" hidden></div>
+
+  <dialog id="role-dialog" class="wide">
+    <form method="dialog" id="role-form">
+      <h2 id="role-dialog-title">New role</h2>
+      <div class="grid">
+        <label class="wide">Name<input id="rd-title" required placeholder="e.g. Careful reviewer"></label>
+        <label class="wide">Icon<div class="icon-picks" id="rd-icons"></div></label>
+        <label class="wide">One-line description<input id="rd-description" placeholder="What this role is good at"></label>
+        <label>Program<select id="rd-harness"></select></label>
+        <label>Model<input id="rd-model" placeholder="the program's default"></label>
+        <label>Reasoning effort<input id="rd-effort" placeholder="default"></label>
+        <label>Tags<input id="rd-tags" placeholder="e.g. code, review"></label>
+        <label class="wide">Tasks it does (its duties)<textarea id="rd-duties" rows="2" placeholder="Review finished work when asked, and report a clear verdict."></textarea></label>
+        <label class="wide">Prompt (its instructions: how to work, what to check)<textarea id="rd-instructions" rows="6" placeholder="Step-by-step habits, style rules, what a good result looks like..."></textarea></label>
+        <label class="wide">Files it may write<input id="rd-scope" class="mono" placeholder="e.g. src/*, tests/*   (empty: edits nothing)"></label>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button class="primary" value="ok">Save role</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="place-dialog">
+    <form method="dialog" id="place-form">
+      <h2 id="place-title">Add to your team</h2>
+      <p class="muted" id="place-sub" style="margin:0"></p>
+      <label>Name in the team<input id="place-name" required></label>
+      <label>Reports to<select id="place-superior"></select></label>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button class="primary" value="ok">Add to team</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="pick-dialog" class="wide">
+    <form method="dialog">
+      <h2>Pick roles for your team</h2>
+      <input id="pick-search" type="search" placeholder="Search roles">
+      <div id="pick-list" class="pick-list"></div>
+      <div class="dialog-actions"><button value="ok" class="primary">Done</button></div>
+    </form>
+  </dialog>
 
   <dialog id="summon">
     <form method="dialog">
@@ -184,5 +259,6 @@
   <script src="/static/app.js"></script>
   <script src="/static/board.js"></script>
   <script src="/static/editor.js"></script>
+  <script src="/static/roles.js"></script>
 </body>
 </html>

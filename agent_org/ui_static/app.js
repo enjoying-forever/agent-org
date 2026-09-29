@@ -177,6 +177,8 @@ function enterTeam() {
   if (S.mode === 'team') return;
   S.mode = 'team';
   $('#view-home').hidden = true;
+  $('#view-roles').hidden = true;
+  $('#market-btn').hidden = true;
   for (const id of ['#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) $(id).hidden = false;
   showView('team');
 }
@@ -188,9 +190,11 @@ function enterHome() {
   if (typeof E !== 'undefined') E.draft = null;
   $('#drawer').hidden = true;
   resetActivity();
-  for (const id of ['#view-team', '#view-board', '#view-editor', '#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) {
+  for (const id of ['#view-team', '#view-board', '#view-editor', '#view-roles', '#views', '#conn', '#switch-btn',
+    '#stop-all', '#launch-all']) {
     $(id).hidden = true;
   }
+  $('#market-btn').hidden = false;
   $('#project').textContent = '';
   $('#view-home').hidden = false;
   document.title = 'agent-org';
@@ -206,8 +210,13 @@ async function renderHome() {
     class: 'list-item', title: r.path, onclick: () => openTeam(r.path),
   }, h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path))));
   const chosen = document.querySelector('#templates input:checked')?.value || home.default;
-  $('#templates').replaceChildren(...home.templates.map((t) => h('label', { class: 'tier' },
-    h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen }),
+  const buildChoice = h('label', { class: 'tier' },
+    h('input', { type: 'radio', name: 'template', value: BUILD, checked: chosen === BUILD,
+      onchange: () => renderBuilder() }),
+    h('span', {}, h('b', {}, 'Build my own from the Role Market')),
+    h('small', {}, 'Pick roles and place each under its superior. The first one leads.'));
+  $('#templates').replaceChildren(buildChoice, ...home.templates.map((t) => h('label', { class: 'tier' },
+    h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen, onchange: () => renderBuilder() }),
     h('span', {}, h('b', {}, t.title), t.default ? h('span', { class: 'tag' }, 'default') : null,
       h('span', { class: 'muted' }, `  ${t.roles}`)),
     h('small', {}, t.summary,
@@ -216,6 +225,7 @@ async function renderHome() {
       t.mine && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('delete', t); } },
         ' Delete')))));
   renderChecks($('#home-checks'));
+  renderBuilder();
 }
 
 async function templateAction(kind, t) {
@@ -242,7 +252,9 @@ $('#create-go').addEventListener('click', async () => {
   const folder = $('#create-path').value.trim();
   const template = document.querySelector('#templates input:checked')?.value;
   if (!folder) { toast('Choose the project folder first.', true); return; }
-  await act(api('/api/create', { folder, template }), () => 'Team created. Check it in "Edit team", then Launch team.');
+  const body = template === BUILD ? { folder, roles: builderRoles() } : { folder, template };
+  if (template === BUILD && !body.roles.length) { toast('Pick at least one role from the market first.', true); return; }
+  await act(api('/api/create', body), () => 'Team created. Check it in "Edit team", then Launch team.');
 });
 $('#shortcut-btn').addEventListener('click', () =>
   act(api('/api/desktop-shortcut', {}), () => 'Shortcut added: double-click "agent-org" on your desktop next time.'));
@@ -739,9 +751,10 @@ function showView(v) {
   $('#view-team').hidden = v !== 'team';
   $('#view-board').hidden = v !== 'board';
   $('#view-editor').hidden = v !== 'editor';
-  $('#launch-all').hidden = v === 'editor';
-  $('#stop-all').hidden = v === 'editor';
+  $('#view-roles').hidden = v !== 'roles';
+  $('#launch-all').hidden = S.mode !== 'team' || v === 'editor';
   if (v === 'editor') { closeDrawer(); if (!E.draft) loadEditor(); }
+  if (v === 'roles') { closeDrawer(); loadRoles(); }
 }
 
 function showTab(t) {

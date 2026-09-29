@@ -162,17 +162,27 @@ consultants, checks and settings) and can make it your **default**. When you cre
 for a new project, your saved teams are listed first and the default is already chosen:
 pick the folder and click *Create team*. *Make default* and *Delete* are next to each.
 
-## A library of roles
+## The Role Market
 
-Each role has short **duties** (what it is for) and optional **instructions** - its own
-prompt: how to work, style rules, what to check. Both go into the agent's role card.
+A **role** is a packaged agent: its program and model, its reasoning effort, the tasks it does
+(its duties), its prompt (instructions: how to work, what to check), the files it may write,
+and a name, icon, description and tags to find it by.
 
-**Save as preset…** on any role in *Edit team* keeps its program, model, effort, duties,
-instructions and files. In any team, **+ Add role…** offers your presets and ready-made
-ones (planner, coder, reviewer, tester, researcher, Gemini coder), filled in with one click;
-your presets are listed above the roles, each with ✕ to delete it. Managers can hire from
-the library too: `hire_agent(name, preset="reviewer")`, overriding whatever they want.
-Presets are kept in `~/.agent-org/roles/`.
+The **Roles** page is a marketplace of them: ready-made ones (planner, coder, reviewer,
+tester, researcher, Gemini coder) and your own.
+
+- **Search** and **filter** by program; open *Tasks and prompt* on a card to see what it does.
+- **New role** designs one; **Duplicate** makes your own editable copy of a ready-made one;
+  **Edit** and **Delete** your own.
+- **Export** downloads a role as a `.role.yaml` file; **Import…** adds one - share roles, or
+  keep them safe.
+- **Add to team** places a role in the open team: choose its name and whom it reports to.
+- **Build a new team from roles:** under *Create a new team*, choose *Build my own from the
+  Role Market*, add roles, and set whom each reports to - the first one leads.
+- In *Edit team*, **Save as preset…** turns any role into a market role, and **+ Add role…**
+  offers the market. Managers can hire from it too: `hire_agent(name, preset="reviewer")`.
+
+Your roles are kept in `~/.agent-org/roles/`.
 
 ## The team can change while it runs
 

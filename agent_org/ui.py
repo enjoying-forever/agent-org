@@ -275,19 +275,40 @@ class App:
 
     def create_team(self, body: dict[str, Any]) -> dict[str, Any]:
         folder = Path(_str(body, "folder").strip().strip('"'))
-        template = _str(body, "template")
-        if template not in templates.ids():
+        picked = body.get("roles")
+        template = "" if picked else _str(body, "template")
+        if not picked and template not in templates.ids():
             raise ApiError(f"Unknown team template '{template}'.")
         if not folder.is_absolute():
             raise ApiError("Choose a full folder path, for example E:\\projects\\my-app.")
         team_file = folder / "team.yaml"
         if team_file.exists() and not body.get("overwrite"):
             raise ApiError(f"{team_file} already exists. Open it instead, or choose another folder.")
+        config = self._team_from_roles(picked) if picked else templates.team_config(template)
+        try:
+            Team.from_dict(config, base_dir=folder)
+        except TeamError as e:
+            raise ApiError(f"That team is not complete yet: {e}") from None
         folder.mkdir(parents=True, exist_ok=True)
-        team_file.write_text(yaml.safe_dump(templates.team_config(template), sort_keys=False,
-                                            allow_unicode=True, width=100), encoding="utf-8")
+        team_file.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True, width=100), encoding="utf-8")
         self._open(team_file)
         return {"team_file": str(self.team_file)}
+
+    @staticmethod
+    def _team_from_roles(picked: object) -> dict[str, Any]:
+        """A team.yaml built from market roles: [{id, name, superior}], superiors by name ('you' = leader)."""
+        if not isinstance(picked, list) or not picked:
+            raise ApiError("Pick at least one role for the team.")
+        roles: dict[str, Any] = {}
+        for item in picked:
+            if not isinstance(item, dict):
+                raise ApiError("Each picked role needs an id, a name and whom it reports to.")
+            try:
+                name = str(item.get("name") or "").strip() or presets.role_name(str(item.get("id")), set(roles))
+                roles[name] = presets.team_role(str(item.get("id")), str(item.get("superior") or "you"))
+            except KeyError:
+                raise ApiError(f"There is no role '{item.get('id')}' in the market.") from None
+        return {"owner": "you", "project_root": ".", "roles": roles, "consultants": templates.CONSULTANTS}
 
     def desktop_shortcut(self, body: dict[str, Any]) -> dict[str, Any]:
         """Put an 'agent-org' shortcut on the Windows desktop that opens this UI."""
@@ -533,6 +554,66 @@ class App:
             raise ApiError(str(e)) from None
         return {"template": template, "default": templates.default_template()}
 
+    # the Role Market
+
+    def roles(self) -> dict[str, Any]:
+        return {"roles": presets.catalogue(), "harnesses": list(HARNESSES), "models": self.catalog.models,
+                "efforts": EFFORTS, "team_open": self._hub is not None,
+                "team_roles": list(self.hub.team.roles) if self._hub is not None else [],
+                "owner": self.hub.base_team.owner if self._hub is not None else ""}
+
+    def role_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        role = body.get("role")
+        if not isinstance(role, dict):
+            raise ApiError("send the role's settings")
+        try:
+            preset = presets.save(str(role.get("title") or ""), role, body.get("id") or None)
+        except presets.RoleError as e:
+            raise ApiError(str(e)) from None
+        return {"id": preset, "roles": presets.catalogue()}
+
+    def role_duplicate(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            preset = presets.duplicate(_str(body, "id"))
+        except KeyError:
+            raise ApiError("There is no such role.") from None
+        return {"id": preset, "roles": presets.catalogue()}
+
+    def role_import(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            preset = presets.import_text(_str(body, "text"))
+        except presets.RoleError as e:
+            raise ApiError(str(e)) from None
+        return {"id": preset, "roles": presets.catalogue()}
+
+    def role_export(self, preset: str) -> dict[str, Any]:
+        try:
+            filename, text = presets.export_text(preset)
+        except KeyError:
+            raise ApiError("There is no such role.") from None
+        return {"filename": filename, "text": text}
+
+    def role_place(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Put a market role into the open team, under `superior` (the owner makes it the leader)."""
+        preset, superior = _str(body, "id"), _str(body, "superior")
+        team = self.hub.team
+        if superior != team.owner and superior not in team.roles:
+            raise ApiError(f"'{superior}' is not in this team")
+        try:
+            name = (body.get("name") or "").strip() or presets.role_name(preset, set(team.roles))
+            spec = presets.team_role(preset, superior)
+        except KeyError:
+            raise ApiError("There is no such role.") from None
+        if name in team.roles or name == team.owner:
+            raise ApiError(f"There is already a '{name}' in the team.")
+
+        def add(config: dict[str, Any]) -> None:
+            config.setdefault("roles", {})[name] = spec
+
+        self.hub.edit_team(add)
+        self.hub.event("team", team.owner, f"placed {name} ({spec['harness']}) under {superior} from the Role Market")
+        return {"name": name}
+
     def save_preset(self, body: dict[str, Any]) -> dict[str, Any]:
         """Keep one role's settings in the library, to reuse in any team."""
         role = body.get("role")
@@ -599,6 +680,8 @@ GET_ROUTES = {
     "/api/task": lambda app, q: app.task_details(int(q["id"][0])),
     "/api/search": lambda app, q: app.search(q.get("q", [""])[0]),
     "/api/task-changes": lambda app, q: app.task_changes(int(q["id"][0])),
+    "/api/roles": lambda app, q: app.roles(),
+    "/api/role-export": lambda app, q: app.role_export(q.get("id", [""])[0]),
 }
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
@@ -611,6 +694,8 @@ POST_ROUTES = {
     "/api/reassign": App.reassign, "/api/restart": App.restart, "/api/save-template": App.save_template,
     "/api/default-template": App.default_template, "/api/delete-template": App.delete_template,
     "/api/save-preset": App.save_preset, "/api/delete-preset": App.delete_preset,
+    "/api/role-save": App.role_save, "/api/role-duplicate": App.role_duplicate,
+    "/api/role-delete": App.delete_preset, "/api/role-import": App.role_import, "/api/role-place": App.role_place,
 }
 
 

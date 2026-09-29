@@ -426,8 +426,54 @@ def test_role_presets_from_the_editor(server):
     saved = server.ok("/api/save-preset", {"name": "Careful coder", "role": {
         "harness": "codex", "model": "gpt-6-luna", "duties": "Code.", "instructions": "Run the tests.",
         "write_scope": ["src/*"]}})
-    assert saved["preset"] == "my:Careful coder"
-    mine = next(p for p in server.ok("/api/team")["presets"] if p["id"] == "my:Careful coder")
+    assert saved["preset"] == "my:careful-coder"
+    mine = next(p for p in server.ok("/api/team")["presets"] if p["id"] == "my:careful-coder")
     assert mine["mine"] and mine["instructions"] == "Run the tests."
-    server.ok("/api/delete-preset", {"id": "my:Careful coder"})
+    server.ok("/api/delete-preset", {"id": "my:careful-coder"})
     assert server.request("/api/delete-preset", {"id": "coder"})[0] == 400
+
+
+def test_the_role_market(server, tmp_path):
+    market = server.ok("/api/roles")
+    assert market["team_open"] and {"planner", "reviewer"} <= {p["id"] for p in market["roles"]}
+    reviewer = next(p for p in market["roles"] if p["id"] == "reviewer")
+    assert reviewer["icon"] and reviewer["description"] and reviewer["tags"]
+    # design one, edit it, duplicate a ready-made one
+    made = server.ok("/api/role-save", {"role": {"title": "Doc writer", "icon": "📝", "harness": "claude",
+                                                 "model": "sonnet", "duties": "Write the docs.", "tags": "docs",
+                                                 "instructions": "Short sentences.", "write_scope": "docs/*"}})
+    assert made["id"] == "my:doc-writer"
+    server.ok("/api/role-save", {"id": "my:doc-writer", "role": {"title": "Doc writer", "harness": "claude",
+                                                                "duties": "Write and fix the docs."}})
+    mine = next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "my:doc-writer")
+    assert mine["duties"] == "Write and fix the docs." and mine["mine"]
+    assert server.request("/api/role-save", {"id": "reviewer", "role": {"title": "x", "harness": "claude"}})[0] == 400
+    copy = server.ok("/api/role-duplicate", {"id": "reviewer"})
+    assert copy["id"].startswith("my:reviewer")
+    # export, delete, import: the same role comes back
+    exported = server.ok("/api/role-export?id=my:doc-writer")
+    assert exported["filename"] == "doc-writer.role.yaml" and "agent-org-role: 1" in exported["text"]
+    server.ok("/api/role-delete", {"id": "my:doc-writer"})
+    back = server.ok("/api/role-import", {"text": exported["text"]})
+    assert back["id"] == "my:doc-writer"
+    assert server.request("/api/role-import", {"text": "not: [a role"})[0] == 400
+    # place it in the open team
+    placed = server.ok("/api/role-place", {"id": "my:doc-writer", "superior": "leader"})
+    assert placed["name"] == "doc-writer"
+    roles = yaml.safe_load(server.team_file.read_text(encoding="utf-8"))["roles"]
+    assert roles["doc-writer"] == {"superior": "leader", "harness": "claude", "duties": "Write and fix the docs."}
+    assert server.request("/api/role-place", {"id": "coder", "superior": "ghost"})[0] == 400
+
+
+def test_a_new_team_built_from_market_roles(server, tmp_path):
+    folder = tmp_path / "built"
+    server.ok("/api/create", {"folder": str(folder), "roles": [
+        {"id": "planner", "name": "lead", "superior": "you"},
+        {"id": "coder", "name": "dev", "superior": "lead"},
+        {"id": "reviewer", "superior": "lead"}]})
+    team = yaml.safe_load((folder / "team.yaml").read_text(encoding="utf-8"))
+    assert {n: r["superior"] for n, r in team["roles"].items()} == {"lead": "you", "dev": "lead", "reviewer": "lead"}
+    assert team["roles"]["dev"]["model"] == "gpt-6-luna" and team["consultants"]
+    status, data = server.request("/api/create", {"folder": str(tmp_path / "bad"), "roles": [
+        {"id": "planner", "superior": "you"}, {"id": "coder", "superior": "you"}]})
+    assert status == 400 and "not complete" in data["error"]  # two leaders

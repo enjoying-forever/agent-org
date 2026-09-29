@@ -20,7 +20,7 @@ def test_save_use_and_delete_your_own():
     preset = presets.save("My Tester!", {"harness": "codex", "model": "gpt-6-luna", "duties": "Test it.",
                                          "instructions": "Be thorough.", "write_scope": ["tests/*"],
                                          "superior": "ignored"})
-    assert preset == "my:My Tester"
+    assert preset == "my:my-tester"
     assert presets.get(preset) == {"harness": "codex", "model": "gpt-6-luna", "duties": "Test it.",
                                    "instructions": "Be thorough.", "write_scope": ["tests/*"]}
     assert presets.catalogue()[0]["mine"]  # yours come first
