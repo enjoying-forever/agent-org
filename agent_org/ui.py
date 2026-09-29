@@ -502,10 +502,12 @@ class App:
                                        limit=self.hub.base_team.settings.max_running)
         self._resumable.clear()
 
+        opener = launch.open_tab  # fixed now: the thread outlives this call
+
         def open_all() -> None:
             for tab in tabs:
                 try:
-                    launch.open_tab(tab)
+                    opener(tab)
                 except (HubError, OSError, subprocess.SubprocessError) as e:
                     print(f"could not open a tab: {e}", file=sys.stderr)
                 time.sleep(1)  # let the named window exist before the next tab joins it

@@ -243,3 +243,8 @@ def test_antigravity_hooks_only_edit_tools(tmp_path):
     pre = json.loads((folder / "hooks.json").read_text(encoding="utf-8"))["agent-org"]["PreToolUse"][0]
     assert "write_to_file" in pre["matcher"] and "call_mcp_tool" not in pre["matcher"] and pre["matcher"] != "*"
 
+
+
+def test_tests_can_never_open_real_agent_tabs():
+    with pytest.raises(launch.HubError, match="inside a test"):
+        launch.open_tab(["wt", "new-tab", "pwsh"])

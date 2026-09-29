@@ -50,13 +50,16 @@ class Launch:
 def kickoff(role: str) -> str:
     return (f"You are the '{role}' agent in a team. Call the {SERVER_NAME} tool my_role to read "
             "your role, the message law and where you left off. Then carry on with your open tasks, "
-            "or end your turn: new messages will be delivered to you.")
+            "or end your turn: new messages will be delivered to you. If you have no tool called "
+            f"my_role (the {SERVER_NAME} tools did not load), say so and stop: do not search the computer "
+            "for it.")
 
 
 def resume_kickoff(role: str) -> str:
     return (f"agent-org: the team was restarted and you are back as '{role}'. Your role or the team "
             f"may have changed, so call the {SERVER_NAME} tool my_role first. Then read_inbox, check "
-            "list_tasks, and carry on where you left off.")
+            "list_tasks, and carry on where you left off. If you have no tool called my_role, say so and "
+            "stop: do not search the computer for it.")
 
 
 def plan_session(hub: Hub, role: str, fresh: bool = False) -> tuple[str | None, str | None]:
@@ -429,6 +432,8 @@ def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
 
 
 def open_tab(tab: list[str]) -> None:
+    if os.environ.get("PYTEST_CURRENT_TEST"):  # a test must never start real agents
+        raise HubError("refusing to open a real terminal tab inside a test")
     wt = shutil.which("wt")
     if wt is None or shutil.which("pwsh") is None:
         raise HubError("needs Windows Terminal (wt) and PowerShell 7 (pwsh) on PATH")
