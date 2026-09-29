@@ -9,7 +9,8 @@ const E = { draft: null, meta: null, dirty: false };
 function toDraft(config) {
   const {
     owner = 'you', project_root = '.', roles = {}, consultants = {}, checks = [],
-    autostart = false, max_running = 0, commit_on_accept = true, isolation = 'leases', ...extra
+    autostart = false, max_running = 0, commit_on_accept = true, isolation = 'leases', team_changes = true,
+    ...extra
   } = config || {};
   return {
     owner: String(owner),
@@ -17,6 +18,7 @@ function toDraft(config) {
     extra,
     autostart: Boolean(autostart),
     branches: isolation === 'branches',
+    teamChanges: team_changes !== false,
     max_running: Number(max_running) || 0,
     commit_on_accept: commit_on_accept !== false,
     checks: (checks || []).map((c) => ({
@@ -47,6 +49,7 @@ function fromDraft(d) {
   const config = { owner: d.owner.trim(), project_root: d.project_root.trim() || '.', ...d.extra };
   if (d.autostart) config.autostart = true;
   if (d.branches) config.isolation = 'branches';
+  if (!d.teamChanges) config.team_changes = false;
   if (Number(d.max_running) > 0) config.max_running = Math.round(Number(d.max_running));
   if (!d.commit_on_accept) config.commit_on_accept = false;
   const checks = d.checks.filter((c) => c.run.trim()).map((c) => {
@@ -214,6 +217,10 @@ function renderEditor() {
         h('input', {
           type: 'checkbox', checked: d.branches, onchange: (e) => { d.branches = e.target.checked; touch(); },
         }), 'Agents work on their own git branches, so several can change one file at once (instead of one writer per file)'),
+        h('label', { class: 'inline wide', title: 'Managers can hire an agent under them, change one, or let '
+          + 'one go while the team runs. You are told about every change.' }, h('input', {
+          type: 'checkbox', checked: d.teamChanges, onchange: (e) => { d.teamChanges = e.target.checked; touch(); },
+        }), 'Agents may change the team (hire, change or let go of agents below them)'),
         h('label', { class: 'inline wide' }, h('input', {
           type: 'checkbox', checked: d.autostart, onchange: (e) => { d.autostart = e.target.checked; touch(); },
         }), 'Start agents automatically when they get work (while this page is open)'),
@@ -328,6 +335,15 @@ $('#save').addEventListener('click', async () => {
     toast(e.message, true);
   }
 });
+$('#save-template').addEventListener('click', async () => {
+  if (E.dirty) { toast('Save team.yaml first; then save it as your team.', true); return; }
+  const name = prompt('Name for this team (it will be offered for every new project):', 'My team');
+  if (name === null || !name.trim()) return;
+  const makeDefault = confirm(`Use "${name.trim()}" as the default for new projects?`);
+  await act(api('/api/save-template', { name: name.trim(), default: makeDefault }),
+    () => `Saved "${name.trim()}"${makeDefault ? ' as your default team' : ''}. Choose it when you create a team.`);
+});
+
 $('#revert').addEventListener('click', () => {
   if (!E.dirty || confirm('Throw away your unsaved changes?')) loadEditor();
 });

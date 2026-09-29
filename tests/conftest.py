@@ -41,6 +41,8 @@ def private_recent_list(tmp_path_factory, monkeypatch):
     from agent_org import launch
     grok = path.parent / ".grok" / "hooks" / "agent-org.json"  # nor the real ~/.grok hooks
     monkeypatch.setattr(launch, "grok_hooks_file", lambda: grok)
+    from agent_org import templates
+    monkeypatch.setattr(templates, "home_dir", lambda: path.parent / ".agent-org")  # nor saved teams
 
 
 @pytest.fixture

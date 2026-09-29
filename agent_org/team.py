@@ -13,7 +13,7 @@ ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
 CHECK_KEYS = {"name", "run", "when", "timeout"}
 TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants", "checks",
-             "autostart", "max_running", "commit_on_accept", "isolation"}
+             "autostart", "max_running", "commit_on_accept", "isolation", "team_changes"}
 ISOLATION = ("leases", "branches")  # one writer per file, or every agent on its own git branch
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 CONSULTANT_PREFIX = "consultant-"  # names of temporary consultant roles: consultant-1, consultant-2, ...
@@ -72,6 +72,7 @@ class Settings:
     max_running: int = 0          # most agents running at once (0: no limit)
     commit_on_accept: bool = True  # commit a task's files when its result is accepted
     isolation: str = "leases"     # "branches": each agent works in its own git worktree
+    team_changes: bool = True     # managers may hire, change and let go of the agents below them
 
     @property
     def branches(self) -> bool:
@@ -147,7 +148,8 @@ class Team:
         if isolation not in ISOLATION:
             raise TeamError(f"'isolation' must be one of {list(ISOLATION)}")
         settings = Settings(autostart=bool(data.get("autostart", False)), max_running=max_running,
-                            commit_on_accept=bool(data.get("commit_on_accept", True)), isolation=isolation)
+                            commit_on_accept=bool(data.get("commit_on_accept", True)), isolation=isolation,
+                            team_changes=bool(data.get("team_changes", True)))
         return cls(owner, project_root, database, roles, tiers, checks, settings)
 
     def with_roles(self, extra: list[Role]) -> Team:

@@ -153,6 +153,29 @@ These are set in *Edit team*, under the team's name.
   the number of running agents (and your subscription use) down; the others wait for a
   free place.
 
+## Set your team up once
+
+In *Edit team*, **Save as my team…** keeps the team (its roles, programs, models, duties,
+consultants, checks and settings) and can make it your **default**. When you create a team
+for a new project, your saved teams are listed first and the default is already chosen:
+pick the folder and click *Create team*. *Make default* and *Delete* are next to each.
+
+## The team can change while it runs
+
+The leader, and any agent with people below it, can:
+
+- **hire_agent**: add an agent under itself (or under someone below it) - its program,
+  model, duties and files. It opens in its own tab and starts at once.
+- **change_agent**: change an agent below it - duties, files, model or whom it reports to.
+  A new model applies from the agent's next start.
+- **let_go_agent**: remove an agent below it whose work is over (its unfinished tasks must
+  be reassigned or cancelled first). Its program stops; its people move up one level.
+
+Every change is saved to `team.yaml` (the old one is kept as `team.yaml.bak`), everyone
+sees it at once, and you are told about it in *Messages*. You can turn it off in *Edit team*
+(**Agents may change the team**). So you can also start with just a leader (*Solo*) and
+let it build the team the work needs.
+
 ## Several agents on one file: git branches
 
 By default one agent writes a file at a time (the lease in rule 9), and the others wait.

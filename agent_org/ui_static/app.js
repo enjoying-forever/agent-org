@@ -207,12 +207,24 @@ async function renderHome() {
   $('#recent').replaceChildren(...recent.map((r) => h('button', {
     class: 'list-item', title: r.path, onclick: () => openTeam(r.path),
   }, h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path))));
-  const chosen = document.querySelector('#templates input:checked')?.value || 'pair';
+  const chosen = document.querySelector('#templates input:checked')?.value || home.default;
   $('#templates').replaceChildren(...home.templates.map((t) => h('label', { class: 'tier' },
     h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen }),
-    h('span', {}, h('b', {}, t.title), h('span', { class: 'muted' }, `  ${t.roles}`)),
-    h('small', {}, t.summary))));
+    h('span', {}, h('b', {}, t.title), t.default ? h('span', { class: 'tag' }, 'default') : null,
+      h('span', { class: 'muted' }, `  ${t.roles}`)),
+    h('small', {}, t.summary,
+      !t.default && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('default', t); } },
+        ' Make default'),
+      t.mine && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('delete', t); } },
+        ' Delete')))));
   renderChecks($('#home-checks'));
+}
+
+async function templateAction(kind, t) {
+  if (kind === 'delete' && !confirm(`Delete your saved team "${t.title}"? Projects made from it keep their team.`)) return;
+  await act(api(`/api/${kind}-template`, { id: t.id }),
+    () => (kind === 'delete' ? `Deleted "${t.title}".` : `"${t.title}" is now the default for new projects.`));
+  renderHome();
 }
 
 async function openTeam(path) {

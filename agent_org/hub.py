@@ -31,8 +31,11 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from . import gitops, verify
+import yaml
+
+from .filelock import file_lock
 from .store import ACTIVE, CLOSED, Consultant, Lock, Message, Status, Store, Task
-from .team import Role, Team
+from .team import HARNESSES, NAME_RE, Role, Team, TeamError
 
 STATES = ("idle", "working", "waiting", "blocked", "done")
 OUTCOMES = ("done", "blocked", "failed", "rejected")
@@ -155,15 +158,66 @@ def is_pattern(path: str) -> bool:
 
 
 class Hub:
-    def __init__(self, team: Team, store: Store, opener: Opener | None = None):
-        self.base_team = team
+    RELOAD_EVERY = 1.0  # seconds between looks at team.yaml for changes made elsewhere
+
+    def __init__(self, team: Team, store: Store, opener: Opener | None = None,
+                 team_file: str | Path | None = None, stopper: Callable[[str], object] | None = None):
+        self.team_file = Path(team_file).resolve() if team_file else None
+        self._base_team = team
+        self._stamp = self._mtime()
+        self._checked = time.time()
         self.store = store
         self.opener = opener
+        self.stopper = stopper  # ends a let-go agent's program (the launcher's stop_role)
 
     @classmethod
-    def open(cls, team_path: str | Path, opener: Opener | None = None) -> Hub:
+    def open(cls, team_path: str | Path, opener: Opener | None = None,
+             stopper: Callable[[str], object] | None = None) -> Hub:
         team = Team.load(team_path)
-        return cls(team, Store(team.database), opener)
+        return cls(team, Store(team.database), opener, team_path, stopper)
+
+    def _mtime(self) -> float:
+        try:
+            return self.team_file.stat().st_mtime if self.team_file else 0.0
+        except OSError:
+            return 0.0
+
+    @property
+    def base_team(self) -> Team:
+        """The team from team.yaml - reloaded when anyone (an agent, the page) changes the file."""
+        if self.team_file and time.time() - self._checked > self.RELOAD_EVERY:
+            self._checked = time.time()
+            stamp = self._mtime()
+            if stamp != self._stamp:
+                self._stamp = stamp
+                try:
+                    self._base_team = Team.load(self.team_file)
+                except (TeamError, OSError, yaml.YAMLError):
+                    pass  # half-written or broken: keep the last good team
+        return self._base_team
+
+    @base_team.setter
+    def base_team(self, team: Team) -> None:
+        self._base_team = team
+        self._stamp = self._mtime()
+
+    def edit_team(self, change: Callable[[dict], None]) -> Team:
+        """Change team.yaml: `change` edits its content; the result is checked before it is saved."""
+        if self.team_file is None:
+            raise HubError("this hub was opened without its team.yaml, so the team cannot be changed")
+        with file_lock(self.team_file.parent / ".agent-org" / "team.lock", busy="someone else is changing the team"):
+            text = self.team_file.read_text(encoding="utf-8")
+            config = yaml.safe_load(text) or {}
+            change(config)
+            try:
+                team = Team.from_dict(config, base_dir=self.team_file.parent)
+            except TeamError as e:
+                raise HubError(f"that change would break the team: {e}") from None
+            self.team_file.with_suffix(self.team_file.suffix + ".bak").write_text(text, encoding="utf-8")
+            self.team_file.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True, width=100),
+                                      encoding="utf-8")
+        self.base_team = team
+        return team
 
     def close(self) -> None:
         self.store.close()
@@ -759,6 +813,113 @@ class RoleSession:
         self.hub.event("task", self.name, f"moved #{task.id} from {before} to {to}" + (f": {why}" if why else ""),
                        task.id)
         return task
+
+    # changing the team (hire, change, let go) - only below yourself
+
+    def _may_change_team(self) -> Team:
+        team = self.team
+        me = team.roles.get(self.name)
+        if not team.settings.team_changes:
+            raise PermissionDenied("the owner has turned team changes off; ask them instead")
+        if me is not None and me.is_consultant:
+            raise PermissionDenied("consultants do not change the team")
+        return team
+
+    def hire(self, name: str, harness: str, duties: str, model: str = "", effort: str = "",
+             write_scope: list[str] | tuple[str, ...] = (), superior: str = "") -> Role:
+        """Add an agent under yourself (or under someone below you); it starts at once."""
+        team = self._may_change_team()
+        superior = superior or self.name
+        if superior != self.name and not team.is_above(self.name, superior):
+            raise PermissionDenied(f"you can only hire under yourself or someone below you, not under {superior}")
+        if not NAME_RE.match(name) or name.startswith("consultant-"):
+            raise HubError("give it a simple name: letters, digits, - and _ (not starting with consultant-)")
+        if team.is_member(name):
+            raise HubError(f"there is already a '{name}' in the team")
+        if harness not in HARNESSES:
+            raise HubError(f"harness must be one of {list(HARNESSES)}")
+        spec = {"superior": superior, "harness": harness, "duties": _text(duties)[:2000],
+                "write_scope": [str(p) for p in write_scope]}
+        if model.strip():
+            spec["model"] = model.strip()
+        if effort.strip():
+            spec["effort"] = effort.strip()
+        self.hub.edit_team(lambda c: c.setdefault("roles", {}).__setitem__(name, spec))
+        role = self.hub.team.roles[name]
+        self._announce(f"hired {name} ({harness}{', ' + model if model else ''}) under {superior}: {duties[:200]}")
+        if self.hub.opener is not None:
+            try:
+                self.hub.opener(role)
+            except Exception as e:  # noqa: BLE001 - the role exists; it can be started from the page
+                self.hub.event("agent", self.name, f"could not open {name}'s tab: {e}")
+        return role
+
+    def change_role(self, name: str, duties: str | None = None, model: str | None = None,
+                    effort: str | None = None, write_scope: list[str] | None = None,
+                    superior: str | None = None) -> Role:
+        """Change an agent below you. A new model or effort applies from its next start."""
+        team = self._may_change_team()
+        if not team.is_above(self.name, name) or team.roles[name].is_consultant:
+            raise PermissionDenied(f"you can only change agents below you, and '{name}' is not one")
+        if superior is not None and superior != self.name and not team.is_above(self.name, superior):
+            raise PermissionDenied(f"{name} can only move under you or someone below you")
+        what = {"duties": duties, "model": model, "effort": effort, "write_scope": write_scope,
+                "superior": superior}
+        what = {k: v for k, v in what.items() if v is not None}
+        if not what:
+            raise HubError("say what to change: duties, model, effort, write_scope or superior")
+
+        def change(config: dict) -> None:
+            spec = config["roles"][name]
+            for key, value in what.items():
+                if value in ("", []) and key in ("model", "effort"):
+                    spec.pop(key, None)
+                else:
+                    spec[key] = list(value) if key == "write_scope" else value
+
+        self.hub.edit_team(change)
+        self._announce(f"changed {name}: " + ", ".join(f"{k} -> {v}" for k, v in what.items())[:300])
+        if superior is not None or duties is not None or write_scope is not None:
+            self.hub.notice(name, f"{self.name} changed your role ({', '.join(what)}). Call my_role to see it now.")
+        return self.hub.team.roles[name]
+
+    def let_go(self, name: str, reason: str = "") -> list[str]:
+        """Remove an agent below you. Its subordinates move up to its superior. Returns who moved."""
+        team = self._may_change_team()
+        if not team.is_above(self.name, name) or team.roles[name].is_consultant:
+            raise PermissionDenied(f"you can only let go of agents below you, and '{name}' is not one")
+        busy = [t for t in self.store.tasks(assignee=name, open_only=True) if t.state in ACTIVE]
+        if busy:
+            raise HubError(f"{name} still has unfinished tasks ({', '.join(f'#{t.id}' for t in busy)}): "
+                           "reassign_task or cancel_task them first")
+        above = team.roles[name].superior
+        moved = team.subordinates_of(name)
+
+        def change(config: dict) -> None:
+            for sub in moved:
+                config["roles"][sub]["superior"] = above
+            del config["roles"][name]
+
+        if self.hub.stopper is not None:
+            try:
+                self.hub.stopper(name)
+            except Exception:  # noqa: BLE001 - its tab can be closed by hand
+                pass
+        for lock in self.store.locks(name):
+            self.store.release(self.hub.lock_key(lock.path)[0])
+        self.hub.edit_team(change)
+        self._announce(f"let go of {name}" + (f": {reason.strip()}" if reason.strip() else "")
+                       + (f"; {', '.join(moved)} now report to {above}" if moved else ""))
+        for sub in moved:
+            self.hub.notice(sub, f"{name} has left the team; you now report to {above}. Call my_role.")
+        return moved
+
+    def _announce(self, what: str) -> None:
+        """Team changes are recorded and told to the owner."""
+        self.hub.event("team", self.name, what)
+        owner = self.team.owner
+        if self.name != owner:
+            self.hub.notice(owner, f"Team change by {self.name}: {what}")
 
     def task_details(self, task_id: int) -> tuple[Task, list[Message]]:
         """A task and its whole thread, for anyone who may see it (assigner, assignee, above them)."""

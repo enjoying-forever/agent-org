@@ -398,3 +398,23 @@ def test_autostart_does_not_keep_restarting_an_agent_that_will_not_stop(server, 
     server.app._autostart(hub, watchdog.patrol(hub))
     assert stopped == ["leader"] and server.opened_tabs == []
     assert "could not be restarted automatically: its program did not stop" in [e.text for e in hub.store.events_after(0)]
+
+
+def test_save_a_team_once_and_start_new_projects_from_it(server, tmp_path):
+    saved = server.ok("/api/save-template", {"name": "My crew", "default": True})
+    assert saved == {"template": "my:My crew", "default": "my:My crew"}
+    home = server.ok("/api/home")
+    assert home["default"] == "my:My crew"
+    mine = next(t for t in home["templates"] if t["id"] == "my:My crew")
+    assert mine["mine"] and mine["default"] and "tech-lead" in mine["roles"]
+    folder = tmp_path / "new-project"
+    server.ok("/api/create", {"folder": str(folder), "template": "my:My crew"})
+    created = yaml.safe_load((folder / "team.yaml").read_text(encoding="utf-8"))
+    assert created["project_root"] == "." and set(created["roles"]) == set(TEAM["roles"])
+    assert created["consultants"] == TEAM["consultants"]
+    server.ok("/api/default-template", {"id": "solo"})
+    assert server.ok("/api/home")["default"] == "solo"
+    server.ok("/api/delete-template", {"id": "my:My crew"})
+    assert not any(t["mine"] for t in server.ok("/api/home")["templates"])
+    status, _ = server.request("/api/delete-template", {"id": "solo"})
+    assert status == 400  # built-in teams stay

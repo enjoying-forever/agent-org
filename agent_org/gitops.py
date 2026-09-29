@@ -10,10 +10,10 @@ import os
 import re
 import shutil
 import subprocess
-import time
-from contextlib import contextmanager
 from fnmatch import fnmatchcase
 from pathlib import Path
+
+from .filelock import file_lock
 
 MAX_DIFF = 200_000  # characters of diff shown for one task
 IGNORE = [".agent-org/", ".agents/plugins/agent-org/"]  # the hub's own files never go into history
@@ -259,28 +259,6 @@ def commit_diff(root: Path, commit: str) -> str:
     return text if len(text) <= MAX_DIFF else text[:MAX_DIFF] + "\n... (diff cut short)\n"
 
 
-@contextmanager
 def land_lock(root: Path, timeout: float = 120):
     """One landing into main at a time, across every agent's process."""
-    path = root / ".agent-org" / LAND_LOCK
-    path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.time() + timeout
-    while True:
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            try:
-                if time.time() - path.stat().st_mtime > 300:  # left behind by a process that died
-                    path.unlink()
-                    continue
-            except OSError:
-                pass
-            if time.time() > deadline:
-                raise TimeoutError("another agent is putting its work into main; try again in a moment") from None
-            time.sleep(0.2)
-    try:
-        yield
-    finally:
-        os.close(fd)
-        path.unlink(missing_ok=True)
+    return file_lock(root / ".agent-org" / LAND_LOCK, timeout, "another agent is putting its work into main")

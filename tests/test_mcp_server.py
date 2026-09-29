@@ -107,7 +107,8 @@ def test_each_role_gets_the_tools_it_can_use(client, hub):
     # a manager can summon; the tier list is in the tool's schema
     lead = client("tech-lead")
     assert tool_names(lead) == BASIC_TOOLS | {"dismiss_consultant", "summon_consultant", "assign_task",
-                                              "cancel_task", "review_task", "reassign_task"}
+                                              "cancel_task", "review_task", "reassign_task",
+                                              "hire_agent", "change_agent", "let_go_agent"}
     summon = next(t for t in lead.call("tools/list")["result"]["tools"] if t["name"] == "summon_consultant")
     assert summon["inputSchema"]["properties"]["tier"]["enum"] == ["medium", "high"]
     # a consultant only helps

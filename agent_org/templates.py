@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 CONSULTANTS: dict[str, Any] = {
     "opus-medium": {"harness": "claude", "model": "claude-opus-5-5", "effort": "medium", "max_active": 2,
@@ -66,8 +71,88 @@ TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
+MINE = "my:"  # ids of the teams the owner saved
+KEEP_OUT = ("owner", "project_root", "database")  # these belong to one project, not to a saved team
+
+
+def home_dir() -> Path:
+    return Path.home() / ".agent-org"
+
+
+def teams_dir() -> Path:
+    return home_dir() / "teams"
+
+
+def _prefs_file() -> Path:
+    return home_dir() / "prefs.json"
+
+
+def _prefs() -> dict[str, Any]:
+    try:
+        return json.loads(_prefs_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def default_template() -> str:
+    """The team preselected for a new project: the owner's choice, else 'Leader and worker'."""
+    chosen = _prefs().get("default_team")
+    return chosen if isinstance(chosen, str) and chosen in ids() else "pair"
+
+
+def set_default(template: str) -> None:
+    if template not in ids():
+        raise KeyError(template)
+    prefs = _prefs()
+    prefs["default_team"] = template
+    _prefs_file().parent.mkdir(parents=True, exist_ok=True)
+    _prefs_file().write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+
+
+def _saved() -> dict[str, dict[str, Any]]:
+    found = {}
+    for path in sorted(teams_dir().glob("*.yaml")):
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(config, dict) and isinstance(config.get("roles"), dict):
+            found[MINE + path.stem] = config
+    return found
+
+
+def ids() -> list[str]:
+    return [*TEMPLATES, *_saved()]
+
+
+def save(name: str, config: dict[str, Any], default: bool = False) -> str:
+    """Keep a team (its roles, consultants, checks and settings) to start new projects from."""
+    stem = re.sub(r"[^A-Za-z0-9_ -]", "", name).strip()
+    if not stem:
+        raise ValueError("give the team a name (letters, digits, spaces, - and _)")
+    body = {k: v for k, v in config.items() if k not in KEEP_OUT}
+    teams_dir().mkdir(parents=True, exist_ok=True)
+    (teams_dir() / f"{stem}.yaml").write_text(yaml.safe_dump(body, sort_keys=False, allow_unicode=True, width=100),
+                                              encoding="utf-8")
+    template = MINE + stem
+    if default:
+        set_default(template)
+    return template
+
+
+def delete(template: str) -> None:
+    if not template.startswith(MINE):
+        raise KeyError(template)
+    (teams_dir() / f"{template[len(MINE):]}.yaml").unlink(missing_ok=True)
+
+
 def team_config(template: str) -> dict[str, Any]:
-    """A team.yaml body for `template`, with the project in the same folder."""
+    """A team.yaml body for `template` (built in, or one the owner saved), with the project in the same folder."""
+    if template.startswith(MINE):
+        saved = _saved().get(template)
+        if saved is None:
+            raise KeyError(template)
+        return {"owner": "you", "project_root": ".", **saved}
     spec = TEMPLATES[template]
     config: dict[str, Any] = {"owner": "you", "project_root": ".", "roles": spec["roles"]}
     if spec.get("consultants"):
@@ -75,6 +160,11 @@ def team_config(template: str) -> dict[str, Any]:
     return config
 
 
-def catalogue() -> list[dict[str, str]]:
-    return [{"id": key, "title": t["title"], "summary": t["summary"], "roles": ", ".join(t["roles"])}
-            for key, t in TEMPLATES.items()]
+def catalogue() -> list[dict[str, Any]]:
+    default = default_template()
+    mine = [{"id": key, "title": key[len(MINE):], "summary": "Your saved team.",
+             "roles": ", ".join(config["roles"]), "mine": True, "default": key == default}
+            for key, config in _saved().items()]
+    built_in = [{"id": key, "title": t["title"], "summary": t["summary"], "roles": ", ".join(t["roles"]),
+                 "mine": False, "default": key == default} for key, t in TEMPLATES.items()]
+    return mine + built_in

@@ -166,6 +166,7 @@ class App:
     def _open(self, team_file: Path) -> None:
         team_file = team_file.resolve()
         hub = Hub.open(team_file, opener=launch.tab_opener(team_file))  # raises TeamError
+        hub.stopper = lambda role: launch.stop_role(hub, role)
         if self._hub is not None:
             self._hub.close()
         self._hub, self.team_file = hub, team_file
@@ -250,7 +251,7 @@ class App:
     def home(self) -> dict[str, Any]:
         recent = [{"path": p, "name": Path(p).parent.name, "exists": Path(p).is_file()} for p in load_recent()]
         return {"open": self._hub is not None, "team_file": str(self.team_file or ""),
-                "recent": recent, "templates": templates.catalogue()}
+                "recent": recent, "templates": templates.catalogue(), "default": templates.default_template()}
 
     def open_team(self, body: dict[str, Any]) -> dict[str, Any]:
         path = Path(_str(body, "path").strip().strip('"'))
@@ -267,7 +268,7 @@ class App:
     def create_team(self, body: dict[str, Any]) -> dict[str, Any]:
         folder = Path(_str(body, "folder").strip().strip('"'))
         template = _str(body, "template")
-        if template not in templates.TEMPLATES:
+        if template not in templates.ids():
             raise ApiError(f"Unknown team template '{template}'.")
         if not folder.is_absolute():
             raise ApiError("Choose a full folder path, for example E:\\projects\\my-app.")
@@ -391,6 +392,7 @@ class App:
             "settings": {"autostart": team.settings.autostart, "max_running": team.settings.max_running,
                          "commit_on_accept": team.settings.commit_on_accept,
                          "isolation": team.settings.isolation,
+                         "team_changes": team.settings.team_changes,
                          "checks": [c.name for c in team.checks]},
             "last_event": store.last_event_id(),
             "owner_unread": unread.get(team.owner, 0),
@@ -512,6 +514,29 @@ class App:
             raise ApiError(f"'{role}' is not a role")
         return {"stopped": {n: launch.stop_role(self.hub, n) for n in names}}
 
+    def save_template(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Keep the open team (as saved in team.yaml) to start new projects from."""
+        config = yaml.safe_load(self.team_file.read_text(encoding="utf-8")) or {}
+        try:
+            template = templates.save(_str(body, "name"), config, bool(body.get("default")))
+        except ValueError as e:
+            raise ApiError(str(e)) from None
+        return {"template": template, "default": templates.default_template()}
+
+    def default_template(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            templates.set_default(_str(body, "id"))
+        except KeyError:
+            raise ApiError("There is no such team.") from None
+        return {"default": templates.default_template()}
+
+    def delete_template(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            templates.delete(_str(body, "id"))
+        except KeyError:
+            raise ApiError("Only your own saved teams can be deleted.") from None
+        return {"default": templates.default_template()}
+
     def save_team(self, body: dict[str, Any]) -> dict[str, Any]:
         config = body.get("config")
         try:
@@ -555,7 +580,8 @@ POST_ROUTES = {
     "/api/summon": App.summon, "/api/dismiss": App.dismiss, "/api/release": App.release,
     "/api/inbox/read": App.read_inbox, "/api/launch": App.launch, "/api/stop": App.stop,
     "/api/team": App.save_team, "/api/review": App.review, "/api/history": App.enable_history,
-    "/api/reassign": App.reassign, "/api/restart": App.restart,
+    "/api/reassign": App.reassign, "/api/restart": App.restart, "/api/save-template": App.save_template,
+    "/api/default-template": App.default_template, "/api/delete-template": App.delete_template,
 }
 
 

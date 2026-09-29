@@ -23,9 +23,9 @@ from typing import Any
 
 from .cards import role_card
 from .hub import BROADCAST, OUTCOMES, Hub, HubError, RoleSession
-from .launch import tab_opener
+from .launch import stop_role, tab_opener
 from .store import Lock, Message
-from .team import TeamError
+from .team import HARNESSES, TeamError
 
 FALLBACK_PROTOCOL = "2025-06-18"
 DEFAULT_WAIT = 1800  # seconds; launchers raise each harness's tool timeout above this
@@ -154,6 +154,33 @@ class Tools:
                       {"task_id": {"type": "integer"}, "to": text,
                        "reason": {"type": "string", "description": "why it moves; the new assignee reads this"}},
                       ["task_id", "to"], self._reassign)
+        if team.settings.team_changes and (team.subordinates_of(me.name) or me.name == team.leader):
+            role_props = {"duties": text, "model": {"type": "string", "description": "e.g. sonnet, gpt-6-luna, "
+                          "grok-4.7, gemini-3.8-flash-medium; empty for the program's default"},
+                          "effort": text, "write_scope": {"type": "array", "items": {"type": "string"},
+                          "description": "files it may write, e.g. [\"src/*\", \"tests/*\"]; [] for none"}}
+            self._add("hire_agent",
+                      "Add an agent to the team, under you (or under someone below you). It opens in its own "
+                      "tab and starts at once. Pick the cheapest program and model that can do the work; every "
+                      "agent uses the owner's subscriptions.",
+                      {"name": text, "harness": {"type": "string", "enum": list(HARNESSES)},
+                       "superior": {"type": "string", "description": "who it reports to (default: you)"},
+                       **role_props}, ["name", "harness", "duties"],
+                      lambda a: self._hired(me.hire(a["name"], a["harness"], a["duties"], a.get("model") or "",
+                                                    a.get("effort") or "", a.get("write_scope") or [],
+                                                    a.get("superior") or "")))
+            self._add("change_agent",
+                      "Change an agent below you: its duties, files, model or effort (a new model applies "
+                      "from its next start), or whom it reports to (you or someone below you).",
+                      {"name": text, "superior": text, **role_props}, ["name"],
+                      lambda a: f"Changed {me.change_role(a['name'], a.get('duties'), a.get('model'), a.get('effort'), a.get('write_scope'), a.get('superior')).name}.")
+            self._add("let_go_agent",
+                      "Remove an agent below you from the team when its work is over (reassign or cancel its "
+                      "unfinished tasks first). Its program stops; its subordinates move up to its superior.",
+                      {"name": text, "reason": text}, ["name"],
+                      lambda a: "Let go of {}.{}".format(a["name"], (lambda moved: f" {', '.join(moved)} now report "
+                                                                     "to its superior." if moved else "")(
+                          me.let_go(a["name"], a.get("reason") or ""))))
         if team.can_summon(me.name):
             tiers = "; ".join(f"{t.describe()}: {t.use_for}" if t.use_for else t.describe()
                               for t in team.tiers.values())
@@ -258,6 +285,10 @@ class Tools:
     def _claim(self, args: dict[str, Any]) -> str:
         lock = self.me.claim(args["path"], args.get("reason") or "")
         return f"You now hold {lock.path}" + (f" ({lock.reason})" if lock.reason else "") + "."
+
+    def _hired(self, role: Any) -> str:
+        return (f"Hired {role.name} ({role.harness}{', ' + role.model if role.model else ''}), reporting to "
+                f"{role.superior}. Its tab is opening; give it work with assign_task.")
 
     def _reassign(self, args: dict[str, Any]) -> str:
         task = self.me.reassign_task(int(args["task_id"]), args["to"], args.get("reason") or "")
@@ -474,6 +505,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         hub = Hub.open(args.team, opener=tab_opener(Path(args.team).resolve()))
+        hub.stopper = lambda role: stop_role(hub, role)
         me = hub.session(args.role)
     except (TeamError, HubError) as e:
         print(f"agent-org: {e}", file=sys.stderr)
