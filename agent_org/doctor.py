@@ -113,14 +113,6 @@ def check_antigravity(harnesses: set[str]) -> list[Check]:
     return checks
 
 
-def check_zcode(harnesses: set[str]) -> list[Check]:
-    """The ZCode desktop app, which a zcode role runs in (on the user's own sign-in in the app)."""
-    from .launch import zcode_program
-    found = zcode_program()
-    return [Check("ZCode", found is not None, "installed" if found else "not installed",
-                  "Install ZCode from zcode.z.ai and sign in inside the app.", needed="zcode" in harnesses)]
-
-
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:
     """All checks, in parallel. `harnesses`: the ones the open team uses (all if None)."""
     used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}  # agy: only if used
@@ -137,5 +129,4 @@ def run_checks(harnesses: set[str] | None = None) -> list[Check]:
         codex = pool.submit(check_codex, used)
         grok = pool.submit(check_grok, used)
         antigravity = pool.submit(check_antigravity, used)
-        zcode = pool.submit(check_zcode, used)
-        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result(), *zcode.result()]
+        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result()]

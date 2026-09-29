@@ -32,7 +32,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PACKAGE_ROOT / "org_hook.py"
 WINDOW = "agent-org"
 WAIT_LIMIT = 3600  # seconds a single wait_for_messages call may take; harness tool timeouts are set to this
-TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4", "zcode": "#7C5CFF",
+TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4",
               "owner": "#F2C94C"}
 
 
@@ -312,73 +312,8 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "antigravity", "agy", cli)
 
 
-ZCODE_STOP_WAIT = 540  # seconds; ZCode may cap a hook's run time at 10 minutes
-
-
-def zcode_program() -> tuple[Path, Path] | None:
-    """ZCode's desktop app and the command-line agent bundled with it (run on the app's own Node)."""
-    base = Path(os.environ.get("LOCALAPPDATA") or sessions.home() / "AppData" / "Local") / "Programs" / "ZCode"
-    exe, script = base / "ZCode.exe", base / "resources" / "glm" / "zcode.cjs"
-    return (exe, script) if exe.exists() and script.exists() else None
-
-
-def zcode_project_config(hub: Hub, team_file: Path, role: str) -> Path:
-    """Put the 'org' MCP server and our hooks, bound to `role`, in <project>/.zcode/config.json.
-
-    The ZCode desktop app reads a project's config for its MCP servers and hooks (it asks you
-    to trust the hooks once), but it cannot hand them environment variables, so the team and
-    role travel as arguments. Anything else in the file is kept.
-    """
-    path = hub.base_team.project_root / ".zcode" / "config.json"
-    try:
-        config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, ValueError):
-        config = {}
-    command, args, env = mcp_server(team_file, role)
-    mcp = dict(config.get("mcp") or {})
-    mcp["servers"] = {**(mcp.get("servers") or {}),
-                      SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}
-    config["mcp"] = mcp
-    bind = f" --team {shell_path(team_file)} --role {role} --stop-wait {ZCODE_STOP_WAIT}"
-    hooks = dict(config.get("hooks") or {})
-    events = dict(hooks.get("events") or {})
-    for event, groups in hook_table(None).items():
-        for group in groups:
-            for handler in group["hooks"]:
-                handler["command"] += bind
-                handler["timeoutMs"] = min(int(handler.pop("timeout")), ZCODE_STOP_WAIT + 60) * 1000
-        theirs = [g for g in events.get(event) or [] if "org_hook.py" not in json.dumps(g)]
-        events[event] = theirs + groups
-    config["hooks"] = {**hooks, "enabled": True, "events": events}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def zcode_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                 resume: str | None = None, new_id: str | None = None) -> Launch:
-    """A ZCode role is the ZCode desktop app, working in the project folder on the owner's own
-    sign-in (its free plan tokens reach only the app). The tab sets the project up, starts the
-    app, puts the first message on the clipboard, and says what to do."""
-    found = zcode_program()
-    if found is None:
-        raise HubError(r"ZCode is not installed (expected it in %LOCALAPPDATA%\Programs\ZCode)")
-    zcode_project_config(hub, team_file, role)
-    first = resume_kickoff(role) if resume else kickoff(role)
-    folder = str(hub.base_team.project_root)
-    steps = [f"ZCode desktop is '{role}' in this team.",
-             f"1. In ZCode, open the folder {folder}",
-             "   (if ZCode asks whether to trust this project's hooks, allow them).",
-             "2. " + ("Continue the conversation you had there" if resume else "Start a new conversation")
-             + ", paste the message now on your clipboard (Ctrl+V) and send it:",
-             f"   {first}",
-             "Close this tab whenever you like; the agent lives in the ZCode window."]
-    setup = [["Set-Clipboard", first], *(["Write-Host", line] for line in steps)]
-    return Launch(role, "zcode", str(found[0]), [folder], setup=setup)
-
-
 BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch,
-            "antigravity": antigravity_launch, "zcode": zcode_launch}
+            "antigravity": antigravity_launch}
 
 
 def toml(value: object) -> str:
@@ -496,7 +431,7 @@ def open_tab(tab: list[str]) -> None:
     subprocess.run([wt, *tab[1:]], check=True, stdin=subprocess.DEVNULL)
 
 
-HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}  # never the ZCode app
+HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}
 
 
 def program_name(pid: int) -> str:
