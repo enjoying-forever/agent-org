@@ -30,15 +30,9 @@ function fill(el, ...kids) {
   return el;
 }
 
-const TOKEN = (() => {
-  const fromUrl = new URLSearchParams(location.search).get('token');
-  try {
-    if (fromUrl) sessionStorage.setItem('agent-org-token', fromUrl);
-    else return sessionStorage.getItem('agent-org-token') || '';
-  } catch { /* storage can be unavailable; the URL token still works for this load */ }
-  return fromUrl || '';
-})();
-if (new URLSearchParams(location.search).has('token')) history.replaceState(null, '', '/');
+// Signing in happens before this page loads: the one-time link sets an HttpOnly cookie that
+// no script (this one included) can read. Every request adds the page's own header.
+const PAGE_HEADERS = { 'X-Agent-Org': '1' };
 
 class NoTeam extends Error {}
 
@@ -46,12 +40,13 @@ async function api(path, body) {
   const post = body !== undefined;
   const res = await fetch(path, {
     method: post ? 'POST' : 'GET',
-    headers: post ? { 'X-Org-Token': TOKEN, 'Content-Type': 'application/json' } : { 'X-Org-Token': TOKEN },
+    headers: post ? { ...PAGE_HEADERS, 'Content-Type': 'application/json' } : PAGE_HEADERS,
+    credentials: 'same-origin',
     body: post ? JSON.stringify(body) : undefined,
   });
   let data = {};
   try { data = await res.json(); } catch { /* empty body */ }
-  if (res.status === 403) showBlocker();
+  if (res.status === 403) { S.signedOut = true; showBlocker(); }
   if (res.status === 412 && data.error === 'no_team') throw new NoTeam();
   if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
   return data;
@@ -85,8 +80,9 @@ function toast(text, error = false) {
 function showBlocker() {
   const b = $('#blocker');
   b.replaceChildren(h('div', {},
-    h('h2', {}, 'This page needs its access link'),
-    h('p', { class: 'muted' }, 'Open the link printed in the agent-org window (it ends with ?token=...).')));
+    h('h2', {}, 'This browser is not signed in to agent-org'),
+    h('p', { class: 'muted' }, 'Click in the black agent-org window and press Enter: it prints a new sign-in '
+      + 'link. Open it here. Each link works once, for two minutes.')));
   b.hidden = false;
 }
 
@@ -137,6 +133,7 @@ async function poll() {
   } else {
     await refresh();
   }
+  if (S.signedOut) return; // not signed in: stop asking; the sign-in link reloads the page
   setTimeout(poll, S.mode === 'home' ? 5000 : 1500);
 }
 
@@ -795,5 +792,4 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#dra
 
 // ---------- start ----------
 
-if (!TOKEN) showBlocker();
-else poll();
+poll(); // without a session the first request answers 403 and the sign-in note shows

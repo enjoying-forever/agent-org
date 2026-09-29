@@ -220,6 +220,22 @@ pre-approved). On top of that, agent-org holds every agent to these limits:
 - Every refusal is recorded in *Activity* (kind "safety"). The command guard and the secret
   check can be turned off in *Edit team* if a project really needs it.
 
+### The web page
+
+Only your own browser can use the page - not other web sites, and not other programs on
+your PC (the agents' shells included):
+
+- It is reachable from this PC only (127.0.0.1) and refuses other host names.
+- The link that opens it works **once, for two minutes**; your browser then gets a session
+  cookie that page scripts cannot read and that other sites never send. Nothing that could
+  act as you is printed or put on a command line. To open the page in another browser (or
+  after a restart of the browser), press **Enter in the black agent-org window**: it prints
+  a new link.
+- Every change (POST) must come from the page itself as JSON; forms or requests sent from
+  other sites, oversized or malformed bodies are refused before anything happens.
+- The page is served with strict security headers (only its own scripts, it cannot be
+  framed by another site, no referrer, nothing cached), and errors never show internals.
+
 ## When a subscription runs out
 
 Each program runs on its own subscription, so when one is used up the others can carry

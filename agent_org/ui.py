@@ -2,10 +2,18 @@
 
     python -m agent_org.ui [--team path/to/team.yaml] [--port 8765] [--no-browser]
 
-Without a team it opens on a welcome page, where you open or create one. It serves on
-127.0.0.1 only and opens your browser. The page is opened with a token in its URL and
-every API call must carry it, so other programs on this machine (including the agents'
-shells) can't act as you through it.
+Without a team it opens on a welcome page, where you open or create one.
+
+Only your browser can act as you through it - not other web sites, and not other programs
+on this PC (the agents' shells included):
+- It serves on 127.0.0.1, and refuses other Host names (DNS rebinding).
+- The browser is opened with a sign-in code that works once, for two minutes; it is traded
+  for an HttpOnly, SameSite=Strict session cookie. The session secret is never printed or
+  put on a command line (which any process can read). Enter in its window prints a new link.
+- Every API call needs that cookie plus the page's own header; POSTs must be JSON with a
+  known size, and requests another site's page sends (Origin, Sec-Fetch-Site) are refused.
+- Strict headers on everything: a Content-Security-Policy (only its own scripts, no framing),
+  nosniff, no referrer, no caching. Errors never show internals; stalled connections time out.
 """
 
 from __future__ import annotations
@@ -585,34 +593,106 @@ POST_ROUTES = {
 }
 
 
-def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPRequestHandler]:
+COOKIE = "agent_org_session"
+CODE_TTL = 120  # seconds a sign-in link works (and it works once)
+PAGE_HEADER = "X-Agent-Org"  # the page sends it; a form or a plain link from another site cannot
+SECURITY_HEADERS = {
+    "Content-Security-Policy": ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                                "form-action 'self'; frame-ancestors 'none'"),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Cache-Control": "no-store",
+}
+
+
+class Access:
+    """Who may use the page: the browser you signed in with, and nobody else.
+
+    The session secret never leaves this process except as an HttpOnly cookie. What the
+    browser is opened with is a sign-in code that works once and for two minutes, so even
+    a program that reads the browser's command line (any process on the PC can) is too late.
+    """
+
+    def __init__(self, session: str | None = None):
+        self.session = session or secrets.token_urlsafe(32)
+        self._codes: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def new_code(self) -> str:
+        code = secrets.token_urlsafe(24)
+        with self._lock:
+            now = time.time()
+            self._codes = {c: t for c, t in self._codes.items() if t > now}
+            self._codes[code] = now + CODE_TTL
+        return code
+
+    def redeem(self, code: str) -> bool:
+        with self._lock:
+            expires = self._codes.pop(code, 0)
+        return expires > time.time()
+
+    def cookie_ok(self, header: str) -> bool:
+        for part in header.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == COOKIE and secrets.compare_digest(value, self.session):
+                return True
+        return False
+
+
+def make_handler(app: App, access: Access, port_holder: list[int]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "agent-org"
+        sys_version = ""
+        timeout = 30  # a stalled or very slow connection is dropped
 
         def log_message(self, fmt: str, *args: Any) -> None:
             if self.command != "GET":  # polling would drown out everything else
-                sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path}\n")
+                sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {urlparse(self.path).path}\n")
+
+        def _origin(self) -> str:
+            return f"http://127.0.0.1:{port_holder[0]}"
 
         def _host_ok(self) -> bool:
             # refuse other Host names, so a web page can't reach this server through DNS rebinding
             port = port_holder[0]
             return self.headers.get("Host", "") in (f"127.0.0.1:{port}", f"localhost:{port}")
 
-        def _send(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
+        def _same_site(self) -> bool:
+            """The request comes from this page (or is typed/opened directly), never from another site."""
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in (self._origin(), f"http://localhost:{port_holder[0]}"):
+                return False
+            return self.headers.get("Sec-Fetch-Site", "same-origin") in ("same-origin", "none")
+
+        def _signed_in(self) -> bool:
+            if secrets.compare_digest(self.headers.get("X-Org-Token", ""), access.session):
+                return True  # a program that started this server itself (tests, scripts)
+            return access.cookie_ok(self.headers.get("Cookie", "")) and self.headers.get(PAGE_HEADER) == "1"
+
+        def _send(self, status: HTTPStatus, body: bytes, content_type: str,
+                  extra: dict[str, str] | None = None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            for name, value in {**SECURITY_HEADERS, **(extra or {})}.items():
+                self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _json(self, status: HTTPStatus, data: Any) -> None:
             self._send(status, json.dumps(data, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
 
         def _api(self, routes: dict, path: str, arg: Any) -> None:
-            if not secrets.compare_digest(self.headers.get("X-Org-Token", ""), token):
-                return self._json(HTTPStatus.FORBIDDEN, {"error": "missing or wrong token"})
+            if not self._same_site():
+                return self._json(HTTPStatus.FORBIDDEN, {"error": "requests must come from the agent-org page"})
+            if not self._signed_in():
+                return self._json(HTTPStatus.FORBIDDEN, {"error": "not signed in"})
             route = routes.get(path)
             if route is None:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": f"no such endpoint: {path}"})
@@ -626,6 +706,9 @@ def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPR
                 self._json(HTTPStatus.BAD_REQUEST, {"error": f"team problem: {e}"})
             except (KeyError, ValueError, TypeError) as e:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": f"bad request: {e}"})
+            except Exception as e:  # noqa: BLE001 - never a traceback to the browser
+                print(f"error in {path}: {e!r}", file=sys.stderr)
+                self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "something went wrong; see the agent-org window"})
 
         def do_GET(self) -> None:
             if not self._host_ok():
@@ -633,38 +716,64 @@ def make_handler(app: App, token: str, port_holder: list[int]) -> type[BaseHTTPR
             url = urlparse(self.path)
             if url.path.startswith("/api/"):
                 return self._api(GET_ROUTES, url.path, parse_qs(url.query))
+            code = parse_qs(url.query).get("code", [""])[0]
+            if url.path == "/" and code:  # a sign-in link: trade the one-time code for the session cookie
+                if access.redeem(code):
+                    cookie = f"{COOKIE}={access.session}; HttpOnly; SameSite=Strict; Path=/"
+                    return self._send(HTTPStatus.SEE_OTHER, b"", "text/plain", {"Location": "/", "Set-Cookie": cookie})
+                return self._send(HTTPStatus.SEE_OTHER, b"", "text/plain", {"Location": "/"})  # used or expired
             name = "index.html" if url.path == "/" else url.path.removeprefix("/static/")
             file = STATIC / name
             if "/" in name or "\\" in name or not file.is_file() or file.suffix not in CONTENT_TYPES:
                 return self._send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
             self._send(HTTPStatus.OK, file.read_bytes(), CONTENT_TYPES[file.suffix])
 
+        do_HEAD = do_GET
+
         def do_POST(self) -> None:
             if not self._host_ok():
                 return self._send(HTTPStatus.FORBIDDEN, b"bad host", "text/plain")
-            length = int(self.headers.get("Content-Length") or 0)
+            if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+                return self._json(HTTPStatus.LENGTH_REQUIRED, {"error": "send the body with a Content-Length"})
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return self._json(HTTPStatus.LENGTH_REQUIRED, {"error": "Content-Length is required"})
+            if length < 0:
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": "bad Content-Length"})
             if length > MAX_BODY:
                 return self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "too large"})
+            if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+                return self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "the body must be JSON"})
+            if not self._same_site():  # before reading anything from a cross-site request
+                return self._json(HTTPStatus.FORBIDDEN, {"error": "requests must come from the agent-org page"})
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": "body must be JSON"})
             if not isinstance(body, dict):
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": "body must be a JSON object"})
             self._api(POST_ROUTES, urlparse(self.path).path, body)
 
+        def do_PUT(self) -> None:
+            self._send(HTTPStatus.METHOD_NOT_ALLOWED, b"not allowed", "text/plain", {"Allow": "GET, HEAD, POST"})
+
+        do_DELETE = do_PATCH = do_OPTIONS = do_PUT  # no CORS preflight is ever answered
+
     return Handler
 
 
 def serve(team_file: Path | None, port: int, token: str | None = None,
-          load_models: bool = True, watch: bool = True) -> tuple[ThreadingHTTPServer, App, str]:
-    """Build the server (not started). Port 0 picks a free port."""
+          load_models: bool = True, watch: bool = True) -> tuple[ThreadingHTTPServer, App, Access]:
+    """Build the server (not started). Port 0 picks a free port. `token` fixes the session secret
+    (for programs that talk to the API themselves with an X-Org-Token header)."""
     app = App(team_file, load_models, watch)
-    token = token or secrets.token_urlsafe(24)
+    access = Access(token)
     port_holder = [port]
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, token, port_holder))
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, access, port_holder))
+    server.daemon_threads = True
     port_holder[0] = server.server_address[1]
-    return server, app, token
+    return server, app, access
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -685,12 +794,20 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as e:
             print(f"cannot start the UI: {e}", file=sys.stderr)
             return 1
-    url = f"http://127.0.0.1:{server.server_address[1]}/?token={token}"
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
     print("agent-org is running." + (f" Team: {app.team_file}" if app.team_file else ""))
-    print(f"  {url}")
     print("Keep this window open while you use agent-org; close it to stop the page (not the agents).")
+    print("Sign-in links work once, for two minutes. Press Enter here for a new one (another browser, say).")
     if not args.no_browser:
-        webbrowser.open(url)
+        webbrowser.open(f"{base}?code={token.new_code()}")
+    else:
+        print(f"  {base}?code={token.new_code()}")
+
+    def new_links() -> None:
+        for _ in sys.stdin:
+            print(f"  {base}?code={token.new_code()}   (works once, for two minutes)")
+
+    threading.Thread(target=new_links, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
