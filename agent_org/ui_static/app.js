@@ -65,7 +65,7 @@ function ago(t) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const modelLine = (x) => [x.model || 'default model', x.effort && `${x.effort} effort`].filter(Boolean).join(' · ');
+const modelLine = (x) => [x.model || 'default model', x.effort && `${x.effort} effort`].filter(Boolean).join(', ');
 
 let toastTimer;
 function toast(text, error = false) {
@@ -356,7 +356,7 @@ function roleCard(r) {
   return h('div', { class: cls.filter(Boolean).join(' '), title: r.duties || '', onclick: () => openDrawer(r.name) },
     h('div', { class: 'name' }, runningDot(r), h('span', { class: 'nm' }, r.name), h('span', { class: 'harness' }, r.harness)),
     h('div', { class: 'model' }, modelLine(r)),
-    r.tier && h('div', {}, h('span', { class: 'tag' }, `consultant · ${r.tier} · #${r.help_id}`)),
+    r.tier && h('div', {}, h('span', { class: 'tag' }, `${r.tier} consultant for #${r.help_id}`)),
     h('div', { class: 'task', title: s && s.task ? s.task : '' },
       h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'not started'),
       s && s.task ? ` ${s.task}` : ''),
@@ -384,9 +384,9 @@ function fmtNum(n) {
 }
 
 function usageText(u) {
-  if (!u.tokens_in && !u.tokens_out) return `${u.messages} messages${u.model ? ` · ${u.model}` : ''}`;
-  return `${fmtNum(u.tokens_in)} in · ${fmtNum(u.tokens_cached)} cached · ${fmtNum(u.tokens_out)} out`
-    + ` · ${plural(u.messages, 'reply')}${u.model ? ` · ${u.model}` : ''}`;
+  if (!u.tokens_in && !u.tokens_out) return `${plural(u.messages, 'message')}${u.model ? ` on ${u.model}` : ''}`;
+  return `${fmtNum(u.tokens_in)} in, ${fmtNum(u.tokens_cached)} cached, ${fmtNum(u.tokens_out)} out`
+    + ` over ${plural(u.messages, 'reply')}${u.model ? ` on ${u.model}` : ''}`;
 }
 
 const shortUsage = (u) => (u.tokens_in || u.tokens_out ? `${fmtNum(u.tokens_in + u.tokens_out)} tok` : `${u.messages} msg`);
@@ -452,7 +452,7 @@ function renderDrawer() {
         h('dt', {}, 'Superior'), h('dd', {}, r.superior),
         h('dt', {}, 'Subordinates'), h('dd', {}, subs.join(', ') || '-'),
         h('dt', {}, 'Model'), h('dd', {}, modelLine(r)),
-        u && [h('dt', {}, 'Used'), h('dd', {}, usageText(u), u.limits.length ? h('div', { class: 'muted small' }, u.limits.join(' · ')) : null)],
+        u && [h('dt', {}, 'Used'), h('dd', {}, usageText(u), u.limits.length ? h('div', { class: 'muted small' }, u.limits.join('; ')) : null)],
         r.tier
           ? [h('dt', {}, 'Consultant'), h('dd', {}, `${r.tier} tier, helping with #${r.help_id}`)]
           : [h('dt', {}, 'Write scope'), h('dd', { class: 'mono' }, r.write_scope.join(', ') || 'nothing')],
@@ -542,7 +542,7 @@ function messageEl(m, compact = false) {
       m.urgent && h('span', { class: 'urgent-tag' }, 'urgent'),
       h('b', {}, m.sender), '→', h('b', {}, m.recipient),
       m.reply_to && h('button', { class: 'link', onclick: () => jumpTo(m.reply_to) }, `re #${m.reply_to}`),
-      h('span', { class: 'right' }, `#${m.id} · ${fmtTime(m.sent_at)}`)),
+      h('span', { class: 'right', title: `message #${m.id}` }, fmtTime(m.sent_at))),
     text,
     long && h('button', {
       class: 'link', style: { fontSize: '12px' },
@@ -602,7 +602,7 @@ function renderInboxBadge() {
   $('#inbox-badge').hidden = !n;
   $('#mark-read').hidden = !n;
   const name = $('#project').textContent;
-  document.title = `${n ? `(${n}) ` : ''}${name ? `${name} · ` : ''}agent-org`;
+  document.title = `${n ? `(${n}) ` : ''}${name ? `${name} – ` : ''}agent-org`;
 }
 
 function setCompose(mode) {
@@ -656,7 +656,7 @@ function taskEl(t) {
     h('div', { class: 'head' },
       h('span', { class: `tstate ${t.state}` }, label),
       h('b', {}, `#${t.id} ${t.title}`)),
-    h('div', { class: 'muted small' }, `from ${t.assigner} · ${ago(t.created_at)}`),
+    h('div', { class: 'muted small' }, `from ${t.assigner}, ${ago(t.created_at)}`),
     t.result && h('div', { class: `result ${t.state}` }, t.result));
 }
 
@@ -729,7 +729,7 @@ function openSummon(m) {
     return h('label', { class: 'tier' + (full ? ' full' : '') },
       h('input', { type: 'radio', name: 'tier', value: t.name, checked: t === firstFree, disabled: full }),
       h('span', {}, h('b', {}, t.name), ' ', h('span', { class: `harness h-${t.harness}` }, t.harness)),
-      h('small', {}, `${modelLine(t)} · ${t.active}/${t.max_active} busy${t.use_for ? ` · ${t.use_for}` : ''}`));
+      h('small', {}, `${modelLine(t)}; ${t.active} of ${t.max_active} busy.${t.use_for ? ` For ${t.use_for}.` : ''}`));
   }));
   $('#summon-brief').value = '';
   $('#summon').returnValue = '';

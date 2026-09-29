@@ -44,8 +44,8 @@ function roleTile(p) {
       h('div', {}, h('h3', {}, p.title),
         h('div', { class: 'specs' },
           h('span', { class: 'harness' }, p.harness),
-          p.model && h('span', { class: 'spec' }, p.model),
-          p.effort && h('span', { class: 'spec' }, `${p.effort} effort`)))),
+          (p.model || p.effort) && h('span', { class: 'spec' },
+            [p.model, p.effort && `${p.effort} effort`].filter(Boolean).join(', '))))),
     p.description && h('p', { class: 'desc' }, p.description),
     (p.tags || []).length ? h('div', { class: 'tags' }, p.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
     h('details', { class: 'role-details' },
@@ -172,7 +172,7 @@ function placeRole(p) {
   let name = base;
   for (let n = 2; taken.has(name); n += 1) name = `${base}-${n}`;
   $('#place-title').textContent = `Add "${p.title}" to your team`;
-  $('#place-sub').textContent = `${p.harness}${p.model ? ` · ${p.model}` : ''}. It starts the next time you launch the team.`;
+  $('#place-sub').textContent = `Runs on ${p.harness}${p.model ? ` with ${p.model}` : ''}. It starts the next time you launch the team.`;
   $('#place-name').value = name;
   const roles = R.meta.team_roles;
   $('#place-superior').replaceChildren(
@@ -215,8 +215,8 @@ async function renderBuilder() {
   const rows = B.picked.map((x, i) => {
     const p = byId(x.id);
     const others = B.picked.filter((y) => y !== x).map((y) => y.name);
-    return h('div', { class: 'builder-row' }, roleIcon(p),
-      h('div', {}, h('b', {}, p.title), h('div', { class: 'muted small' }, `${p.harness}${p.model ? ` · ${p.model}` : ''}`)),
+    return h('div', { class: `builder-row h-${p.harness}` }, roleIcon(p),
+      h('div', {}, h('b', {}, p.title), h('div', { class: 'muted small' }, `${p.harness}${p.model ? `, ${p.model}` : ''}`)),
       h('input', { value: x.name, title: 'Its name in the team', oninput: (e) => { x.name = e.target.value.trim(); } ,
         onchange: () => renderBuilder() }),
       h('select', { title: 'Reports to', onchange: (e) => { x.superior = e.target.value; } },

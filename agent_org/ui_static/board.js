@@ -48,7 +48,7 @@ function cardEl(t) {
     h('div', { class: 'tc-title' }, t.title),
     h('div', { class: 'tc-meta' },
       h('span', { class: `harness h-${harnessOf(t.assignee)}` }, t.assignee),
-      h('span', { class: 'muted' }, `from ${t.assigner} · ${ago(t.created_at)}`)),
+      h('span', { class: 'muted' }, `from ${t.assigner}, ${ago(t.created_at)}`)),
     t.after.length ? h('div', { class: 'tc-after muted' }, `after #${t.after.join(', #')}`) : null,
     stuckOn(t) && h('div', { class: `stuck-badge ${stuckOn(t).kind}`, title: 'Its assignee cannot work right now' },
       `${t.assignee} is ${stuckOn(t).describe}`));
@@ -268,7 +268,7 @@ function renderProblems() {
   const box = $('#problems');
   box.hidden = !list.length;
   if (!list.length) return;
-  box.replaceChildren(h('b', {}, `Needs attention (${list.length})`),
+  box.replaceChildren(h('b', {}, `Needs you (${list.length})`),
     ...list.map((p) => h('div', { class: `problem ${p.kind}` },
       h('span', { class: 'picon' }, PROBLEM_ICON[p.kind] || '!'),
       h('span', { class: 'ptext' }, p.text),
