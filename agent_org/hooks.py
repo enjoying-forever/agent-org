@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import sessions, usage
+from . import safety, sessions, usage
 from .hub import Hub, HubError, RoleSession
 from .store import Message
 
@@ -195,12 +195,49 @@ def edited_paths(payload: dict[str, Any]) -> list[str]:
     return [p.strip() for p in dict.fromkeys(paths) if p.strip()]
 
 
+def tool_call(payload: dict[str, Any]) -> tuple[str, Any]:
+    """(tool name, its input), in any harness's dialect."""
+    call = payload.get("toolCall")  # Antigravity
+    if isinstance(call, dict):
+        return str(call.get("name") or ""), call.get("args") or {}
+    return str(field(payload, "tool_name") or ""), field(payload, "tool_input") or {}
+
+
+def is_shell(tool: str) -> bool:
+    return tool.rsplit("__", 1)[-1].lower() in safety.SHELL_TOOLS
+
+
+def guard_command(me: RoleSession, payload: dict[str, Any]):
+    """Refuse a shell command that publishes, wipes shared work, or deletes outside the project."""
+    tool, tool_input = tool_call(payload)
+    if not is_shell(tool) or not me.team.settings.guard_commands:
+        return None
+    command = safety.command_of(tool_input)
+    roots = [me.hub.base_team.project_root, me.hub.root_of(me.name)]
+    why = safety.check_command(command, roots, shared_folder=not me.hub.branches)
+    if why is None:
+        return None
+    me.hub.event("safety", me.name, f"refused a command: {command[:200]}")
+    return deny(f"agent-org refused this command. {why} If it really is needed, ask {me.superior}.")
+
+
+def guard_protected(me: RoleSession, rel: str):
+    if safety.protected(rel, me.hub.team_file.name if me.hub.team_file else "team.yaml"):
+        me.hub.event("safety", me.name, f"refused an edit of {rel}")
+        return deny(f"{rel} is the team's own configuration; agents never edit it. If the team needs "
+                    f"changing, ask {me.superior} (managers have hire_agent / change_agent).")
+    return None
+
+
 def deny(reason: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": reason}}
 
 
 def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
+    refused = guard_command(me, payload)
+    if refused is not None:
+        return refused
     if me.hub.branches:
         return on_pre_edit_branch(me, payload)
     root = me.hub.base_team.project_root
@@ -214,6 +251,9 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
             continue  # outside the project: not the team's business
         if rel == HUB_DIR or rel.startswith(HUB_DIR + "/"):
             return deny(f"{rel} belongs to the agent-org hub; use the org tools instead of editing it.")
+        refused = guard_protected(me, rel)
+        if refused is not None:
+            return refused
         key, _ = me.hub.lock_key(full)
         lock = me.store.covering(key)
         if lock is not None and lock.owner == me.name:
@@ -252,6 +292,9 @@ def on_pre_edit_branch(me: RoleSession, payload: dict[str, Any]):
             continue  # outside the project: not the team's business
         if rel == ".git" or rel.startswith(".git/"):
             return deny("Leave git's own files alone; the hub handles commits and merges.")
+        refused = guard_protected(me, rel)
+        if refused is not None:
+            return refused
         if not me._in_scope(me.team, me.name, rel):
             return deny(f"{rel} is outside the files you may write ({', '.join(me._scope(me.team, me.name)) or 'none'}). "
                         f"Ask {me.superior} if it needs changing.")
@@ -279,17 +322,22 @@ HANDLERS = {"stop": on_stop, "post-tool": on_post_tool, "pre-edit": on_pre_edit,
             "invocation": on_post_tool}
 
 
-def for_antigravity(event: str, out: dict[str, Any] | None) -> dict[str, Any]:
-    """Antigravity's hooks speak a different dialect: translate our answer, and always answer."""
+def for_antigravity(event: str, out: dict[str, Any] | None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Antigravity's hooks speak a different dialect: translate our answer, and always answer.
+
+    A pre-tool answer must carry a decision: an edit the lease allows is "allow"; a shell
+    command that passed our guard is "ask", so Antigravity's own permission check still runs.
+    """
+    shell = is_shell(tool_call(payload or {})[0])
     if not out:
-        return {"decision": "allow"} if event == "pre-edit" else {}
+        return ({"decision": "ask" if shell else "allow"}) if event == "pre-edit" else {}
     spec = out.get("hookSpecificOutput") or {}
     if event == "stop" and out.get("decision") == "block":
         return {"decision": "continue", "reason": out.get("reason", "")}
     if event == "pre-edit" and spec.get("permissionDecision") == "deny":
         return {"decision": "deny", "reason": spec.get("permissionDecisionReason", "")}
     if event == "pre-edit":
-        return {"decision": "allow"}  # the lease is held; a missing decision would count as "deny"
+        return {"decision": "ask" if shell else "allow"}  # a missing decision would count as "deny"
     if event == "invocation" and spec.get("additionalContext"):
         return {"injectSteps": [{"ephemeralMessage": spec["additionalContext"]}]}
     return {}
@@ -346,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             hub.close()
     if antigravity:
-        out = for_antigravity(event, out)
+        out = for_antigravity(event, out, payload)
     if out is not None and (out or antigravity):
         sys.stdout.write(json.dumps(out))  # ASCII-escaped, whatever the console code page
         sys.stdout.flush()

@@ -189,3 +189,30 @@ def test_an_agent_with_nothing_new_lands_nothing(hub):
     task, _ = start(hub, "worker-a", "Look into it")
     done = hub.session("worker-a").finish_task(task.id, "nothing needed changing")
     assert done.state == "done" and done.commit_id == ""
+
+
+def test_nothing_outside_the_scope_reaches_main(hub):
+    task, a = start(hub, "worker-a")  # may write src/* and tests/*
+    edit(a, "return 1", "return 'one'")
+    (a / "README.md").write_text("written through the shell\n", encoding="utf-8")
+    with pytest.raises(HubError, match="README.md is outside the files you may write"):
+        hub.session("worker-a").finish_task(task.id, "done")
+    (a / "README.md").unlink()
+    hub.session("worker-a").finish_task(task.id, "done")
+    assert "return 'one'" in main_text(hub)
+
+
+def test_the_team_configuration_never_reaches_main(hub):
+    import yaml as _yaml
+    task, a = start(hub, "worker-a")
+    (a / "team.yaml").write_text(_yaml.safe_dump({"roles": {}}), encoding="utf-8")
+    with pytest.raises(HubError, match="team's own configuration"):
+        hub.session("worker-a").finish_task(task.id, "done")
+
+
+def test_secrets_never_reach_main(hub):
+    task, a = start(hub, "worker-a")
+    edit(a, "return 1", "return 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123'")
+    with pytest.raises(HubError, match="would put secrets into git history: tests/test_shared.py:2"):
+        hub.session("worker-a").finish_task(task.id, "done")
+    assert "sk-ant" not in main_text(hub)

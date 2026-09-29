@@ -194,6 +194,32 @@ Turn on **Agents work on their own git branches** in *Edit team* and they no lon
 - History is turned on by itself; the Board shows what each task changed, and every task
   is one merge in `git log`.
 
+## Safety
+
+Agents run with their programs' normal permissions: Claude Code, Codex, Grok and
+Antigravity still ask you in their tab before anything risky (only the `org` tools are
+pre-approved). On top of that, agent-org holds every agent to these limits:
+
+- **The team's own configuration is off limits.** No agent edits `team.yaml`, the hub's
+  folder (`.agent-org`), agent-org's plugin or project configs, or `.git` - so none can
+  rewrite its own permissions or the law. Team changes go through `hire_agent` /
+  `change_agent`.
+- **Dangerous commands are refused before they run:** `git push` (publishing is your
+  call), commands that wipe other agents' unsaved work in a shared folder (`git reset
+  --hard`, `git clean`, `git checkout .`, `git stash`), and deleting drives, home folders or
+  anything outside the project. Everyday commands - tests, builds, `rm -rf build` inside the
+  project - are not touched.
+- **Secrets stay out of git history.** New work that adds a private key or an API token
+  (`sk-...`, AWS, GitHub, Google, Slack keys, passwords in code) is refused, with the file
+  and line but never the value, until it reads them from the environment instead.
+- **Nobody gives more than they have.** A manager can only hire or change agents with files
+  it may write itself, and the team cannot grow past **At most this many agents in the
+  team** (12 by default). A new hire does not start past the running limit.
+- **With git branches, scope is checked at the door:** work only reaches main if every file
+  it changed is in the agent's write scope - including files written through the shell.
+- Every refusal is recorded in *Activity* (kind "safety"). The command guard and the secret
+  check can be turned off in *Edit team* if a project really needs it.
+
 ## When a subscription runs out
 
 Each program runs on its own subscription, so when one is used up the others can carry

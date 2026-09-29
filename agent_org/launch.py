@@ -162,7 +162,8 @@ def grok_hooks_file() -> Path:
 
 
 def _grok_hooks_text() -> str:
-    return json.dumps({"hooks": hook_table("Edit|Write|MultiEdit")}, indent=2) + "\n"
+    return json.dumps({"hooks": hook_table("Edit|Write|MultiEdit|Bash|Shell|run_terminal_cmd|run_command")},
+                      indent=2) + "\n"
 
 
 def grok_hooks_state() -> str:
@@ -187,7 +188,7 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
         {"mcpServers": {SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}},
         indent=2), encoding="utf-8")
     settings = out / "settings.json"
-    settings.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit")}, indent=2),
+    settings.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")}, indent=2),
                         encoding="utf-8")
     cli = ["--mcp-config", str(config), "--allowedTools", f"mcp__{SERVER_NAME}",
            "--append-system-prompt-file", str(card), "--settings", str(settings)]
@@ -261,7 +262,7 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
 
 
 AGY_EDIT_MATCHER = ("write_to_file|replace_file_content|multi_replace_file_content|code_action|file_change|"
-                    "propose_code|edit_notebook")
+                    "propose_code|edit_notebook|run_command")  # run_command: the command guard
 
 
 def antigravity_plugin(project_root: Path) -> Path:

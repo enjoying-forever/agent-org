@@ -13,7 +13,8 @@ ROLE_KEYS = {"superior", "harness", "model", "effort", "duties", "write_scope"}
 TIER_KEYS = {"harness", "model", "effort", "use_for", "max_active"}
 CHECK_KEYS = {"name", "run", "when", "timeout"}
 TEAM_KEYS = {"owner", "project_root", "database", "roles", "consultants", "checks",
-             "autostart", "max_running", "commit_on_accept", "isolation", "team_changes"}
+             "autostart", "max_running", "commit_on_accept", "isolation", "team_changes",
+             "guard_commands", "scan_secrets", "max_agents"}
 ISOLATION = ("leases", "branches")  # one writer per file, or every agent on its own git branch
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 CONSULTANT_PREFIX = "consultant-"  # names of temporary consultant roles: consultant-1, consultant-2, ...
@@ -73,6 +74,9 @@ class Settings:
     commit_on_accept: bool = True  # commit a task's files when its result is accepted
     isolation: str = "leases"     # "branches": each agent works in its own git worktree
     team_changes: bool = True     # managers may hire, change and let go of the agents below them
+    guard_commands: bool = True   # refuse shell commands that publish, wipe shared work or delete outside
+    scan_secrets: bool = True     # keep private keys and API tokens out of git history
+    max_agents: int = 12          # most roles the team may grow to by hiring
 
     @property
     def branches(self) -> bool:
@@ -149,7 +153,10 @@ class Team:
             raise TeamError(f"'isolation' must be one of {list(ISOLATION)}")
         settings = Settings(autostart=bool(data.get("autostart", False)), max_running=max_running,
                             commit_on_accept=bool(data.get("commit_on_accept", True)), isolation=isolation,
-                            team_changes=bool(data.get("team_changes", True)))
+                            team_changes=bool(data.get("team_changes", True)),
+                            guard_commands=bool(data.get("guard_commands", True)),
+                            scan_secrets=bool(data.get("scan_secrets", True)),
+                            max_agents=_whole(data, "max_agents", 12))
         return cls(owner, project_root, database, roles, tiers, checks, settings)
 
     def with_roles(self, extra: list[Role]) -> Team:
@@ -233,6 +240,13 @@ class Team:
 
         walk(self.owner, "")
         return lines
+
+
+def _whole(data: dict, key: str, default: int) -> int:
+    value = data.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise TeamError(f"'{key}' must be a whole number of at least 1")
+    return value
 
 
 def _parse_check(number: int, spec: object) -> CheckSpec:

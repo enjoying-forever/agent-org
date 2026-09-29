@@ -123,7 +123,7 @@ def test_claude_gets_the_hooks_through_settings(team_file):
     out = run_dry(team_file, "leader") / "leader"
     hooks = json.loads((out / "settings.json").read_text(encoding="utf-8"))["hooks"]
     assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
-    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit"
+    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
     stop = hooks["Stop"][0]["hooks"][0]
     assert stop["command"].endswith("org_hook.py stop") and stop["timeout"] > launch.STOP_WAIT
     script = (out / "start.ps1").read_text(encoding="utf-8")
@@ -167,7 +167,7 @@ def test_grok_hooks_install_into_the_home_folder(tmp_path, monkeypatch):
     path = launch.install_grok_hooks()
     assert path == tmp_path / ".grok" / "hooks" / "agent-org.json"
     hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
-    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit"
+    assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|Bash|Shell|run_terminal_cmd|run_command"
 
 
 def test_unknown_roles_are_refused(team_file):

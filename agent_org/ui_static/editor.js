@@ -10,7 +10,7 @@ function toDraft(config) {
   const {
     owner = 'you', project_root = '.', roles = {}, consultants = {}, checks = [],
     autostart = false, max_running = 0, commit_on_accept = true, isolation = 'leases', team_changes = true,
-    ...extra
+    guard_commands = true, scan_secrets = true, max_agents = 12, ...extra
   } = config || {};
   return {
     owner: String(owner),
@@ -19,6 +19,9 @@ function toDraft(config) {
     autostart: Boolean(autostart),
     branches: isolation === 'branches',
     teamChanges: team_changes !== false,
+    guardCommands: guard_commands !== false,
+    scanSecrets: scan_secrets !== false,
+    max_agents: Number(max_agents) || 12,
     max_running: Number(max_running) || 0,
     commit_on_accept: commit_on_accept !== false,
     checks: (checks || []).map((c) => ({
@@ -50,6 +53,9 @@ function fromDraft(d) {
   if (d.autostart) config.autostart = true;
   if (d.branches) config.isolation = 'branches';
   if (!d.teamChanges) config.team_changes = false;
+  if (!d.guardCommands) config.guard_commands = false;
+  if (!d.scanSecrets) config.scan_secrets = false;
+  if (Number(d.max_agents) !== 12) config.max_agents = Math.round(Number(d.max_agents));
   if (Number(d.max_running) > 0) config.max_running = Math.round(Number(d.max_running));
   if (!d.commit_on_accept) config.commit_on_accept = false;
   const checks = d.checks.filter((c) => c.run.trim()).map((c) => {
@@ -110,6 +116,7 @@ function validate(d) {
     if (!(Number(t.max_active) >= 1)) errs.push(`Tier ${t.name}: "at once" must be at least 1.`);
   }
   if (!(Number(d.max_running) >= 0)) errs.push('"At most this many agents at once" must be 0 or more.');
+  if (!(Number(d.max_agents) >= 1)) errs.push('"At most this many agents in the team" must be at least 1.');
   const checkNames = d.checks.map((c) => c.name.trim());
   d.checks.forEach((c, i) => {
     const label = checkNames[i] || `check ${i + 1}`;
@@ -221,6 +228,16 @@ function renderEditor() {
           + 'one go while the team runs. You are told about every change.' }, h('input', {
           type: 'checkbox', checked: d.teamChanges, onchange: (e) => { d.teamChanges = e.target.checked; touch(); },
         }), 'Agents may change the team (hire, change or let go of agents below them)'),
+        h('label', {}, 'At most this many agents in the team (hiring stops there)',
+          bound(d, 'max_agents', { type: 'number', min: 1 })),
+        h('label', { class: 'inline wide', title: "Refuses git push, commands that wipe other agents' unsaved "
+          + 'work in a shared folder, and deleting drives or folders outside the project.' }, h('input', {
+          type: 'checkbox', checked: d.guardCommands, onchange: (e) => { d.guardCommands = e.target.checked; touch(); },
+        }), 'Refuse dangerous commands (publishing, wiping shared work, deleting outside the project)'),
+        h('label', { class: 'inline wide', title: 'Private keys and API tokens found in new work keep it out of '
+          + 'main and out of history until they are removed.' }, h('input', {
+          type: 'checkbox', checked: d.scanSecrets, onchange: (e) => { d.scanSecrets = e.target.checked; touch(); },
+        }), 'Keep secrets (API keys, private keys, passwords) out of git history'),
         h('label', { class: 'inline wide' }, h('input', {
           type: 'checkbox', checked: d.autostart, onchange: (e) => { d.autostart = e.target.checked; touch(); },
         }), 'Start agents automatically when they get work (while this page is open)'),

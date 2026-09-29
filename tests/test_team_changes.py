@@ -34,8 +34,9 @@ def roles_in(team_file):
 
 def test_a_manager_hires_an_agent_that_starts_at_once(hub, team_file):
     role = hub.session("tech-lead").hire("tester", "claude", "Write and run the tests.", model="sonnet",
-                                         write_scope=["tests/*"])
-    assert (role.superior, role.harness, role.model, role.write_scope) == ("tech-lead", "claude", "sonnet", ("tests/*",))
+                                         write_scope=["src/tests/*"])
+    assert (role.superior, role.harness, role.model, role.write_scope) == ("tech-lead", "claude", "sonnet",
+                                                                            ("src/tests/*",))
     assert roles_in(team_file)["tester"]["superior"] == "tech-lead"  # saved in team.yaml
     assert hub.opener.opened == ["tester"]
     [told] = hub.session("you").read_inbox()
@@ -102,3 +103,30 @@ def test_letting_go_of_an_agent(hub, team_file):
     assert moved == ["worker-b"] and roles_in(team_file)["worker-b"]["superior"] == "leader"
     with pytest.raises(PermissionDenied):
         leader.let_go("leader")
+
+
+def test_a_manager_cannot_give_more_than_it_has(hub):
+    lead = hub.session("tech-lead")  # may write src/* only
+    with pytest.raises(PermissionDenied, match="beyond your own scope"):
+        lead.hire("tester", "claude", "Tests.", write_scope=["tests/*"])
+    with pytest.raises(PermissionDenied, match="beyond your own scope"):
+        lead.change_role("worker-a", write_scope=["*"])
+    lead.change_role("worker-a", write_scope=["src/api/*"])  # narrower: fine
+
+
+def test_the_team_cannot_grow_past_its_limit(hub, team_file):
+    data = yaml.safe_load(team_file.read_text(encoding="utf-8"))
+    data["max_agents"] = len(data["roles"]) + 1
+    team_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    hub.session("leader").hire("one-more", "claude", "Help.")
+    with pytest.raises(HubError, match="the most the owner allows"):
+        hub.session("leader").hire("too-many", "claude", "Help.")
+
+
+def test_a_hire_waits_when_the_running_limit_is_reached(hub, team_file):
+    data = yaml.safe_load(team_file.read_text(encoding="utf-8"))
+    data["max_running"] = 1
+    team_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    hub.store.check_in(4242, "leader")
+    hub.session("leader").hire("helper", "claude", "Help.")
+    assert hub.opener.opened == []  # hired, but not started past the limit

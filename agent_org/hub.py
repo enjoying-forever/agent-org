@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -30,7 +31,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
-from . import gitops, verify
+from . import gitops, safety, verify
 import yaml
 
 from .filelock import file_lock
@@ -164,7 +165,7 @@ class Hub:
                  team_file: str | Path | None = None, stopper: Callable[[str], object] | None = None):
         self.team_file = Path(team_file).resolve() if team_file else None
         self._base_team = team
-        self._stamp = self._mtime()
+        self._stamp = self._fingerprint()
         self._checked = time.time()
         self.store = store
         self.opener = opener
@@ -176,18 +177,19 @@ class Hub:
         team = Team.load(team_path)
         return cls(team, Store(team.database), opener, team_path, stopper)
 
-    def _mtime(self) -> float:
+    def _fingerprint(self) -> bytes:
+        """What team.yaml holds now (its content: two quick writes can share a timestamp on Windows)."""
         try:
-            return self.team_file.stat().st_mtime if self.team_file else 0.0
+            return hashlib.sha1(self.team_file.read_bytes()).digest() if self.team_file else b""
         except OSError:
-            return 0.0
+            return b""
 
     @property
     def base_team(self) -> Team:
         """The team from team.yaml - reloaded when anyone (an agent, the page) changes the file."""
         if self.team_file and time.time() - self._checked > self.RELOAD_EVERY:
             self._checked = time.time()
-            stamp = self._mtime()
+            stamp = self._fingerprint()
             if stamp != self._stamp:
                 self._stamp = stamp
                 try:
@@ -199,7 +201,7 @@ class Hub:
     @base_team.setter
     def base_team(self, team: Team) -> None:
         self._base_team = team
-        self._stamp = self._mtime()
+        self._stamp = self._fingerprint()
 
     def edit_team(self, change: Callable[[dict], None]) -> Team:
         """Change team.yaml: `change` edits its content; the result is checked before it is saved."""
@@ -596,8 +598,10 @@ class RoleSession:
         elif self.hub.branches:
             self._save_work(f"task #{task.id} ({outcome})")
         elif outcome == "done":
-            checks = self._checks(self.store.task_files(task_id), self.hub.base_team.project_root,
-                                  f"task #{task_id} is not done yet", task.id)
+            files, root = self.store.task_files(task_id), self.hub.base_team.project_root
+            if files and self.team.settings.scan_secrets and self.team.settings.commit_on_accept:
+                self._no_secrets(gitops.diff(root, files), f"task #{task_id} is not done yet", task.id)
+            checks = self._checks(files, root, f"task #{task_id} is not done yet", task.id)
         task = self.store.update_task(task_id, state=outcome, result=result, checks=checks, **landed)
         head = {"done": "is DONE - please review it", "blocked": "is BLOCKED", "failed": "FAILED",
                 "rejected": "was REJECTED"}[outcome]
@@ -656,6 +660,7 @@ class RoleSession:
             changed = gitops.git(wt, "diff", "--name-only", f"{main}...HEAD").stdout.split()
             if not gitops.git(wt, "rev-list", "--count", f"{main}..HEAD").stdout.strip().strip("0"):
                 return "", ""  # nothing of its own to put into main
+            self._landing_checks(wt, main, changed, refusal, task_id)
             checks = self._checks(sorted(set(files) | set(changed)), wt, refusal, task_id)
             with gitops.land_lock(root):
                 commit, why = gitops.land(root, branch, message)
@@ -672,6 +677,36 @@ class RoleSession:
             raise HubError(f"{refusal}: git failed: {e}") from None
         hub.event("git", self.name, f"merged into main as {commit}: {message}", task_id)
         return commit, checks
+
+    def _landing_checks(self, wt: Path, main: str, changed: list[str], refusal: str, task_id: int | None) -> None:
+        """What never goes into main: the team's own configuration, files outside the agent's write
+        scope (also written through the shell), and secrets."""
+        team = self.team
+        name = self.hub.team_file.name if self.hub.team_file else "team.yaml"
+        guarded = [f for f in changed if safety.protected(f, name)]
+        if guarded:
+            self.hub.event("safety", self.name, f"refused to land changes to {', '.join(guarded)}", task_id)
+            raise HubError(f"{refusal}: your copy changes {', '.join(guarded)}, the team's own configuration. "
+                           f"Undo that (git checkout {main} -- <file>), then try again.")
+        outside = safety.outside_scope([f for f in changed if not gitops.is_junk(f)], self._scope(team, self.name))
+        if outside:
+            self.hub.event("safety", self.name, f"refused to land files outside its scope: {', '.join(outside)}",
+                           task_id)
+            raise HubError(f"{refusal}: {', '.join(outside)} {'is' if len(outside) == 1 else 'are'} outside the "
+                           f"files you may write ({', '.join(self._scope(team, self.name)) or 'none'}). Undo "
+                           f"those changes (git checkout {main} -- <file>, or delete new files), or ask "
+                           f"{self.superior} to change your scope.")
+        self._no_secrets(gitops.git(wt, "diff", f"{main}...HEAD").stdout, refusal, task_id)
+
+    def _no_secrets(self, diff: str, refusal: str, task_id: int | None) -> None:
+        if not self.team.settings.scan_secrets:
+            return
+        found = safety.find_secrets(diff)
+        if found:
+            self.hub.event("safety", self.name, f"refused to put secrets into history: {', '.join(found)}", task_id)
+            raise HubError(f"{refusal}: this would put secrets into git history: {', '.join(found)}. Read them "
+                           "from an environment variable or a file that is not committed (add it to .gitignore) "
+                           "instead, then try again.")
 
     def share_work(self, summary: str) -> str:
         """Branch mode: put your work so far into main now, without finishing a task (after the checks)."""
@@ -838,6 +873,10 @@ class RoleSession:
             raise HubError(f"there is already a '{name}' in the team")
         if harness not in HARNESSES:
             raise HubError(f"harness must be one of {list(HARNESSES)}")
+        if len(self.hub.base_team.roles) >= team.settings.max_agents:
+            raise HubError(f"the team already has {team.settings.max_agents} agents, the most the owner allows; "
+                           "let one go first, or ask the owner")
+        self._scope_allowed(team, write_scope)
         spec = {"superior": superior, "harness": harness, "duties": _text(duties)[:2000],
                 "write_scope": [str(p) for p in write_scope]}
         if model.strip():
@@ -847,7 +886,11 @@ class RoleSession:
         self.hub.edit_team(lambda c: c.setdefault("roles", {}).__setitem__(name, spec))
         role = self.hub.team.roles[name]
         self._announce(f"hired {name} ({harness}{', ' + model if model else ''}) under {superior}: {duties[:200]}")
-        if self.hub.opener is not None:
+        limit = team.settings.max_running
+        running = sum(1 for n in self.store.online() if n in team.roles)
+        if limit and running >= limit:
+            self.hub.event("agent", name, f"not started: {limit} agents are running already (the team's limit)")
+        elif self.hub.opener is not None:
             try:
                 self.hub.opener(role)
             except Exception as e:  # noqa: BLE001 - the role exists; it can be started from the page
@@ -863,6 +906,8 @@ class RoleSession:
             raise PermissionDenied(f"you can only change agents below you, and '{name}' is not one")
         if superior is not None and superior != self.name and not team.is_above(self.name, superior):
             raise PermissionDenied(f"{name} can only move under you or someone below you")
+        if write_scope is not None:
+            self._scope_allowed(team, write_scope)
         what = {"duties": duties, "model": model, "effort": effort, "write_scope": write_scope,
                 "superior": superior}
         what = {k: v for k, v in what.items() if v is not None}
@@ -913,6 +958,13 @@ class RoleSession:
         for sub in moved:
             self.hub.notice(sub, f"{name} has left the team; you now report to {above}. Call my_role.")
         return moved
+
+    def _scope_allowed(self, team: Team, scope: list[str] | tuple[str, ...]) -> None:
+        """A manager cannot give anyone more files than it may write itself."""
+        beyond = safety.scope_within(list(scope), self._scope(team, self.name))
+        if beyond:
+            raise PermissionDenied(f"you can only give files you may write yourself; {', '.join(beyond)} "
+                                   "reach beyond your own scope")
 
     def _announce(self, what: str) -> None:
         """Team changes are recorded and told to the owner."""
