@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 MAX_DIFF = 200_000  # characters of diff shown for one task
@@ -135,6 +136,7 @@ def ensure_worktree(root: Path, role: str) -> Path:
     """The role's own copy of the project, on branch agent/<role> (made from main the first time)."""
     wt = worktree_path(root, role)
     if (wt / ".git").exists():
+        exclude_junk(root)
         return wt
     branch = BRANCH_PREFIX + role
     git(root, "worktree", "prune")
@@ -143,7 +145,27 @@ def ensure_worktree(root: Path, role: str) -> Path:
     else:
         git(root, "worktree", "add", "-b", branch, str(wt), main_branch(root), check=True)
     git(root, "config", "merge.conflictStyle", "zdiff3")  # conflicts show the common base too
+    exclude_junk(root)
     return wt
+
+
+JUNK = ["__pycache__/", "*.pyc", "*.pyo", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/",
+        ".venv/", "venv/", "dist/", "build/", "*.egg-info/", ".DS_Store", "Thumbs.db", ".agent-org/"]
+
+
+def exclude_junk(root: Path) -> None:
+    """Keep build output out of the agents' commits (running code makes __pycache__ in every copy, and
+    two copies of a compiled file always conflict). It goes in .git/info/exclude, never in .gitignore."""
+    common = git(root, "rev-parse", "--git-common-dir").stdout.strip()
+    if not common:
+        return
+    path = (root / common if not Path(common).is_absolute() else Path(common)) / "info" / "exclude"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    missing = [p for p in JUNK if p not in lines]
+    if missing:
+        path.write_text("\n".join(lines + ["# agent-org: build output never goes into the agents' commits",
+                                           *missing]) + "\n", encoding="utf-8")
 
 
 def merging(wt: Path) -> bool:
@@ -166,9 +188,24 @@ def with_markers(wt: Path, files: list[str]) -> list[str]:
     return left
 
 
+def is_junk(path: str) -> bool:
+    """Build output (see JUNK), which never belongs in an agent's commit."""
+    parts = path.replace("\\", "/").split("/")
+    for pattern in JUNK:
+        if pattern.endswith("/"):
+            if pattern[:-1] in parts[:-1] or fnmatchcase(parts[0], pattern[:-1]):
+                return True
+        elif fnmatchcase(parts[-1], pattern):
+            return True
+    return False
+
+
 def commit_all(wt: Path, message: str) -> str | None:
     """Commit everything in the worktree (also concludes a merge whose conflicts were resolved)."""
     git(wt, "add", "-A", check=True)
+    junk = [f for f in git(wt, "diff", "--cached", "--name-only").stdout.splitlines() if f and is_junk(f)]
+    if junk:  # committed before the exclude list existed: stop tracking it
+        git(wt, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *junk)
     if not merging(wt) and not git(wt, "diff", "--cached", "--name-only").stdout.strip():
         return None
     git(wt, "commit", "--no-edit", "-m", message, check=True, env_extra=_identity(wt))
@@ -183,6 +220,9 @@ def sync(wt: Path, main: str, abort_on_conflict: bool) -> tuple[list[str], list[
     """
     before = head(wt)
     r = git(wt, "merge", "--no-edit", main, env_extra=_identity(wt))
+    if r.returncode != 0 and conflicted(wt) and all(is_junk(f) for f in conflicted(wt)):
+        git(wt, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *conflicted(wt))  # build output: drop it
+        r = git(wt, "commit", "--no-edit", env_extra=_identity(wt))
     if r.returncode != 0:
         files = conflicted(wt) or [(r.stderr or r.stdout).strip()[:300]]
         if abort_on_conflict:

@@ -153,3 +153,33 @@ def test_the_law_and_role_card_describe_branches(hub):
     from agent_org.cards import role_card
     card = role_card(hub.session("worker-a"))
     assert "Your own copy" in card and "One writer per file" not in card and "share_work" in card
+
+
+def test_build_output_never_gets_into_the_agents_commits(hub):
+    """Both agents ran the code: each copy had its own __pycache__, which used to conflict."""
+    a_task, a = start(hub, "worker-a")
+    b_task, b = start(hub, "worker-b")
+    for wt, old, new in ((a, "return 1", "return 'one'"), (b, "return 3", "return 'three'")):
+        edit(wt, old, new)
+        (wt / "tests" / "__pycache__").mkdir()
+        (wt / "tests" / "__pycache__" / "test_shared.cpython-312.pyc").write_bytes(wt.name.encode() * 50)
+    hub.session("worker-a").finish_task(a_task.id, "done")
+    hub.session("worker-b").finish_task(b_task.id, "done")
+    tracked = git(hub.base_team.project_root, "ls-files")
+    assert "__pycache__" not in tracked and SHARED in tracked
+
+
+def test_junk_committed_earlier_does_not_block_a_merge(hub):
+    root = hub.base_team.project_root
+    a_task, a = start(hub, "worker-a")
+    b_task, b = start(hub, "worker-b")
+    for wt, text in ((a, b"from a"), (b, b"from b")):  # as an older agent-org would have committed it
+        (wt / "old.pyc").write_bytes(text)
+        git(wt, "add", "-f", "old.pyc")
+        git(wt, "commit", "-q", "-m", "junk")
+    edit(a, "return 1", "return 'one'")
+    edit(b, "return 3", "return 'three'")
+    hub.session("worker-a").finish_task(a_task.id, "done")
+    hub.session("worker-b").finish_task(b_task.id, "done")
+    assert "return 'one'" in main_text(hub) and "return 'three'" in main_text(hub)
+    assert "old.pyc" not in git(root, "ls-files")
