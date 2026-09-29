@@ -78,7 +78,8 @@ what they still owe.
    messages; long material goes in a file.
 9. **One writer per file.** An agent must hold a file's lease to edit it; editing a free
    file in its scope takes it, and a whole folder (`src/api/*`) can be reserved for a
-   task. Leases run out when their holder stops working.
+   task. Leases run out when their holder stops working. (With git branches on, each
+   agent edits its own copy instead: see below.)
 10. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
     Messages stay private to the sender, the receiver and their superiors.
 11. **Silence is a problem.** A task with no progress gets a reminder, then its assigner
@@ -151,6 +152,24 @@ These are set in *Edit team*, under the team's name.
   waiting but is not running is started for you. **At most N agents at once** keeps
   the number of running agents (and your subscription use) down; the others wait for a
   free place.
+
+## Several agents on one file: git branches
+
+By default one agent writes a file at a time (the lease in rule 9), and the others wait.
+Turn on **Agents work on their own git branches** in *Edit team* and they no longer wait:
+
+- Each agent works in its own copy of the project (a git worktree in
+  `.agent-org/worktrees/<role>`, on branch `agent/<role>`), and edits any file in its scope.
+- When it finishes a task as done, the hub commits its work, merges the latest main into
+  it, runs the checks there, and puts it into main at once - no waiting for the review.
+  Changes to different parts of the same file merge by themselves.
+- Only when two agents changed the very same lines does the work come back to the agent,
+  with both versions (and the original) marked in the file, to settle.
+- Each copy takes in main's new work by itself as the agent goes, so the copies stay close
+  and conflicts stay small. `share_work` lets an agent put something others need (a plan,
+  an interface) into main before it is done.
+- History is turned on by itself; the Board shows what each task changed, and every task
+  is one merge in `git log`.
 
 ## When a subscription runs out
 

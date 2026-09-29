@@ -97,7 +97,7 @@ async function openTask(id) {
       feedback,
       h('div', { class: 'actions' },
         h('button', { class: 'primary', onclick: () => review(t, true) },
-          S.state.history && S.state.settings.commit_on_accept ? 'Accept & commit' : 'Accept'),
+          S.state.history && S.state.settings.commit_on_accept && S.state.settings.isolation !== 'branches' ? 'Accept & commit' : 'Accept'),
         h('button', { onclick: () => review(t, false, feedback.value) }, 'Send back'))),
     h('div', { class: 'actions' },
       h('button', { onclick: () => { $('#task-dialog').close(); composeTo(t.assignee, 'message'); } }, `Message ${t.assignee}`),
