@@ -187,7 +187,7 @@ class Hub:
     @property
     def base_team(self) -> Team:
         """The team from team.yaml - reloaded when anyone (an agent, the page) changes the file."""
-        if self.team_file and time.time() - self._checked > self.RELOAD_EVERY:
+        if self.team_file and time.time() - self._checked >= self.RELOAD_EVERY:
             self._checked = time.time()
             stamp = self._fingerprint()
             if stamp != self._stamp:
