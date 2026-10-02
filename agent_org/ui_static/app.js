@@ -421,22 +421,25 @@ function renderChart() {
   const item = (r, depth) => {
     const kids = rolesUnder(r.name);
     const count = r.unread || r.open_tasks;
-    return h('li', {},
-      h('button', {
+    const row = h('button', {
         class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`
           + `${PANES.get(r.name)?.asking ? ' asking' : ''}`,
         style: { paddingLeft: `${8 + depth * 14}px` },
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
       },
-      runningDot(r), h('span', { class: 'nm' }, r.name), glyph(r.harness),
-      count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null),
-      kids.length ? h('ul', {}, kids.map((k) => item(k, depth + 1))) : null);
+      runningDot(r), h('span', { class: 'nm' }, r.name), badge(r),
+      count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null);
+    if (!r.tier) dragTeammate(row, r.name);
+    dropTarget(row, r.name);
+    return h('li', {}, row, kids.length ? h('ul', {}, kids.map((k) => item(k, depth + 1))) : null);
   };
-  const owner = h('li', {}, h('button', {
+  const ownerRow = h('button', {
     class: 'rail-item owner', title: 'Messages to you', onclick: () => { showTab('messages'); setFilter('me'); },
   }, h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)')),
-  st.owner_unread ? h('span', { class: 'pill hot' }, st.owner_unread) : null));
+  st.owner_unread ? h('span', { class: 'pill hot' }, st.owner_unread) : null);
+  dropTarget(ownerRow, st.owner);
+  const owner = h('li', {}, ownerRow);
   $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
   const running = st.roles.filter((r) => r.online).length;
   $('#rail-summary').textContent = `${running} of ${st.roles.length} running`;
@@ -488,6 +491,7 @@ function makePane(name) {
     p.head, p.body, p.foot);
   p.head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleMax(name); });
   dragPanes(p);
+  dropTarget(p.el, name);
   return p;
 }
 
@@ -510,7 +514,7 @@ function updatePane(p, r) {
     S.focus === r.name && 'focus', live && 'live', p.outputting && 'outputting', live && p.asking && 'asking',
   ].filter(Boolean).join(' ');
   fill(p.head,
-    runningDot(r), glyph(r.harness), h('span', { class: 'nm' }, r.name),
+    runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
       : r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`),
     launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
@@ -871,7 +875,7 @@ $('#theme-btn').addEventListener('click', () => {
 try { applyTheme(localStorage.getItem('agent-org-theme') || 'dark'); } catch { applyTheme('dark'); }
 
 $('#rail-checks').addEventListener('click', () => $('#checks-btn').click());
-$('#rail-add').addEventListener('click', () => showView('roles'));
+$('#rail-add').addEventListener('click', (e) => togglePalette(e));
 
 /** The session at a glance: green running, grey stopped, red when two sessions share the role. */
 function runningDot(r) {

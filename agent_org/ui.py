@@ -737,6 +737,71 @@ class App:
             raise ApiError("Only your own saved teams can be deleted.") from None
         return {"default": templates.default_template()}
 
+    # one teammate at a time (its card on the Team page, and dragging in the team list)
+
+    def teammate_update(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Change one teammate in team.yaml: its program, model, effort, duties, instructions, files
+        or whom it reports to. An empty value removes the setting (its program's default)."""
+        name = _str(body, "name")
+        changes = body.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            raise ApiError("say what to change")
+        unknown = set(changes) - set(TEAMMATE_FIELDS)
+        if unknown:
+            raise ApiError(f"cannot change {', '.join(sorted(unknown))} here")
+        if name not in self.hub.base_team.roles:
+            raise ApiError(f"'{name}' is not in team.yaml (a consultant comes from its tier: change that in Edit team)")
+        for key, value in changes.items():
+            if key == "write_scope":
+                if isinstance(value, str):
+                    value = [x.strip() for x in value.replace("\n", ",").split(",") if x.strip()]
+                if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                    raise ApiError("files must be a list of patterns")
+                changes[key] = value
+            elif value is not None and not isinstance(value, str):
+                raise ApiError(f"'{key}' must be text")
+        if not changes.get("superior", "x") or not changes.get("harness", "x"):
+            raise ApiError("a teammate needs a program and someone to report to")
+
+        def change(config: dict[str, Any]) -> None:
+            role = config.setdefault("roles", {})[name]
+            for key, value in changes.items():
+                if value in ("", None, []) and key != "write_scope":
+                    role.pop(key, None)
+                else:
+                    role[key] = value.strip() if isinstance(value, str) else value
+
+        try:
+            self.hub.edit_team(change)
+        except HubError as e:
+            raise ApiError(str(e)) from None
+        self.hub.event("team", self.hub.base_team.owner, f"changed {name}: {', '.join(sorted(changes))}")
+        return {"name": name}
+
+    def teammate_remove(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Take a teammate out of team.yaml; the ones who reported to it now report to its superior."""
+        name = _str(body, "name")
+        team = self.hub.base_team
+        if name not in team.roles:
+            raise ApiError(f"'{name}' is not in team.yaml")
+        if self.hub.store.online().get(name):
+            raise ApiError(f"{name} is running: stop it first.")
+        superior = team.roles[name].superior
+
+        def change(config: dict[str, Any]) -> None:
+            roles = config.setdefault("roles", {})
+            roles.pop(name, None)
+            for spec in roles.values():
+                if isinstance(spec, dict) and spec.get("superior") == name:
+                    spec["superior"] = superior
+
+        try:
+            self.hub.edit_team(change)
+        except HubError as e:
+            raise ApiError(str(e)) from None
+        self.hub.event("team", team.owner, f"removed {name} from the team")
+        return {"removed": name, "moved_to": superior}
+
     def save_team(self, body: dict[str, Any]) -> dict[str, Any]:
         config = body.get("config")
         try:
@@ -791,6 +856,7 @@ POST_ROUTES = {
     "/api/role-reset": App.role_reset, "/api/role-restore": App.role_restore,
     "/api/term-input": App.term_input, "/api/term-resize": App.term_resize, "/api/open-url": App.open_url,
     "/api/window": App.window_action,
+    "/api/teammate": App.teammate_update, "/api/teammate-remove": App.teammate_remove,
 }
 
 
@@ -811,6 +877,7 @@ SECURITY_HEADERS = {
 
 
 LAUNCHER_HEADER = "X-Agent-Org-Launcher"
+TEAMMATE_FIELDS = ("harness", "model", "effort", "duties", "instructions", "write_scope", "superior")
 
 
 class WindowControl:

@@ -489,3 +489,27 @@ def test_a_new_team_built_from_market_roles(server, tmp_path):
     status, data = server.request("/api/create", {"folder": str(tmp_path / "bad"), "roles": [
         {"id": "planner", "superior": "you"}, {"id": "coder", "superior": "you"}]})
     assert status == 400 and "not complete" in data["error"]  # two leaders
+
+
+def test_one_teammate_changed_moved_and_removed(server):
+    roles = lambda: yaml.safe_load(server.team_file.read_text(encoding="utf-8"))["roles"]  # noqa: E731
+    server.ok("/api/teammate", {"name": "worker-a", "changes": {
+        "harness": "claude", "model": "sonnet", "effort": "high", "instructions": "Run the tests.",
+        "write_scope": "src/*, tests/*"}})
+    a = roles()["worker-a"]
+    assert (a["harness"], a["model"], a["effort"], a["instructions"], a["write_scope"]) == (
+        "claude", "sonnet", "high", "Run the tests.", ["src/*", "tests/*"])
+    server.ok("/api/teammate", {"name": "worker-a", "changes": {"model": ""}})  # back to the program's default
+    assert "model" not in roles()["worker-a"]
+    server.ok("/api/teammate", {"name": "worker-a", "changes": {"superior": "leader"}})  # dragged onto leader
+    assert roles()["worker-a"]["superior"] == "leader"
+    # what would break the team is refused, and team.yaml stays as it was
+    assert server.request("/api/teammate", {"name": "leader", "changes": {"superior": "worker-a"}})[0] == 400  # a loop
+    assert server.request("/api/teammate", {"name": "worker-a", "changes": {"harness": "zcode"}})[0] == 400
+    assert server.request("/api/teammate", {"name": "worker-a", "changes": {"tier": "x"}})[0] == 400
+    assert server.request("/api/teammate", {"name": "ghost", "changes": {"model": "x"}})[0] == 400
+    assert roles()["leader"]["superior"] == "you"
+    # removing one: whoever reported to it reports to its superior
+    out = server.ok("/api/teammate-remove", {"name": "tech-lead"})
+    assert out == {"removed": "tech-lead", "moved_to": "leader"}
+    assert "tech-lead" not in roles() and roles()["worker-b"]["superior"] == "leader"

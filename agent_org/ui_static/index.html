@@ -88,7 +88,7 @@
   <main id="view-team" class="team-view" hidden>
     <nav class="rail" aria-label="Team">
       <div class="rail-head"><span>Team</span>
-        <button id="rail-add" class="icon-btn" title="Add a role from the Role Market" aria-label="Add a role">
+        <button id="rail-add" class="icon-btn" title="Add a teammate: drag a role onto whoever it reports to" aria-label="Add a teammate">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         </button>
       </div>
@@ -288,6 +288,15 @@
     </form>
   </dialog>
 
+  <div id="palette" class="palette" hidden>
+    <div class="palette-head"><b>Add a teammate</b>
+      <span class="muted small">Drag a role onto whoever it should report to</span></div>
+    <input id="palette-search" type="search" placeholder="Search roles">
+    <div id="palette-list" class="palette-list"></div>
+    <button id="palette-market" class="link small">Open the Role Market</button>
+  </div>
+  <div id="mate-card" class="mate-card" hidden></div>
+
   <dialog id="close-dialog">
     <form method="dialog">
       <h2>Close agent-org?</h2>
@@ -312,5 +321,6 @@
   <script src="/static/editor.js"></script>
   <script src="/static/roles.js"></script>
   <script src="/static/layout.js"></script>
+  <script src="/static/teammates.js"></script>
 </body>
 </html>

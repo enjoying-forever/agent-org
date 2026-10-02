@@ -53,6 +53,12 @@ agent carries on where it stopped.
   something (a permission, "trust this folder?"): its pane turns amber until you answer. Drag a
   pane by its title onto another to swap them. The arrangement is remembered for each team, and the
   window comes back where and as big as it was.
+- **Changing the team right there:** the **+** in the team list opens your roles: drag one onto
+  a teammate (in the list or onto its pane) and it joins the team under them. Drag a teammate
+  onto another to change whom it reports to. Click a teammate's badge (C, X, G, A) for its card:
+  program, model, reasoning effort, whom it reports to, duties, instructions and files, *Save*
+  (a running agent uses them from its next start; *Save and restart* applies them now) or
+  *Remove* (whoever reported to it then reports to its superior).
 - **In a terminal:** Ctrl+C copies when text is selected (otherwise it interrupts the agent),
   Ctrl+V pastes, right-click copies or pastes, and links open in your browser. A pane's program
   badge lights up while it writes. Ctrl+Alt+1-9, Ctrl+Alt+arrows and Ctrl+Alt+Enter move between

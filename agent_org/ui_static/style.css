@@ -794,3 +794,32 @@ body.moving-pane, body.moving-pane * { cursor: grabbing !important; }
 .pane-feed .feed-now .state { font-family: var(--font-ui); }
 .pane-feed .feed-step { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pane-feed .t { color: var(--faint); }
+
+/* adding a teammate: the palette of roles, and where they can be dropped */
+.palette { position: fixed; left: 18px; top: 96px; z-index: 30; width: 300px; max-height: min(70vh, 560px);
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--lift); }
+.palette-head { display: flex; flex-direction: column; gap: 2px; }
+.palette-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.palette-item { display: flex; gap: 10px; align-items: center; padding: 7px 9px; border-radius: 9px; cursor: grab;
+  border: 1px solid var(--edge); background: var(--well); }
+.palette-item:hover { border-color: var(--rule); }
+.palette-item .role-icon { width: 30px; height: 30px; font-size: 15px; border-radius: 7px; }
+.palette-item .grow { min-width: 0; }
+.palette-item b { font-size: 13.5px; }
+#palette-market { align-self: flex-start; }
+.rail-item.drop-here, .pane.drop-here { outline: 2px dashed var(--accent); outline-offset: -3px; background: var(--accent-wash); }
+body.adding-role .rail-item:not(.drop-here), body.adding-role .pane:not(.drop-here) { outline: 1px dashed var(--rule); outline-offset: -3px; }
+.rail-item[draggable="true"] { cursor: grab; }
+
+/* a teammate's badge opens its card */
+.hglyph.clickable { cursor: pointer; }
+.hglyph.clickable:hover { box-shadow: 0 0 0 1.5px var(--harness); }
+.mate-card { position: fixed; z-index: 40; width: min(440px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--lift); }
+.mate-card .card-head { display: flex; align-items: center; gap: 8px; }
+.mate-card .card-head b { font-size: 15px; }
+.mate-card .card-head .icon-btn { margin-left: auto; }
+.mate-card .card-actions { display: flex; gap: 8px; align-items: center; }
+.mate-card .card-actions .grow { flex: 1; }
