@@ -94,3 +94,17 @@ def test_the_window_runs_agents_in_its_terminals(server, tmp_path):  # noqa: F81
         assert server.request("/api/terms?w=nonsense")[0] == 400
     finally:
         app.terminals.close_all()
+
+
+def test_agents_keep_agent_orgs_way_to_the_internet(monkeypatch):
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    env = terminals.network_env({"PATH": "x", "https_proxy": "http://stale:1"})
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897" and "https_proxy" not in env
+    monkeypatch.delenv("HTTPS_PROXY")  # none of its own: Windows' system proxy, if one is on
+    monkeypatch.setattr(terminals, "system_proxy", lambda: "http://127.0.0.1:7890")
+    env = terminals.network_env({"PATH": "x"})
+    assert env["HTTP_PROXY"] == env["HTTPS_PROXY"] == "http://127.0.0.1:7890" and "127.0.0.1" in env["NO_PROXY"]
+    monkeypatch.setattr(terminals, "system_proxy", lambda: None)
+    assert "HTTPS_PROXY" not in terminals.network_env({"PATH": "x"})

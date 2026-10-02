@@ -37,9 +37,54 @@ _SESSION_VARS = ("CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_AGENT_SDK", "CLAUDE_PID",
                  "MCP_CONNECTION_NONBLOCKING", "MCP_SERVER_CONNECTION_BATCH_SIZE")
 
 
+# How agent-org reaches the internet: the agents need the same (a proxy can decide whether a
+# service is available at all - Antigravity refuses some regions).
+_NETWORK_VARS = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+                 "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_USE_ENV_PROXY"}
+
+
+def system_proxy() -> str | None:
+    """Windows' own proxy setting (what a proxy app's "system proxy" mode sets), as a URL."""
+    try:
+        import winreg  # noqa: PLC0415 - Windows only
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as key:
+            if not winreg.QueryValueEx(key, "ProxyEnable")[0]:
+                return None
+            server = str(winreg.QueryValueEx(key, "ProxyServer")[0]).strip()
+    except (ImportError, OSError):
+        return None
+    if "=" in server:  # per protocol: "http=host:port;https=host:port"
+        parts = dict(p.split("=", 1) for p in server.split(";") if "=" in p)
+        server = parts.get("https") or parts.get("http") or ""
+    if not server:
+        return None
+    return server if "://" in server else f"http://{server}"
+
+
+def network_env(env: dict[str, str]) -> dict[str, str]:
+    """`env` with agent-org's own proxy and certificate settings, or Windows' system proxy."""
+    env = {k: v for k, v in env.items() if k.upper() not in _NETWORK_VARS}
+    carried = {k: v for k, v in os.environ.items() if k.upper() in _NETWORK_VARS}
+    env.update(carried)
+    if not any(k.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY") for k in carried):
+        proxy = system_proxy()
+        if proxy:
+            env.update({"HTTP_PROXY": proxy, "HTTPS_PROXY": proxy})
+            env.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+    return env
+
+
 def fresh_env() -> dict[str, str]:
     """The environment a newly started program of this user gets (as a new Windows Terminal tab
-    does), not agent-org's own: whatever started agent-org must not leak into its agents."""
+    does), not agent-org's own - whatever started agent-org must not leak into its agents -
+    but with agent-org's way to the internet (its proxy)."""
+    return network_env(_user_env())
+
+
+def _user_env() -> dict[str, str]:
+    """This user's environment as Windows gives it to a new program."""
     try:
         import ctypes  # noqa: PLC0415 - Windows only
         from ctypes import wintypes  # noqa: PLC0415
