@@ -187,20 +187,20 @@ def test_generated_scripts_parse_in_powershell(team_file):
         assert result.returncode == 0, f"{script}: {result.stdout}{result.stderr}"
 
 
-def test_antigravity_gets_a_project_plugin_and_starts_interactively(team_file):
+def test_antigravity_runs_interactively_with_a_user_level_plugin(team_file):
     base = run_dry(team_file, "worker-b")  # worker-b runs on antigravity
-    plugin = team_file.parent / "project" / ".agents" / "plugins" / "agent-org"
+    plugin = launch.antigravity_plugin_dir()  # interactive agy loads only user-level plugins
     assert json.loads((plugin / "plugin.json").read_text(encoding="utf-8")) == {"name": "agent-org"}
     server = json.loads((plugin / "mcp_config.json").read_text(encoding="utf-8"))["mcpServers"]["org"]
-    assert server["args"] == ["-m", "agent_org.mcp_server"]  # the role comes from each tab
+    assert server["args"] == ["-m", "agent_org.mcp_server"]  # the role comes from each agent's terminal
     hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))["agent-org"]
     assert set(hooks) == {"PreToolUse", "PreInvocation", "Stop"}
     stop = hooks["Stop"][0]["command"]
     assert '"' not in stop and stop.endswith("org_hook.py stop agy")  # runs as it is in cmd /c
+    assert not (team_file.parent / "project" / ".agents").exists()  # nothing written into the project
     script = (base / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    # print mode loads the plugin; its steps come as JSON events, shown by runview
-    assert "& 'agy' '--print-timeout' '0s' '--output-format' 'stream-json' '-p' 'You are the ''worker-b'' agent" in script
-    assert "| & " in script and "'agent_org.runview'" in script
+    assert "& 'agy' '-i' 'You are the ''worker-b'' agent" in script and "agent-org_org" in script
+    assert "runview" not in script  # its own full terminal
 
 
 def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
@@ -217,7 +217,7 @@ def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
     finally:
         hub.close()
     script = (team_file.parent / ".agent-org" / "launch" / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    assert f"'--conversation' '{sid}' '--print-timeout' '0s' '--output-format' 'stream-json' '-p' 'agent-org: the team was restarted" in script
+    assert f"'--conversation' '{sid}' '-i' 'agent-org: the team was restarted" in script
     assert tab
 
 
@@ -358,3 +358,33 @@ def test_runview_shows_an_antigravity_run_as_it_streams(monkeypatch):
     assert "conversation c-1" in text and "org.read_inbox()" in text and "1 new message" in text
     assert "Working on task #3." in text  # the streamed pieces join into one line
     assert "org.send_message(to=you, text=pong)" in text  # its MCP wrapper reads like the other programs'
+
+
+def test_a_waiting_deepseek_agent_takes_a_typed_message(team_file, monkeypatch):
+    import io
+    import sys as _sys
+    from agent_org import wake
+    hub = Hub.open(team_file)
+    try:
+        monkeypatch.setattr(_sys, "stdin", io.StringIO("\n  please fix the login  \n"))
+        wake.read_owner(hub, "worker-a")  # what the owner types into its terminal while it waits
+        got = hub.session("worker-a").read_inbox()
+        assert [(m.sender, m.text) for m in got] == [(hub.team.owner, "please fix the login")]
+        assert "Type a message" in wake.prompt_line("worker-a")
+    finally:
+        hub.close()
+
+
+def test_the_deepseek_start_shows_a_banner(team_file, monkeypatch):
+    monkeypatch.setattr(launch, "deepseek_command", lambda: ("node.exe", ["bin.js"], {}))
+    config = yaml.safe_load(team_file.read_text(encoding="utf-8"))
+    config["roles"]["worker-a"].update(harness="deepseek", model="deepseek-flash", effort="low")
+    team_file.write_text(yaml.safe_dump(config), encoding="utf-8")
+    hub = Hub.open(team_file)
+    try:
+        launch.role_tab(hub, team_file.resolve(), "worker-a")
+        script = (team_file.parent / ".agent-org" / "launch" / "worker-a" / "start.ps1").read_text(encoding="utf-8")
+        assert "'--banner' 'DeepSeek Harness'" in script and "'deepseek-flash, low effort'" in script
+        assert "'--input'" in script  # its wait has an input line
+    finally:
+        hub.close()

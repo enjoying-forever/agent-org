@@ -486,9 +486,9 @@ function renderPanes() {
 
 function makePane(name) {
   const p = { name, head: h('header', { class: 'pane-head' }), body: h('div', { class: 'pane-body' }),
-    foot: h('footer', { class: 'pane-status' }), term: null, termId: 0, next: 0, mode: '' };
+    term: null, termId: 0, next: 0, mode: '' };
   p.el = h('section', { class: 'pane', 'data-role': name, onclick: () => { if (S.focus !== name) focusPane(name); } },
-    p.head, p.body, p.foot);
+    p.head, p.body);
   p.head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleMax(name); });
   dragPanes(p);
   dropTarget(p.el, name);
@@ -513,10 +513,23 @@ function updatePane(p, r) {
   p.el.className = ['pane', `h-${r.harness}`, r.name === st.leader && 'wide', r.tier && 'consultant',
     S.focus === r.name && 'focus', live && 'live', p.outputting && 'outputting', live && p.asking && 'asking',
   ].filter(Boolean).join(' ');
+  // the header is all a pane keeps besides its terminal: details live in its tooltip
+  p.head.title = [
+    `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}`,
+    !r.online ? 'stopped' : r.online > 1 ? `${r.online} sessions share this role` : 'running',
+    s && `${s.state}${s.task ? `: ${s.task}` : ''}`,
+    r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`,
+    r.usage && usageText(r.usage),
+    r.open_tasks && plural(r.open_tasks, 'open task'),
+    r.locks.length && `writing ${r.locks.join(', ')}`,
+    'Drag the title onto another pane to swap them; double-click for full screen',
+  ].filter(Boolean).join('\n');
   fill(p.head,
     runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
-    h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
-      : r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`),
+    h('span', { class: 'sub' }),
+    r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
+    r.online > 1 && h('span', { class: 'flag bad' }, `${r.online} sessions`),
+    r.stuck && h('span', { class: 'flag bad', title: r.stuck.text }, r.stuck.describe),
     launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
     launchable && r.online > 0 && r.stuck && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),
     launchable && r.online > 0 && iconBtn('stop', `Stop ${r.name}`, () => stopRoles(r.name), 'danger'),
@@ -524,14 +537,6 @@ function updatePane(p, r) {
     windowButtons(r.name));
   if (live) openTerm(p);
   else { closeTerm(p); renderSummary(p, r); }
-  fill(p.foot,
-    h('span', { class: r.online > 1 ? 'bad' : '' }, !r.online ? 'stopped' : r.online > 1 ? `${r.online} sessions!` : 'running'),
-    h('span', {}, modelLine(r)),
-    r.usage && h('span', { title: usageText(r.usage) }, shortUsage(r.usage)),
-    r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'open task')) : null,
-    r.unread ? h('span', { class: 'hot' }, `${r.unread} unread`) : null,
-    r.locks.length ? h('span', { title: r.locks.join('\n') }, plural(r.locks.length, 'file')) : null,
-    r.stuck && h('span', { class: 'bad', title: r.stuck.text }, r.stuck.describe));
 }
 
 // when the agent has no terminal here: what it is, what it does, its recent messages

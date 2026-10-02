@@ -277,15 +277,14 @@ AGY_EDIT_MATCHER = ("write_to_file|replace_file_content|multi_replace_file_conte
                     "propose_code|edit_notebook|run_command")  # run_command: the command guard
 
 
-def antigravity_plugin(project_root: Path) -> Path:
-    """Write agent-org's Antigravity plugin into the project: its MCP server and hooks.
+def antigravity_plugin(folder: Path) -> Path:
+    """Write agent-org's Antigravity plugin into `folder`: its MCP server and hooks.
 
-    Antigravity loads plugins from <project>/.agents/plugins/ once the folder is trusted.
-    The plugin names no role: each tab's server and hooks take it from AGENT_ORG_ROLE,
-    and outside agent-org tabs both do nothing. Its hooks run through `cmd /c`, which
-    strips one pair of outer quotes, so each command gets an extra pair.
+    The plugin names no role: each agent's server and hooks take it from AGENT_ORG_ROLE,
+    and outside agent-org terminals both do nothing (the server offers no tools, the hooks
+    exit at once). Its hooks run through `cmd /c`, which strips one pair of outer quotes,
+    so each command gets an extra pair.
     """
-    folder = project_root / ".agents" / "plugins" / "agent-org"
     folder.mkdir(parents=True, exist_ok=True)
     command, args, env = mcp_server()
     def run(event: str, timeout: int) -> dict[str, object]:
@@ -310,10 +309,48 @@ def antigravity_plugin(project_root: Path) -> Path:
     return folder
 
 
+def antigravity_plugin_dir() -> Path:
+    from . import templates  # noqa: PLC0415 - agent-org's home folder
+
+    return templates.home_dir() / "antigravity-plugin"
+
+
+def install_antigravity_plugin() -> None:
+    """Make agent-org's plugin a user-level Antigravity plugin, if it is not already the current one.
+
+    Interactive Antigravity loads user-level plugins only (not a project's .agents/plugins), and an
+    agent-org agent runs interactively - its own full terminal. Outside agent-org the plugin does
+    nothing, so the owner's own `agy` sessions are not affected.
+    """
+    folder = antigravity_plugin(antigravity_plugin_dir())
+    wanted = "".join((folder / name).read_text(encoding="utf-8") for name in ("plugin.json", "mcp_config.json", "hooks.json"))
+    marker = folder / ".installed"
+    agy = shutil.which("agy")
+    if agy is None or os.environ.get("PYTEST_CURRENT_TEST"):  # a test never changes the real Antigravity
+        return
+    listed = subprocess.run([agy, "plugin", "list"], capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=60, stdin=subprocess.DEVNULL).stdout
+    if '"agent-org"' in listed and marker.is_file() and marker.read_text(encoding="utf-8") == wanted:
+        return
+    if '"agent-org"' in listed:  # an older copy: replace it
+        subprocess.run([agy, "plugin", "uninstall", "agent-org"], capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    done = subprocess.run([agy, "plugin", "install", str(folder)], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        raise HubError(f"could not install agent-org's Antigravity plugin: {(done.stdout + done.stderr).strip()[:200]}")
+    marker.write_text(wanted, encoding="utf-8")
+
+
+def antigravity_kickoff(role: str, resume: bool) -> str:
+    where = (" In Antigravity the team tools are on the MCP server agent-org_org (call them with call_mcp_tool); "
+             "their descriptions are in your tool list.")
+    return (resume_kickoff(role) if resume else kickoff(role)) + where
+
+
 def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
                        resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
-    antigravity_plugin(hub.root_of(role))
+    install_antigravity_plugin()
     cli: list[str] = []
     if spec.model:
         cli += ["--model", spec.model]
@@ -322,16 +359,10 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
     if resume:
         cli += ["--conversation", resume]
     # Antigravity has no flag for extra instructions: the kickoff sends it to my_role.
-    # Print mode, not --prompt-interactive: the interactive CLI does not load the project's
-    # plugin (no org tools, no hooks - checked in its own logs), print mode does. Plain print mode
-    # shows only answers, so it writes its steps as JSON events and agent_org.runview shows them
-    # as they happen. The Stop hook keeps it going as messages arrive.
-    cli += ["--print-timeout", "0s", "--output-format", "stream-json", "-p", resume_kickoff(role) if resume else kickoff(role)]
-    viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview"])
-    script = "\n".join(["[Console]::OutputEncoding = [Text.Encoding]::UTF8",
-                         "& 'agy' " + " ".join(ps(a) for a in cli) + f" | & {viewer}"])
-    return Launch(role, "antigravity", "agy", cli, script=script,
-                  env={"PYTHONPATH": str(PACKAGE_ROOT), "PYTHONIOENCODING": "utf-8"})
+    # Interactive (-i): its own full terminal, typeable like any agent's. Its tools and hooks come
+    # from the user-level plugin (install_antigravity_plugin); the Stop hook delivers new messages.
+    cli += ["-i", antigravity_kickoff(role, bool(resume))]
+    return Launch(role, "antigravity", "agy", cli)
 
 
 # ---- DeepSeek Harness ----
@@ -360,6 +391,14 @@ def deepseek_wake(role: str) -> str:
     return (f"agent-org: '{role}', you have new messages. Call read_inbox and handle them (and list_tasks; "
             f"my_role if you need your role again). When nothing is left to do, end your answer: agent-org "
             "starts you again when a new message arrives.")
+
+
+def deepseek_version(command: str, base: list[str]) -> str:
+    """The dsh version, for the banner ('' if it cannot tell)."""
+    for key, version in _dsh_versions.items():
+        if version and key.startswith(base[0] if base else command):
+            return ".".join(str(x) for x in version)
+    return ""
 
 
 DSH_MIN_VERSION = (0, 2)
@@ -484,7 +523,13 @@ def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
     dsh = " ".join(ps(a) for a in [command, *base, "--profile", "headless", "--patch", str(patch_file), "--json"])
     viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview", "--session-file", str(session_file)])
     waiter = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.wake", "--team", str(team_file),
-                                      "--role", role, "--stop", str(out / STOP_MARKER)])
+                                      "--role", role, "--stop", str(out / STOP_MARKER), "--input"])
+    spec = hub.team.roles[role]
+    shown_model = ", ".join(x for x in (spec.model or "deepseek-flash", spec.effort and f"{spec.effort} effort") if x)
+    folder = hub.root_of(role)
+    shown_folder = str(folder) if len(str(folder)) <= 48 else f"…\\{folder.parent.name}\\{folder.name}"
+    banner = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview", "--banner", "DeepSeek Harness",
+                                      deepseek_version(command, base), shown_model, shown_folder])
     sid = ps(str(session_file))
 
     def run(prompt: str) -> str:  # one run, continuing its conversation if it has one, shown as it happens
@@ -497,6 +542,7 @@ def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
     marker = ps(str(out / STOP_MARKER))
     script = "\n".join([
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+        f"& {banner}",
         run(resume_kickoff(role) if resume else deepseek_kickoff(role)),
         f"while (-not (Test-Path -LiteralPath {marker})) {{",  # after each run: wait (no model), run again
         f"    & {waiter}",

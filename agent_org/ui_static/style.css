@@ -819,3 +819,14 @@ body.adding-role .rail-item:not(.drop-here), body.adding-role .pane:not(.drop-he
 .mate-card .card-head .icon-btn { margin-left: auto; }
 .mate-card .card-actions { display: flex; gap: 8px; align-items: center; }
 .mate-card .card-actions .grow { flex: 1; }
+
+/* a pane is its terminal: a thin title line above it, nothing below */
+.pane-head { height: 30px; gap: 5px; padding: 0 2px 0 9px; }
+.pane-head .nm { font-size: 13px; }
+.pane-head .sub { flex: 1 1 0; }
+.pane-head .flag { font-size: 11.5px; padding: 0 6px; border-radius: 5px; line-height: 18px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.pane-head .flag.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.pane-head .icon-btn { width: 22px; height: 22px; }
+.pane.live .pane-body { padding: 4px 0 2px 8px; }
+.pane-status { display: none; }

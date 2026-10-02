@@ -256,3 +256,8 @@ def test_racing_claims_have_exactly_one_winner(team):
     for t in threads:
         t.join()
     assert len(winners) == 1
+
+
+def test_owner_reaches_the_owner_whatever_their_name(hub):
+    sent = hub.session("leader").send("owner", "done")
+    assert sent.recipient == hub.team.owner

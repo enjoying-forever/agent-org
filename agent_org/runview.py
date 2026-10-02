@@ -93,8 +93,7 @@ class View:
     def deepseek(self, e: dict) -> None:
         kind = e.get("type")
         if kind == "session":
-            self.session = e.get("sessionId")
-            self.line(f"{DIM}· session {self.session}{RESET}")
+            self.session = e.get("sessionId")  # kept for the next run, not shown
         elif kind == "thinking":
             for text in str(e.get("text") or "").strip().splitlines():
                 if text.strip():
@@ -147,11 +146,30 @@ class View:
                     self.line(text)
 
 
+BLUE = "\x1b[38;5;69m"
+WHALE = ["   ▄▄▄▄▄▄   ", " ▄█▀▀▀▀▀▀█▄▄", "▐█ ●     ▀▀█", " ▀█▄▄▄▄▄▄█▀ "]
+
+
+def banner(out, program: str, version: str, model: str, folder: str) -> None:
+    """The heading an interactive program shows when it starts: what runs, with which model, where."""
+    info = [f"{BOLD}{BLUE}{program}{RESET} {DIM}{version}{RESET}", model, f"{DIM}{folder}{RESET}", ""]
+    for art, text in zip(WHALE, info):
+        out.write(f"{BLUE}{art}{RESET}  {text}\n")
+    out.write("\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="show an agent program's JSON events as they happen")
     parser.add_argument("--session-file", help="keep the run's session id here, for the next run to continue")
+    parser.add_argument("--banner", nargs=4, metavar=("PROGRAM", "VERSION", "MODEL", "FOLDER"),
+                        help="print the start banner and exit")
     args = parser.parse_args(argv)
     out = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+    if args.banner:
+        banner(out, *args.banner)
+        out.flush()
+        out.detach()
+        return 0
     view = View(out)
     for raw in sys.stdin.buffer:
         line = raw.decode("utf-8", errors="replace").strip()

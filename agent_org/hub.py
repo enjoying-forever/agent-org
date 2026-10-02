@@ -424,6 +424,8 @@ class RoleSession:
 
     def send(self, to: str, text: str, reply_to: int | None = None, urgent: bool = False) -> Message:
         team = self.team
+        if to.strip().lower() in ("owner", "@owner", "the owner") and not team.is_member(to):
+            to = team.owner  # an agent may not know the owner's name; "owner" always reaches them
         if to in BROADCAST:
             raise HubError(f"to write to {BROADCAST[to]}, use broadcast")
         if not team.is_member(to):

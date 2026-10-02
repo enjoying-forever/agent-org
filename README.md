@@ -18,10 +18,11 @@ with the subscription you already have, and you watch, type to and steer all of 
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
    - Antigravity needs you to have run `agy` once yourself and finished its Google
-     sign-in (including any account check it asks for). It runs in print mode (the only
-     mode in which it loads agent-org's tools): its terminal shows only its finished answers
-     and takes no typing; agent-org runs it with JSON output and shows each step - its tool calls,
-     their results, its answers - in its pane as it happens. Talk to it with messages, like to any agent.
+     sign-in (including any account check it asks for). It runs interactively, in its own full
+     terminal like the others. Interactive Antigravity loads only user-level plugins, so agent-org
+     installs its plugin (its tools and hooks) as one: `agy plugin list` shows `agent-org`. Outside
+     agent-org it does nothing - your own `agy` sessions get no tools from it and its hooks exit at
+     once. The first time in a folder, Antigravity asks whether to trust it: say yes in its pane.
    - Each program must be signed in on its own command line (run `claude`, `codex`,
      `grok` once in a terminal and log in); the Setup check tells you which is not.
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
@@ -43,6 +44,8 @@ agent carries on where it stopped.
   restart or stop it, and its details (notes, files, usage). An agent that is not running
   shows a summary instead: its program and model, what it does, and its recent messages.
   On the right, the team's messages. Dark or light with the button at the top.
+- **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
+  buttons) and the terminal below; hover the title for its status, model, usage, tasks and files.
 - **Arranging the workspace:** the page never scrolls; the panes tile the space. The grid
   button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
@@ -110,8 +113,16 @@ message (a task arrives as one), and runs it again. Each run continues the same 
 It gets agent-org's tools through DeepSeek's MCP client plugin, added for that role by a patch
 file (your own DeepSeek settings are not changed). *Stop* ends the run or the wait, and it stays
 stopped until you start it again. Its terminal mode prints only the final answer, so agent-org
-runs it with JSON output and shows each step - thinking, tool calls and results, answers - in its
-pane as it happens.
+runs it with JSON output and shows it like an interactive program: a banner, then each step -
+thinking, tool calls and results, answers - as it happens. While it waits, its pane has an input
+line: type a message for it and press Enter, and it starts working on it.
+
+Its shell runs in DeepSeek's own sandbox, which sets Windows permissions on the project folder.
+If an agent reports that its shell cannot run because of the folder's permissions (no WRITE_DAC),
+give your account full control of the project folder, or run it without the sandbox: set
+`DSH_PERMISSION_MODE=danger-full-access` as a Windows user environment variable (agents get your
+user environment) and restart agent-org. agent-org's command guard does not cover DeepSeek, which
+has no hooks, so that leaves its shell unguarded.
 
 ## The message law
 
