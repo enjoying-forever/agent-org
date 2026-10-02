@@ -136,6 +136,8 @@ const S = {
   state: null, stateKey: '', messages: [], lastId: 0, mode: null,
   filter: 'all', roleFilter: '', replyTo: null, selected: null, summonFor: null,
   compose: 'message', notified: 0,
+  focus: null, // the agent pane in front (highlighted in the rail)
+  drafts: {}, // what you are typing to each agent, kept across re-renders
 };
 
 async function refresh() {
@@ -179,7 +181,9 @@ function applyState(state) {
   const folder = state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
   $('#project').textContent = folder;
   $('#project').title = `project: ${state.project_root}\nteam file: ${state.team_file}`;
+  if (!S.focus || !findRole(S.focus)) S.focus = state.leader;
   renderChart();
+  renderPanes();
   renderGuide();
   renderProblems();
   renderBoard();
@@ -212,8 +216,9 @@ function enterTeam() {
 function enterHome() {
   if (S.mode === 'home') return;
   S.mode = 'home';
-  Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0 });
+  Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0, focus: null, drafts: {} });
   if (typeof E !== 'undefined') E.draft = null;
+  clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
   for (const id of ['#view-team', '#view-board', '#view-editor', '#view-roles', '#views', '#conn', '#switch-btn',
@@ -338,7 +343,7 @@ function renderGuide() {
   const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
   const steps = [
     { done: true, text: 'Check the team in "Edit team": who reports to whom, and which model each role uses.' },
-    { done: running, text: 'Click "Launch team". Each agent opens in its own terminal tab. The first time, '
+    { done: running, text: `Click "Launch team". ${st.in_window ? 'Each agent starts in its own terminal on this page' : 'Each agent opens in its own terminal tab'}. The first time, `
       + 'say yes when Claude or Codex asks to trust the folder, and choose "Trust all and continue" when '
       + 'Codex asks to review hooks.' },
     { done: talked, text: `Give ${st.leader} a task: open the Board and click "New task". Say what "done" means, `
@@ -358,42 +363,356 @@ function renderGuide() {
     h('ol', {}, steps.map((s) => h('li', { class: s.done ? 'done' : '' }, s.text))));
 }
 
-// ---------- org chart ----------
+// ---------- icons (inline SVG, drawn with the text color) ----------
+
+const ICON_PATHS = {
+  play: 'M7 4.5v15l12-7.5z',
+  stop: 'M6.5 6.5h11v11h-11z',
+  restart: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  task: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+  sun: 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z',
+};
+
+function icon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', ICON_PATHS[name]);
+  const solid = name === 'play' || name === 'stop';
+  path.setAttribute('fill', solid ? 'currentColor' : 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', name === 'more' ? '3.2' : '2');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+  return svg;
+}
+
+const iconBtn = (name, title, onclick, cls = '') =>
+  h('button', { class: `icon-btn ${cls}`, title, 'aria-label': title, onclick: (e) => { e.stopPropagation(); onclick(); } }, icon(name));
+
+// ---------- the team rail ----------
+
+const PROGRAM = { claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok', antigravity: 'Antigravity' };
+const GLYPH = { claude: 'C', codex: 'X', grok: 'G', antigravity: 'A' };
+const glyph = (harness) => h('span', { class: `hglyph h-${harness}`, title: PROGRAM[harness] || harness }, GLYPH[harness] || '?');
+
+/** Roles in tree order: the leader first, then down the team. */
+function teamOrder() {
+  const out = [];
+  const walk = (name) => { for (const r of rolesUnder(name)) { out.push(r); walk(r.name); } };
+  walk(S.state.owner);
+  for (const r of S.state.roles) if (!out.includes(r)) out.push(r); // anyone whose superior is missing
+  return out;
+}
 
 function renderChart() {
   const st = S.state;
-  const sub = (name) => {
-    const kids = rolesUnder(name);
-    return kids.length ? h('ul', {}, kids.map((r) => h('li', {}, roleCard(r), sub(r.name)))) : null;
+  const item = (r, depth) => {
+    const kids = rolesUnder(r.name);
+    const count = r.unread || r.open_tasks;
+    return h('li', {},
+      h('button', {
+        class: `rail-item${S.focus === r.name ? ' focus' : ''}`, style: { paddingLeft: `${8 + depth * 14}px` },
+        title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
+        onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
+      },
+      runningDot(r), h('span', { class: 'nm' }, r.name), glyph(r.harness),
+      count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null),
+      kids.length ? h('ul', {}, kids.map((k) => item(k, depth + 1))) : null);
   };
-  const owner = h('div', {
-    class: 'node owner', title: 'Messages to you',
-    onclick: () => { showTab('messages'); setFilter('me'); },
-  },
-  h('div', { class: 'name', style: { justifyContent: 'center' } },
-    h('span', { class: 'nm' }, st.owner), st.owner_unread ? h('span', { class: 'badge' }, st.owner_unread) : null),
-  h('div', { class: 'model' }, 'owner (you)'));
-  $('#chart').replaceChildren(h('li', {}, owner, sub(st.owner)));
+  const owner = h('li', {}, h('button', {
+    class: 'rail-item owner', title: 'Messages to you', onclick: () => { showTab('messages'); setFilter('me'); },
+  }, h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)')),
+  st.owner_unread ? h('span', { class: 'pill hot' }, st.owner_unread) : null));
+  $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
+  const running = st.roles.filter((r) => r.online).length;
+  $('#rail-summary').textContent = `${running} of ${st.roles.length} running`;
 }
 
-function roleCard(r) {
-  const s = r.status;
-  const cls = ['node', `h-${r.harness}`, r.tier && 'consultant', S.selected === r.name && 'selected'];
-  return h('div', { class: cls.filter(Boolean).join(' '), title: r.duties || '', onclick: () => openDrawer(r.name) },
-    h('div', { class: 'name' }, runningDot(r), h('span', { class: 'nm' }, r.name), h('span', { class: 'harness' }, r.harness)),
-    h('div', { class: 'model' }, modelLine(r)),
-    r.tier && h('div', {}, h('span', { class: 'tag' }, `${r.tier} consultant for #${r.help_id}`)),
-    h('div', { class: 'task', title: s && s.task ? s.task : '' },
-      h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'not started'),
-      s && s.task ? ` ${s.task}` : ''),
-    r.stuck && h('div', { class: `stuck-badge ${r.stuck.kind}`, title: r.stuck.text }, r.stuck.describe),
-    h('div', { class: 'meta' },
-      s && h('span', { title: `status updated ${fmtTime(s.updated_at)}` }, ago(s.updated_at)),
-      r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'task')) : null,
-      r.unread ? h('span', { class: 'hot' }, `${r.unread} unread`) : null,
-      r.locks.length ? h('span', {}, plural(r.locks.length, 'file')) : null,
-      r.usage && h('span', { title: usageText(r.usage) }, shortUsage(r.usage))));
+function focusPane(name) {
+  S.focus = name;
+  renderChart();
+  renderPanes();
+  document.querySelector(`.pane[data-role="${CSS.escape(name)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
+
+// ---------- agent panes ----------
+// Each agent has one pane, kept across refreshes (a live terminal must not be rebuilt):
+// the header and status line are redrawn; the body is the agent's terminal when it runs in this
+// window, and a summary of its work otherwise.
+
+const LOG_LINES = 8;
+const PANES = new Map(); // role -> { name, el, head, body, foot, term, fit, termId, next, mode }
+
+function renderPanes() {
+  const st = S.state;
+  if (!st) return;
+  const order = teamOrder();
+  const box = $('#panes');
+  const names = new Set(order.map((r) => r.name));
+  for (const [name, p] of PANES) if (!names.has(name)) { dropPane(p); PANES.delete(name); }
+  box.querySelector(':scope > .empty')?.remove();
+  if (!order.length) {
+    box.append(h('div', { class: 'empty' }, 'No roles yet. Add one with + in the team list, or in Edit team.'));
+    return;
+  }
+  order.forEach((r, i) => {
+    let p = PANES.get(r.name);
+    if (!p) { p = makePane(r.name); PANES.set(r.name, p); }
+    updatePane(p, r);
+    if (box.children[i] !== p.el) box.insertBefore(p.el, box.children[i] || null);
+  });
+}
+
+function makePane(name) {
+  const p = { name, head: h('header', { class: 'pane-head' }), body: h('div', { class: 'pane-body' }),
+    foot: h('footer', { class: 'pane-status' }), term: null, termId: 0, next: 0, mode: '' };
+  p.el = h('section', { class: 'pane', 'data-role': name, onclick: () => { if (S.focus !== name) focusPane(name); } },
+    p.head, p.body, p.foot);
+  return p;
+}
+
+function dropPane(p) {
+  closeTerm(p);
+  p.el.remove();
+}
+
+function clearPanes() {
+  for (const p of PANES.values()) dropPane(p);
+  PANES.clear();
+}
+
+function updatePane(p, r) {
+  const st = S.state;
+  const s = r.status;
+  const launchable = st.launchable.includes(r.harness);
+  const live = st.in_window && r.terminal;
+  p.el.className = ['pane', `h-${r.harness}`, r.name === st.leader && 'wide', r.tier && 'consultant',
+    S.focus === r.name && 'focus', live && 'live'].filter(Boolean).join(' ');
+  fill(p.head,
+    runningDot(r), glyph(r.harness), h('span', { class: 'nm' }, r.name),
+    h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
+      : r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`),
+    !r.tier && iconBtn('task', `Give ${r.name} a task`, () => openNewTask(r.name)),
+    launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
+    launchable && r.online > 0 && r.stuck && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),
+    launchable && r.online > 0 && iconBtn('stop', `Stop ${r.name}`, () => stopRoles(r.name), 'danger'),
+    iconBtn('more', 'Details, tasks and files', () => openDrawer(r.name)));
+  if (live) openTerm(p);
+  else { closeTerm(p); renderSummary(p, r); }
+  fill(p.foot,
+    h('span', { class: r.online > 1 ? 'bad' : '' }, !r.online ? 'stopped' : r.online > 1 ? `${r.online} sessions!` : 'running'),
+    h('span', {}, modelLine(r)),
+    r.usage && h('span', { title: usageText(r.usage) }, shortUsage(r.usage)),
+    r.open_tasks ? h('span', { class: 'hot' }, plural(r.open_tasks, 'open task')) : null,
+    r.unread ? h('span', { class: 'hot' }, `${r.unread} unread`) : null,
+    r.locks.length ? h('span', { title: r.locks.join('\n') }, plural(r.locks.length, 'file')) : null,
+    r.stuck && h('span', { class: 'bad', title: r.stuck.text }, r.stuck.describe));
+}
+
+// when the agent has no terminal here: what it is, what it does, its recent messages
+
+function renderSummary(p, r) {
+  const st = S.state;
+  const s = r.status;
+  const launchable = st.launchable.includes(r.harness);
+  const active = document.activeElement;
+  const typing = active?.dataset?.pane === r.name ? active.selectionStart : null;
+  const oldLog = p.body.querySelector('.pane-log');
+  const atBottom = !oldLog || oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight < 24;
+  const keepTop = oldLog ? oldLog.scrollTop : 0;
+  const task = st.tasks.find((t) => t.assignee === r.name && t.state === 'working')
+    || st.tasks.find((t) => t.assignee === r.name && ['open', 'blocked'].includes(t.state));
+  const log = S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-LOG_LINES);
+  const folder = st.project_root.split(/[\\/]/).filter(Boolean).pop() || st.project_root;
+  const where = r.online
+    ? (st.in_window ? '  running in a separate terminal window' : '')
+    : launchable ? `  ▶ starts it${r.resumes ? ' where it left off' : ''}` : `  ${r.harness} cannot be started from here`;
+  p.mode = 'summary';
+  fill(p.body,
+    h('div', { class: 'pane-banner' },
+      h('div', { class: 'pane-art', 'aria-hidden': 'true' }),
+      h('div', { style: { minWidth: 0 } },
+        h('div', { class: 'line' }, h('b', {}, PROGRAM[r.harness] || r.harness)),
+        h('div', { class: 'line' }, modelLine(r)),
+        h('div', { class: 'line', title: st.project_root }, `~/${folder}`,
+          r.write_scope.length ? `  writes ${r.write_scope.join(', ')}` : '  read-only'))),
+    h('div', { class: 'pane-now' },
+      r.online ? h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'starting')
+        : h('span', { class: 'state idle' }, 'not running'),
+      r.online && s && s.task ? `  ${s.task}` : where),
+    task && h('div', { class: 'pane-task' }, `${task.state === 'working' ? 'on' : 'next'} `, h('b', {}, `#${task.id} ${task.title}`)),
+    h('div', { class: 'pane-log' }, log.length ? log.map((m) => logLine(m, r.name))
+      : h('div', { class: 'pane-empty' }, '› no messages yet')),
+    h('form', {
+      class: 'pane-prompt',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const input = e.target.querySelector('input');
+        const text = input.value.trim();
+        if (!text) return;
+        act(api('/api/send', { to: r.name, text }).then((res) => { S.drafts[r.name] = ''; input.value = ''; return res; }),
+          () => `Sent to ${r.name}.`);
+      },
+    },
+    h('span', { 'aria-hidden': 'true' }, '›'),
+    h('input', {
+      'data-pane': r.name, value: S.drafts[r.name] || '', 'aria-label': `Message ${r.name}`,
+      placeholder: `Message ${r.name}… (Enter sends)`, oninput: (e) => { S.drafts[r.name] = e.target.value; },
+    })));
+  const newLog = p.body.querySelector('.pane-log');
+  newLog.scrollTop = atBottom ? newLog.scrollHeight : keepTop;
+  if (typing !== null) {
+    const input = p.body.querySelector('.pane-prompt input');
+    input.focus();
+    input.setSelectionRange(typing, typing);
+  }
+}
+
+function logLine(m, me) {
+  const out = m.sender === me;
+  return h('button', {
+    type: 'button', class: `logline ${m.kind}`, title: `${m.sender} → ${m.recipient}, ${KIND_LABEL[m.kind] || m.kind}\n\n${m.text.slice(0, 600)}`,
+    onclick: (e) => { e.stopPropagation(); jumpTo(m.id); },
+  },
+  h('span', { class: 't' }, fmtTime(m.sent_at).slice(0, 5)),
+  h('span', { class: 'who' }, `${out ? '→' : '←'} ${out ? m.recipient : m.sender}`),
+  h('span', { class: 'txt' }, m.text.replace(/\s+/g, ' ')));
+}
+
+// ---------- live terminals (xterm.js) ----------
+
+function termTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  return { background: v('--term'), foreground: v('--ink'), cursor: v('--accent'), cursorAccent: v('--term'),
+    selectionBackground: 'rgba(59, 130, 246, 0.35)' };
+}
+
+function openTerm(p) {
+  if (p.mode === 'term' && p.term) return;
+  if (typeof Terminal === 'undefined') { p.mode = ''; return; } // the terminal script did not load
+  p.mode = 'term';
+  const host = h('div', { class: 'xterm-host' });
+  p.body.replaceChildren(host);
+  const term = new Terminal({
+    fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: 12.5, lineHeight: 1.15,
+    cursorBlink: true, scrollback: 5000, theme: termTheme(), allowProposedApi: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  if (typeof Unicode11Addon !== 'undefined') { // wide characters (CJK, emoji) as wide as Windows' console makes them
+    term.loadAddon(new Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = '11';
+  }
+  term.open(host);
+  Object.assign(p, { term, fit, termId: 0, next: 0, pending: '', sending: false, size: '' });
+  term.onData((data) => sendKeys(p, data));
+  term.textarea?.addEventListener('focus', () => { if (S.focus !== p.name) focusPane(p.name); });
+  p.resizer = new ResizeObserver(() => fitTerm(p));
+  p.resizer.observe(host);
+  fitTerm(p);
+  wakeTerms();
+}
+
+function closeTerm(p) {
+  if (!p.term) return;
+  p.resizer?.disconnect();
+  p.term.dispose();
+  Object.assign(p, { term: null, fit: null, mode: '' });
+  p.body.replaceChildren();
+}
+
+function retheme() {
+  for (const p of PANES.values()) if (p.term) p.term.options.theme = termTheme();
+}
+
+function fitTerm(p) {
+  if (!p.term || !p.el.isConnected || !p.body.clientWidth) return;
+  try { p.fit.fit(); } catch { return; }
+  const size = `${p.term.cols}x${p.term.rows}`;
+  if (size === p.size) return;
+  p.size = size;
+  api('/api/term-resize', { role: p.name, cols: p.term.cols, rows: p.term.rows }).catch(() => {});
+}
+
+/** Keystrokes go one request at a time, so they arrive in the order they were typed. */
+async function sendKeys(p, data) {
+  p.pending += data;
+  if (p.sending) return;
+  p.sending = true;
+  while (p.pending) {
+    const chunk = p.pending;
+    p.pending = '';
+    try { await api('/api/term-input', { role: p.name, data: chunk }); } catch (e) { toast(e.message, true); p.pending = ''; }
+  }
+  p.sending = false;
+}
+
+// One long-poll fetches every terminal's new output (a browser allows only a few connections).
+let termPoll = null;
+const pause = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+function wakeTerms() {
+  termPoll?.abort(); // a new terminal: ask again, including it
+  if (!S.termLoop) { S.termLoop = true; termLoop(); }
+}
+
+async function termLoop() {
+  while (S.mode === 'team' && !S.signedOut) {
+    const wants = {};
+    for (const p of PANES.values()) if (p.term) wants[p.name] = [p.termId, p.next];
+    if (!Object.keys(wants).length) { await pause(1000); continue; }
+    termPoll = new AbortController();
+    let res;
+    try {
+      const r = await fetch(`/api/terms?w=${encodeURIComponent(JSON.stringify(wants))}`,
+        { headers: PAGE_HEADERS, credentials: 'same-origin', signal: termPoll.signal });
+      if (!r.ok) throw new Error(String(r.status));
+      res = await r.json();
+    } catch (e) {
+      if (e.name !== 'AbortError') await pause(1500);
+      continue;
+    }
+    for (const [name, t] of Object.entries(res.terms || {})) {
+      const p = PANES.get(name);
+      if (!p || !p.term || t.none) continue;
+      if (t.reset || t.id !== p.termId) {
+        p.term.reset();
+        if (t.id !== p.termId) { p.size = ''; fitTerm(p); } // a new terminal: tell it this pane's size
+        p.termId = t.id;
+      }
+      if (t.data) p.term.write(t.data);
+      p.next = t.next;
+    }
+  }
+  S.termLoop = false;
+}
+
+// ---------- light or dark ----------
+
+function applyTheme(theme) {
+  if (theme === 'light') document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+  $('#theme-btn').replaceChildren(icon(theme === 'light' ? 'moon' : 'sun'));
+  $('#theme-btn').title = theme === 'light' ? 'Switch to dark' : 'Switch to light';
+  retheme();
+}
+
+$('#theme-btn').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem('agent-org-theme', next); } catch { /* remembered for this visit only */ }
+  applyTheme(next);
+});
+try { applyTheme(localStorage.getItem('agent-org-theme') || 'dark'); } catch { applyTheme('dark'); }
+
+$('#rail-checks').addEventListener('click', () => $('#checks-btn').click());
+$('#rail-add').addEventListener('click', () => showView('roles'));
 
 /** The session at a glance: green running, grey stopped, red when two sessions share the role. */
 function runningDot(r) {
@@ -514,6 +833,7 @@ function addMessages(list) {
   notifyOwner(list);
   if (S.state) {
     renderFeed(atBottom ? 'bottom' : null);
+    renderPanes();
     renderGuide();
   }
   if (S.selected) renderDrawer();

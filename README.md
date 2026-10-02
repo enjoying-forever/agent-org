@@ -2,23 +2,26 @@
 
 Run a team of AI agents - Claude Code, Codex, Grok and Antigravity - that work
 together like a small company. You set up who reports to whom; the leader plans, hands out tasks,
-and reports back to you. Every agent runs in its own visible terminal tab, with the
-subscription you already have, and you watch and steer everything from one web page.
+and reports back to you. Every agent runs in its own live terminal inside the agent-org window,
+with the subscription you already have, and you watch, type to and steer all of them in one place.
 
 ## Quick start
 
-1. **Double-click `agent-org-ui.cmd`.** A page opens in your browser. (Keep the small
-   black window open while you use it.)
+1. **Double-click `agent-org-ui.cmd`.** The agent-org window opens. (Keep the small black
+   window open too; closing agent-org ends the agents running in it. Their conversations are
+   kept, and *Start* resumes them.)
 2. **Create a team.** Choose the project folder the agents should work in, pick a
    starting team (Solo, Leader and worker, or Full team) and click *Create team*.
    The *Setup* check on the same page tells you if Claude, Codex or Grok needs fixing.
-3. **Click *Launch team*.** Each agent opens in its own Windows Terminal tab.
+3. **Click *Launch team*.** Each agent starts in its own terminal pane in the window.
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
    - Antigravity needs you to have run `agy` once yourself and finished its Google
-     sign-in (including any account check it asks for). Its tabs show the agent's work
-     but take no typing (Antigravity loads agent-org's tools only in that mode); talk to
-     it from the page, like to any agent.
+     sign-in (including any account check it asks for). Its pane shows the agent's work
+     but takes no typing (Antigravity loads agent-org's tools only in that mode); talk to
+     it with messages, like to any agent.
+   - Each program must be signed in on its own command line (run `claude`, `codex`,
+     `grok` once in a terminal and log in); the Setup check tells you which is not.
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
    saying what you want, and fill in **Done when**: how anyone can check it is
    finished (for example "the page shows today's top 10 stories").
@@ -32,9 +35,12 @@ agent carries on where it stopped.
 
 ## What you see
 
-- **Team:** the org chart. Each card shows the agent's model, what it is doing, whether
-  it is running, its open tasks, unread messages and the files it is writing. Click a
-  card to message it, give it a task, start or stop it, or read its notes.
+- **Team:** on the left, the team as a tree (who reports to whom, who is running, unread
+  messages and open tasks). In the middle, one pane per agent: its **live terminal** - click
+  in it and type, exactly as in its own console - with buttons to give it a task, start,
+  restart or stop it, and its details (notes, files, usage). An agent that is not running
+  shows a summary instead: its program and model, what it does, and its recent messages.
+  On the right, the team's messages. Dark or light with the button at the top.
 - **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.
@@ -54,6 +60,18 @@ agent carries on where it stopped.
   program and model each role uses, what files it may write, the consultant tiers,
   the checks, and whether agents start by themselves.
 - **The law:** the rules below. **Setup:** checks that the programs are ready.
+
+### The window, or a browser, or terminal tabs
+
+agent-org opens in a window of its own (Windows' WebView2, through `pywebview`), and runs
+each agent in a pseudo-terminal it owns (`pywinpty`), shown with xterm.js. The agents get a
+fresh copy of your user environment, as a new terminal would, not the environment agent-org
+itself was started from.
+
+- `python -m agent_org.ui --browser` opens the same page in your browser instead; press
+  Enter in the black window for another sign-in link.
+- Without `pywinpty`, or with the environment variable `AGENT_ORG_TABS=1`, agents open in
+  Windows Terminal tabs as before, and keep running when agent-org closes.
 
 ## The message law
 
@@ -300,12 +318,14 @@ the work.
 
 ## For developers
 
-Everything runs in the `formal` conda environment with only PyYAML beyond the standard
-library. From this folder:
+Everything runs in the `formal` conda environment with PyYAML, plus `pywinpty` (the agents'
+terminals) and `pywebview` (the window); without those two, agent-org falls back to terminal
+tabs and the browser. xterm.js (MIT, see `ui_static/xterm-LICENSE.txt`) is bundled in
+`ui_static`. From this folder:
 
 | Command | What it does |
 |---|---|
-| `python -m agent_org.ui [--team team.yaml]` | the web UI |
+| `python -m agent_org.ui [--team team.yaml] [--browser]` | the agent-org window (or the page in a browser) |
 | `python -m agent_org.launch --team team.yaml [roles] [--fresh] [--force] [--dry-run]` | open agent tabs from the command line |
 | `python -m agent_org.launch --install-grok-hooks` | install the hooks for Grok |
 | `python -m agent_org.cli --team team.yaml [--as ROLE] tree/send/inbox/view/claim/...` | the hub from the command line |
@@ -332,5 +352,6 @@ How it fits together:
 - `cards.py` - the role card: the law, the team, and where the agent left off.
 - `verify.py` - the team's checks; `gitops.py` - task diffs and one commit per
   accepted task (only in a repository whose top folder is the project).
-- `ui.py` + `ui_static/` - the web page (also runs the watchdog and automatic starts);
+- `ui.py` + `ui_static/` - the window's page (also runs the watchdog and automatic starts);
+- `terminals.py` - the agents' pseudo-terminals the window shows;
   `templates.py` - the starting teams; `doctor.py` - the setup check.

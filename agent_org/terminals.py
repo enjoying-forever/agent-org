@@ -1,0 +1,227 @@
+"""Agents' terminals inside the agent-org window.
+
+Each agent runs in a pseudo-terminal that this process owns (Windows ConPTY, through
+pywinpty), instead of a Windows Terminal tab. The page shows it with xterm.js: one long-poll
+fetches the new output of all of them (`TerminalHost.read_many`: a browser allows only a few
+connections at a time), and keystrokes (`write`) and sizes (`resize`) go back.
+
+Agents started this way live as long as agent-org runs: closing the agent-org window ends them
+(their conversations are kept, so the next start resumes them).
+"""
+
+from __future__ import annotations
+
+import itertools
+import os
+import shutil
+import threading
+import time
+from pathlib import Path
+
+try:
+    from winpty import PtyProcess
+except ImportError:  # not Windows, or pywinpty missing: agents open in terminal tabs instead
+    PtyProcess = None
+
+KEEP = 400_000  # characters of output kept per terminal: what a page opened later still sees
+_ids = itertools.count(1)
+
+
+def available() -> bool:
+    return PtyProcess is not None and os.name == "nt"
+
+
+# What a program started by Claude Code (or its desktop app) inherits. Inside an agent's
+# terminal it would make that agent believe it is a sub-session of someone else's session.
+_SESSION_VARS = ("CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_AGENT_SDK", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_PREVIEW",
+                 "MCP_CONNECTION_NONBLOCKING", "MCP_SERVER_CONNECTION_BATCH_SIZE")
+
+
+def fresh_env() -> dict[str, str]:
+    """The environment a newly started program of this user gets (as a new Windows Terminal tab
+    does), not agent-org's own: whatever started agent-org must not leak into its agents."""
+    try:
+        import ctypes  # noqa: PLC0415 - Windows only
+        from ctypes import wintypes  # noqa: PLC0415
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        userenv = ctypes.WinDLL("userenv", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        userenv.CreateEnvironmentBlock.argtypes = [ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.BOOL]
+        userenv.DestroyEnvironmentBlock.argtypes = [ctypes.c_void_p]
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008 | 0x0002, ctypes.byref(token)):
+            raise OSError(ctypes.get_last_error())
+        block = ctypes.c_void_p()
+        try:
+            if not userenv.CreateEnvironmentBlock(ctypes.byref(block), token, False):
+                raise OSError(ctypes.get_last_error())
+            env, at = {}, block.value
+            while True:  # NUL-separated "NAME=value" strings, ending with an empty one
+                entry = ctypes.wstring_at(at)
+                if not entry:
+                    break
+                name, sep, value = entry.partition("=")
+                if sep and name:
+                    env[name] = value
+                at += (len(entry) + 1) * ctypes.sizeof(ctypes.c_wchar)
+            userenv.DestroyEnvironmentBlock(block)
+        finally:
+            kernel32.CloseHandle(token)
+        if env.get("PATH") or env.get("Path"):
+            return env
+    except (OSError, AttributeError, ValueError):
+        pass
+    return {k: v for k, v in os.environ.items() if not k.upper().startswith(_SESSION_VARS)}
+
+
+class Terminal:
+    """One program in a pseudo-terminal, with its recent output."""
+
+    def __init__(self, argv: list[str], cwd: Path, title: str = "", color: str = "",
+                 cols: int = 120, rows: int = 32, notify=lambda: None) -> None:
+        if PtyProcess is None:
+            raise OSError("terminals in the window need pywinpty (pip install pywinpty)")
+        exe = shutil.which(argv[0]) or argv[0]
+        self.id = next(_ids)  # a new one for each start, so a page knows to clear its screen
+        self.title, self.color = title, color
+        self.cols, self.rows = cols, rows
+        env = fresh_env()
+        exe = shutil.which(argv[0], path=env.get("PATH") or env.get("Path")) or exe
+        self.proc = PtyProcess.spawn([exe, *argv[1:]], cwd=str(cwd), env=env, dimensions=(rows, cols))
+        self.started = time.time()
+        self._buf = ""
+        self._start = 0  # where _buf begins in the whole output
+        self._cond = threading.Condition()
+        self._notify = notify  # tells the host that something changed
+        self.alive = True
+        threading.Thread(target=self._pump, name=f"term-{title}", daemon=True).start()
+
+    @property
+    def end(self) -> int:
+        return self._start + len(self._buf)
+
+    def _pump(self) -> None:
+        while True:
+            try:
+                data = self.proc.read(65536)
+            except EOFError:
+                break
+            except Exception:  # noqa: BLE001 - a broken pipe ends the terminal, never the server
+                break
+            if not data:
+                if not self.proc.isalive():
+                    break
+                time.sleep(0.02)
+                continue
+            with self._cond:
+                self._buf += data
+                if len(self._buf) > KEEP:
+                    cut = len(self._buf) - KEEP
+                    self._buf, self._start = self._buf[cut:], self._start + cut
+                self._cond.notify_all()
+            self._notify()
+        with self._cond:
+            self.alive = False
+            self._cond.notify_all()
+        self._notify()
+
+    def chunk(self, offset: int) -> dict[str, object]:
+        """Output from `offset` on. An offset the terminal no longer has (too old, or from an
+        earlier terminal) gets everything kept, with reset=True."""
+        with self._cond:
+            reset = not self._start <= offset <= self.end
+            frm = self._start if reset else offset
+            return {"id": self.id, "data": self._buf[frm - self._start:], "next": self.end,
+                    "reset": reset, "alive": self.alive}
+
+    def write(self, data: str) -> None:
+        if self.alive:
+            self.proc.write(data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        cols, rows = max(20, min(int(cols), 500)), max(5, min(int(rows), 200))
+        if self.alive and (cols, rows) != (self.cols, self.rows):
+            self.cols, self.rows = cols, rows
+            self.proc.setwinsize(rows, cols)
+
+    def close(self) -> None:
+        try:
+            if self.proc.isalive():
+                self.proc.terminate(force=True)
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+
+
+class TerminalHost:
+    """The terminals of the open team, by role name."""
+
+    def __init__(self) -> None:
+        self._terms: dict[str, Terminal] = {}
+        self._lock = threading.Lock()
+        self._changed = threading.Condition()
+        self._sizes: dict[str, tuple[int, int]] = {}  # the size each pane last had: a restart starts at it
+
+    def _notify(self) -> None:
+        with self._changed:
+            self._changed.notify_all()
+
+    def open(self, name: str, argv: list[str], cwd: Path, title: str = "", color: str = "") -> Terminal:
+        """Start `argv` in a new terminal for `name`, closing the one it had."""
+        cols, rows = self._sizes.get(name, (120, 32))
+        term = Terminal(argv, cwd, title or name, color, cols=cols, rows=rows, notify=self._notify)
+        with self._lock:
+            old = self._terms.get(name)
+            self._terms[name] = term
+        if old is not None:
+            old.close()
+        return term
+
+    def resize(self, name: str, cols: int, rows: int) -> None:
+        term = self.get(name)
+        if term is not None:
+            term.resize(cols, rows)
+            self._sizes[name] = (term.cols, term.rows)
+
+    def get(self, name: str) -> Terminal | None:
+        with self._lock:
+            return self._terms.get(name)
+
+    def read_many(self, wants: dict[str, tuple[int, int]], wait: float = 15.0) -> dict[str, dict[str, object]]:
+        """New output of several terminals: `wants` maps a name to (terminal id, offset) the page
+        has. Returns as soon as any has something new (or is gone), else after `wait` seconds."""
+        deadline = time.monotonic() + wait
+        with self._changed:
+            while True:
+                out: dict[str, dict[str, object]] = {}
+                for name, (term_id, offset) in wants.items():
+                    term = self.get(name)
+                    if term is None:
+                        out[name] = {"none": True}
+                    elif term_id != term.id or offset != term.end:
+                        out[name] = term.chunk(offset if term_id == term.id else -1)
+                if out:
+                    return out
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return {}
+                self._changed.wait(left)
+
+    def close(self, name: str) -> bool:
+        with self._lock:
+            term = self._terms.pop(name, None)
+        if term is not None:
+            term.close()
+        return term is not None
+
+    def close_all(self) -> None:
+        with self._lock:
+            terms, self._terms = list(self._terms.values()), {}
+        for term in terms:
+            term.close()
+
+    def listing(self) -> dict[str, dict[str, object]]:
+        with self._lock:
+            return {n: {"id": t.id, "alive": t.alive, "title": t.title, "color": t.color} for n, t in self._terms.items()}

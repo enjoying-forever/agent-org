@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -35,7 +36,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, gitops, launch, presets, templates, usage, watchdog
+from . import doctor, gitops, launch, presets, templates, terminals, usage, watchdog
 from .hub import BRANCH_RULE, LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -154,6 +155,11 @@ class App:
         self._problems: tuple[float, list[dict[str, object]]] = (0.0, [])
         self._history: tuple[float, bool] = (0.0, False)
         self._autostarted: dict[str, float] = {}
+        # Agents run in terminals inside the agent-org window when it can host them (Windows with
+        # pywinpty); otherwise, or with AGENT_ORG_TABS=1, each opens in a Windows Terminal tab.
+        self.in_window = (terminals.available() and not os.environ.get("AGENT_ORG_TABS")
+                          and not os.environ.get("PYTEST_CURRENT_TEST"))
+        self._hosts: dict[Path, terminals.TerminalHost] = {}  # one per team: switching teams keeps them running
         if watch:
             threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
         if team_file is not None:
@@ -173,13 +179,50 @@ class App:
 
     def _open(self, team_file: Path) -> None:
         team_file = team_file.resolve()
-        hub = Hub.open(team_file, opener=launch.tab_opener(team_file))  # raises TeamError
+        hub = Hub.open(team_file, opener=launch.tab_opener(team_file, self._open_tab))  # raises TeamError
         hub.stopper = lambda role: launch.stop_role(hub, role)
         if self._hub is not None:
             self._hub.close()
         self._hub, self.team_file = hub, team_file
         self._resumable.clear()
         remember_recent(team_file)
+
+    @property
+    def terminals(self) -> terminals.TerminalHost:
+        """The terminals of the open team's agents."""
+        self.hub  # noqa: B018 - needs an open team
+        return self._hosts.setdefault(self.team_file, terminals.TerminalHost())
+
+    def _open_tab(self, tab: list[str]) -> None:
+        """Start an agent: in a terminal in the window, or in a Windows Terminal tab."""
+        if not self.in_window:
+            launch.open_tab(tab)
+            return
+        title, color, cwd, argv = launch.tab_parts(tab)
+        self.terminals.open(launch.tab_role(tab), argv, cwd, title, color)
+
+    def term_read(self, wants: str) -> dict[str, Any]:
+        """New output of the terminals the page shows. `wants` is JSON: {role: [terminal id, offset]}."""
+        try:
+            raw = json.loads(wants)
+            parsed = {str(k): (int(v[0]), int(v[1])) for k, v in raw.items()} if isinstance(raw, dict) else None
+        except (ValueError, TypeError, IndexError, KeyError):
+            parsed = None
+        if not parsed or len(parsed) > 64:
+            raise ApiError("say which terminals: {role: [id, offset]}")
+        return {"terms": self.terminals.read_many(parsed, wait=15.0)}
+
+    def term_input(self, body: dict[str, Any]) -> dict[str, Any]:
+        term = self.terminals.get(_str(body, "role"))
+        data = body.get("data")
+        if term is None or not isinstance(data, str) or len(data) > 65536:
+            raise ApiError("That agent has no terminal here.")
+        term.write(data)
+        return {}
+
+    def term_resize(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.terminals.resize(_str(body, "role"), int(body["cols"]), int(body["rows"]))
+        return {}
 
     def _watch(self) -> None:
         """Patrol the open team every half minute: nudge, escalate, release expired leases."""
@@ -215,7 +258,7 @@ class App:
             if not tabs:
                 continue  # at the cap: it waits for a free place
             self._autostarted[p.role] = now
-            launch.open_tab(tabs[0])
+            self._open_tab(tabs[0])
             hub.event("agent", p.role, "restarted automatically: it was stuck with work waiting" if p.kind == "stuck"
                       else "started automatically: it has work waiting")
 
@@ -255,6 +298,12 @@ class App:
         if self._hub is not None:
             self._hub.close()
         self._hub = self.team_file = None
+
+    def shutdown(self) -> None:
+        """agent-org is ending: its agents' terminals end with it."""
+        self.close()
+        for host in self._hosts.values():
+            host.close_all()
 
     def home(self) -> dict[str, Any]:
         recent = [{"path": p, "name": Path(p).parent.name, "exists": Path(p).is_file()} for p in load_recent()]
@@ -384,6 +433,7 @@ class App:
         online = store.online()
         open_tasks = store.tasks(open_only=True)
         stuck = self.hub.stuck()
+        terms = self.terminals.listing() if self.in_window else {}
         roles = []
         for name in [team.leader, *team.subtree_of(team.leader)]:
             r = team.roles[name]
@@ -402,6 +452,7 @@ class App:
                 "resumes": self._resumes(name, r.harness),
                 "usage": self._usage(name, r.harness),
                 "stuck": ({**stuck[name], "describe": describe_stuck(stuck[name])} if name in stuck else None),
+                "terminal": terms.get(name),
             })
         recent_tasks = store.tasks(limit=60)
         return {
@@ -426,6 +477,7 @@ class App:
             "last_event": store.last_event_id(),
             "owner_unread": unread.get(team.owner, 0),
             "launchable": list(launch.BUILDERS),
+            "in_window": self.in_window,
         }
 
     def _usage(self, role: str, harness: str) -> dict[str, object] | None:
@@ -523,7 +575,8 @@ class App:
                                        limit=self.hub.base_team.settings.max_running)
         self._resumable.clear()
 
-        opener = launch.open_tab  # fixed now: the thread outlives this call
+        in_window = self.in_window
+        opener = self._open_tab if in_window else launch.open_tab  # fixed now: the thread outlives this call
 
         def open_all() -> None:
             for tab in tabs:
@@ -531,7 +584,8 @@ class App:
                     opener(tab)
                 except (HubError, OSError, subprocess.SubprocessError) as e:
                     print(f"could not open a tab: {e}", file=sys.stderr)
-                time.sleep(1)  # let the named window exist before the next tab joins it
+                if not in_window:
+                    time.sleep(1)  # let the named window exist before the next tab joins it
 
         threading.Thread(target=open_all, daemon=True).start()
         return {"opening": [t[t.index("--title") + 1] for t in tabs], "skipped": skipped}
@@ -692,6 +746,7 @@ GET_ROUTES = {
     "/api/task-changes": lambda app, q: app.task_changes(int(q["id"][0])),
     "/api/roles": lambda app, q: app.roles(),
     "/api/role-export": lambda app, q: app.role_export(q.get("id", [""])[0]),
+    "/api/terms": lambda app, q: app.term_read(q.get("w", [""])[0]),
 }
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
@@ -707,6 +762,7 @@ POST_ROUTES = {
     "/api/role-save": App.role_save, "/api/role-duplicate": App.role_duplicate,
     "/api/role-delete": App.delete_preset, "/api/role-import": App.role_import, "/api/role-place": App.role_place,
     "/api/role-reset": App.role_reset, "/api/role-restore": App.role_restore,
+    "/api/term-input": App.term_input, "/api/term-resize": App.term_resize,
 }
 
 
@@ -893,11 +949,26 @@ def serve(team_file: Path | None, port: int, token: str | None = None,
     return server, app, access
 
 
+def open_window(url: str) -> None:
+    """Show agent-org in a window of its own (Windows' WebView2, through pywebview), until it is
+    closed. Raises ImportError or RuntimeError when there is no such window to be had."""
+    import webview  # noqa: PLC0415 - optional: without it, agent-org opens in the browser
+
+    webview.create_window("agent-org", url, width=1520, height=950, min_size=(900, 600),
+                          background_color="#0B0C0F", confirm_close=True, text_select=True)
+    storage = templates.home_dir() / "window"
+    storage.mkdir(parents=True, exist_ok=True)
+    webview.start(private_mode=False, storage_path=str(storage), localization={
+        "global.quitConfirmation": "Close agent-org? Agents running in its terminals stop too; "
+                                   "their conversations are kept, and Start resumes them."})
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="The agent-org web UI")
+    parser = argparse.ArgumentParser(description="agent-org: its window (or web page)")
     parser.add_argument("--team", help="team.yaml to open (default: the welcome page)")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--browser", action="store_true", help="open in the web browser instead of a window")
+    parser.add_argument("--no-browser", action="store_true", help="open nothing; print the sign-in link")
     args = parser.parse_args(argv)
     team_file = Path(args.team).resolve() if args.team else None
     try:
@@ -906,32 +977,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"team error: {e}", file=sys.stderr)
         return 2
     except OSError:
-        try:  # the usual port is taken (another agent-org window?): use any free one
+        try:  # the usual port is taken (another agent-org?): use any free one
             server, app, token = serve(team_file, 0)
         except OSError as e:
-            print(f"cannot start the UI: {e}", file=sys.stderr)
+            print(f"cannot start agent-org: {e}", file=sys.stderr)
             return 1
     base = f"http://127.0.0.1:{server.server_address[1]}/"
     print("agent-org is running." + (f" Team: {app.team_file}" if app.team_file else ""))
-    print("Keep this window open while you use agent-org; close it to stop the page (not the agents).")
-    print("Sign-in links work once, for two minutes. Press Enter here for a new one (another browser, say).")
-    if not args.no_browser:
-        webbrowser.open(f"{base}?code={token.new_code()}")
-    else:
-        print(f"  {base}?code={token.new_code()}")
 
     def new_links() -> None:
         for _ in sys.stdin:
             print(f"  {base}?code={token.new_code()}   (works once, for two minutes)")
 
     threading.Thread(target=new_links, daemon=True).start()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        server.serve_forever()
+        if not args.browser and not args.no_browser:
+            print("Its window is open. Closing the window ends agent-org and the agents in its terminals.")
+            print("Press Enter here for a sign-in link, to open it in a browser too.")
+            try:
+                open_window(f"{base}?code={token.new_code()}")
+                return 0
+            except Exception as e:  # noqa: BLE001 - no WebView2 or pywebview: the browser still works
+                print(f"cannot open a window ({e}); opening the browser instead", file=sys.stderr)
+        print("Keep this window open while you use agent-org: closing it ends agent-org and the agents")
+        print("in its terminals. Sign-in links work once, for two minutes; press Enter here for a new one.")
+        if args.no_browser:
+            print(f"  {base}?code={token.new_code()}")
+        else:
+            webbrowser.open(f"{base}?code={token.new_code()}")
+        while True:
+            time.sleep(3600)
     except KeyboardInterrupt:
         pass
     finally:
+        server.shutdown()
         server.server_close()
-        app.close()
+        app.shutdown()
     return 0
 
 

@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -380,6 +381,18 @@ def tab_command(title: str, color: str, cwd: Path, script: Path) -> list[str]:
             "pwsh", "-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(script)]
 
 
+def tab_parts(tab: list[str]) -> tuple[str, str, Path, list[str]]:
+    """(title, color, folder, program and arguments) of a tab command, to run it elsewhere
+    (in a terminal inside the agent-org window)."""
+    at = tab.index("-d")
+    return tab[tab.index("--title") + 1], tab[tab.index("--tabColor") + 1], Path(tab[at + 1]), tab[at + 2:]
+
+
+def tab_role(tab: list[str]) -> str:
+    """The role a tab command starts: its start script lives in launch/<role>/."""
+    return Path(tab[-1]).parent.name
+
+
 def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[str]:
     """Write one role's start script and return the tab command that opens it.
 
@@ -473,8 +486,9 @@ def stop_role(hub: Hub, role: str) -> int:
     return stopped
 
 
-def tab_opener(team_file: Path) -> Opener:
-    """What the hub calls to show a newly summoned consultant in its own tab."""
+def tab_opener(team_file: Path, opener: Callable[[list[str]], None] | None = None) -> Opener:
+    """What the hub calls to show a newly summoned consultant: in its own tab, or with
+    `opener` (the agent-org window opens it in a terminal of its own)."""
 
     def open_consultant(role: Role) -> None:
         hub = Hub.open(team_file)  # a fresh connection sees the consultant just registered
@@ -482,7 +496,7 @@ def tab_opener(team_file: Path) -> Opener:
             tab = role_tab(hub, team_file, role.name)
         finally:
             hub.close()
-        open_tab(tab)
+        (opener or open_tab)(tab)
 
     return open_consultant
 

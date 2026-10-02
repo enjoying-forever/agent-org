@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>agent-org</title>
+  <link rel="stylesheet" href="/static/xterm.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -15,9 +16,12 @@
       <button data-view="roles">Roles</button>
       <button data-view="editor">Edit team</button>
     </nav>
-    <div class="spacer"></div>
+    <div class="bar-right">
     <span id="conn" class="conn" hidden>connecting</span>
     <button id="market-btn" class="ghost" title="Browse the Role Market">Role Market</button>
+    <button id="theme-btn" class="icon-btn" title="Switch between dark and light" aria-label="Switch between dark and light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
     <button id="launch-all" hidden class="primary" title="Start every agent that is not running">Launch team</button>
     <details class="menu" id="more-menu">
       <summary class="btn">More</summary>
@@ -29,6 +33,7 @@
         <button id="stop-all" hidden class="danger" title="Stop every running agent">Stop all agents</button>
       </div>
     </details>
+    </div>
   </header>
 
   <!-- welcome: open or create a team -->
@@ -66,10 +71,24 @@
   </main>
 
   <main id="view-team" class="team-view" hidden>
+    <nav class="rail" aria-label="Team">
+      <div class="rail-head"><span>Team</span>
+        <button id="rail-add" class="icon-btn" title="Add a role from the Role Market" aria-label="Add a role">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <ul id="chart" class="rail-tree"></ul>
+      <div class="rail-foot">
+        <span id="rail-summary" class="grow"></span>
+        <button id="rail-checks" class="icon-btn" title="Setup check" aria-label="Setup check">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+        </button>
+      </div>
+    </nav>
     <section class="chart-pane">
       <div id="problems" class="problems" hidden></div>
       <div id="guide" class="guide" hidden></div>
-      <ul id="chart" class="tree"></ul>
+      <div id="panes" class="panes"></div>
     </section>
     <aside class="side">
       <div class="tabs">
@@ -257,6 +276,9 @@
   <div id="toast" class="toast" hidden></div>
   <div id="blocker" class="blocker" hidden></div>
 
+  <script src="/static/xterm.js"></script>
+  <script src="/static/addon-fit.js"></script>
+  <script src="/static/addon-unicode11.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/board.js"></script>
   <script src="/static/editor.js"></script>
