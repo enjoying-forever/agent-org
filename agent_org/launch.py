@@ -33,7 +33,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PACKAGE_ROOT / "org_hook.py"
 WINDOW = "agent-org"
 WAIT_LIMIT = 3600  # seconds a single wait_for_messages call may take; harness tool timeouts are set to this
-TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4",
+TAB_COLORS = {"claude": "#D97757", "codex": "#10A37F", "grok": "#8B8B8B", "antigravity": "#4285F4", "deepseek": "#4D6BFE",
               "owner": "#F2C94C"}
 
 
@@ -46,6 +46,11 @@ class Launch:
     env: dict[str, str] = field(default_factory=dict)
     setup: list[list[str]] = field(default_factory=list)  # commands run first, in the project folder
     cwd: Path | None = None  # where it works (branch mode: its own worktree); default the project folder
+    # A program that does one task per run (DeepSeek): `between` waits for new work after a run,
+    # then it runs again with `again` (its arguments for every run after the first).
+    between: list[str] | None = None
+    again: list[str] | None = None
+    gui: bool = False  # a windowed program (an Electron app run as Node): PowerShell waits only through a pipe
 
 
 def kickoff(role: str) -> str:
@@ -85,6 +90,8 @@ def resumable_session(hub: Hub, role: str) -> str | None:
     were trusted) and records what it finds.
     """
     spec = hub.team.roles[role]
+    if spec.harness not in sessions.RESUMABLE:  # it starts afresh each time (DeepSeek's one-task runs)
+        return None
     record = hub.store.get_session(role)
     if record is not None and record.harness == spec.harness and sessions.exists(spec.harness, record.session_id):
         own = sessions.main_session(spec.harness, record.session_id)
@@ -321,8 +328,130 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "antigravity", "agy", cli)
 
 
+# ---- DeepSeek Harness ----
+# Its terminal mode ("headless") answers one task and exits, with no hooks; agent-org's tools come
+# in through its MCP client plugin, added for each role by a patch file. Its start script runs it,
+# and after each run waits - with agent_org.wake, no model - until the role has a new message,
+# then runs it again (until the role is stopped). The desktop app's own CLI is used when it is
+# installed: its credentials file is written by the app, and an older separately installed `dsh`
+# may not read it.
+
+DSH_EFFORTS = ("off", "low", "high", "max")
+STOP_MARKER = "stopped"  # in a role's launch folder: its start script does not run it again
+
+
+def deepseek_kickoff(role: str) -> str:
+    return (f"You are the '{role}' agent in a team. Call the {SERVER_NAME} tool my_role to read your role, "
+            "the message law and where you left off, then read_inbox and list_tasks, and carry on with your "
+            "open tasks. When nothing is left to do, end your answer: agent-org starts you again when a new "
+            f"message arrives. If you have no tool called my_role (the {SERVER_NAME} tools did not load), "
+            "say so and stop: do not search the computer for it.")
+
+
+def deepseek_wake(role: str) -> str:
+    return (f"agent-org: you are the '{role}' agent and you have new messages. Call the {SERVER_NAME} tool "
+            "my_role first (your role, the law and your notes), then read_inbox and list_tasks, and handle "
+            "them. Save what you need to remember with save_notes: each start begins a new conversation. "
+            "When nothing is left to do, end your answer: agent-org starts you again when a new message arrives.")
+
+
+def deepseek_app() -> Path | None:
+    """DeepSeek Harness.exe of the installed desktop app (its uninstall entry says where), if any."""
+    override = os.environ.get("AGENT_ORG_DEEPSEEK_APP")
+    if override:
+        return Path(override) if Path(override).is_file() else None
+    if os.name != "nt":
+        return None
+    try:
+        import winreg  # noqa: PLC0415 - Windows only
+
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                base = winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Uninstall")
+            except OSError:
+                continue
+            with base:
+                for i in range(winreg.QueryInfoKey(base)[0]):
+                    try:
+                        with winreg.OpenKey(base, winreg.EnumKey(base, i)) as key:
+                            if not str(winreg.QueryValueEx(key, "DisplayName")[0]).startswith("DeepSeek Harness"):
+                                continue
+                            icon = str(winreg.QueryValueEx(key, "DisplayIcon")[0]).split(",")[0].strip('"')
+                    except OSError:
+                        continue
+                    if icon.lower().endswith(".exe") and Path(icon).is_file():
+                        return Path(icon)
+    except ImportError:
+        pass
+    return None
+
+
+def deepseek_command() -> tuple[str, list[str], dict[str, str]] | None:
+    """How to run `dsh`: the desktop app's own CLI (its exe as Node), or a `dsh` on PATH."""
+    app = deepseek_app()
+    if app is not None:
+        asar = app.parent / "resources" / "app.asar"
+        if asar.is_file():
+            cli = asar / "dsh" / "node_modules" / "@deepseek-ai" / "dsh-desktop-host" / "lib" / "cli.js"
+            return str(app), ["--expose-internals", str(cli)], {"ELECTRON_RUN_AS_NODE": "1"}
+    found = shutil.which("dsh")
+    return (found, [], {}) if found else None
+
+
+def yaml_text(value: str) -> str:
+    """A YAML single-quoted string."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def deepseek_patch(hub: Hub, team_file: Path, role: str) -> str:
+    """The patch file that gives a DeepSeek role agent-org's tools (and its model)."""
+    spec = hub.team.roles[role]
+    command, args, env = mcp_server(team_file, role)
+    env = {**env, "AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": role}
+    lines = [
+        "# agent-org: the org tools (and model) for this role. Written by agent_org.launch.",
+        "- insert:",
+        "    - id: agent-org-tools",
+        "      name: '@deepseek-ai/dsh-mcp-client'",
+        "      config:",
+        f"        serverName: {SERVER_NAME}",
+        "        transport: stdio",
+        f"        command: {yaml_text(command)}",
+        "        args: [" + ", ".join(yaml_text(a) for a in args) + "]",
+        "        env:",
+        *(f"          {k}: {yaml_text(v)}" for k, v in env.items()),
+        f"        toolCallTimeoutMs: {(WAIT_LIMIT + 120) * 1000}",
+        "        failOnStartupError: true",
+    ]
+    if spec.model or spec.effort:
+        lines += ["- id: agent-default-model", "  config:", "    provider: deepseek-official",
+                  f"    model: {yaml_text(spec.model or 'deepseek-flash')}"]
+        if spec.effort:
+            lines.append(f"    reasoningEffort: {yaml_text(spec.effort)}")
+    return "\n".join(lines) + "\n"
+
+
+def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
+                    resume: str | None = None, new_id: str | None = None) -> Launch:
+    found = deepseek_command()
+    if found is None:
+        raise HubError("DeepSeek Harness is not installed (install the desktop app, or the dsh command)")
+    command, base, env = found
+    patch_file = out / "dsh.patch.yml"
+    patch_file.write_text(deepseek_patch(hub, team_file, role), encoding="utf-8")
+    run = [*base, "--profile", "headless", "--patch", str(patch_file)]
+    between = [sys.executable, "-m", "agent_org.wake", "--team", str(team_file), "--role", role,
+               "--stop", str(out / STOP_MARKER)]
+    env = {**env, "PYTHONPATH": str(PACKAGE_ROOT)}
+    if os.environ.get("ALL_PROXY", os.environ.get("all_proxy", "")).lower().startswith("socks"):
+        env["ALL_PROXY"] = ""  # dsh cannot use a SOCKS proxy and says so on every run; it uses HTTPS_PROXY
+    return Launch(role, "deepseek", command, [*run, deepseek_kickoff(role)],
+                  env=env, between=between, again=[*run, deepseek_wake(role)],
+                  gui=command.lower().endswith(".exe"))
+
+
 BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch,
-            "antigravity": antigravity_launch}
+            "antigravity": antigravity_launch, "deepseek": deepseek_launch}
 
 
 def toml(value: object) -> str:
@@ -345,15 +474,29 @@ def ps(text: str) -> str:
     return "'" + text.replace("'", "''") + "'"
 
 
-def role_script(launch: Launch, team: Team, team_file: Path) -> str:
+def role_script(launch: Launch, team: Team, team_file: Path, stop_marker: Path | None = None) -> str:
     env = {"AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": launch.role, **launch.env}
+    wait = " | Out-Host" if launch.gui else ""  # without it, the next line would start while this one runs
+    run = f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args) + wait
+    if launch.between and launch.again is not None and stop_marker is not None:
+        # one task per run: after each run, wait (no model) for new messages, then run again; until stopped
+        marker = ps(str(stop_marker))
+        again = f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.again) + wait
+        run = "\n".join([
+            run,
+            f"while (-not (Test-Path -LiteralPath {marker})) {{",
+            "    " + " ".join(["&", *(ps(a) for a in launch.between)]),
+            "    if ($LASTEXITCODE -ne 0) { break }",
+            f"    {again}",
+            "}",
+        ])
     return "\n".join([
         f"# agent-org: role '{launch.role}' on {launch.harness}. Written by agent_org.launch; rerunning it overwrites this.",
         f"$Host.UI.RawUI.WindowTitle = {ps(launch.role)}",
         *(f"$env:{name} = {ps(value)}" for name, value in env.items()),
         f"Set-Location -LiteralPath {ps(str(launch.cwd or team.project_root))}",
         *(" ".join(["&", *(ps(a) for a in cmd), "| Out-Null"]) for cmd in launch.setup),
-        f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args),
+        run,
         "",
     ])
 
@@ -411,7 +554,8 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
     if not resume:
         hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
-    script.write_text(role_script(launch, team, team_file), encoding="utf-8")
+    (out / STOP_MARKER).unlink(missing_ok=True)  # starting it again lifts an earlier Stop
+    script.write_text(role_script(launch, team, team_file, out / STOP_MARKER), encoding="utf-8")
     title = f"{role} ({spec.tier})" if spec.is_consultant else role
     return tab_command(title, TAB_COLORS[spec.harness], cwd, script)
 
@@ -456,7 +600,7 @@ def open_tab(tab: list[str]) -> None:
     subprocess.run([wt, *tab[1:]], check=True, stdin=subprocess.DEVNULL)
 
 
-HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe"}
+HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe", "deepseek harness.exe"}
 
 
 def program_name(pid: int) -> str:
@@ -477,12 +621,18 @@ def stop_role(hub: Hub, role: str) -> int:
     can never take something else down. The tab stays open at a PowerShell prompt.
     """
     stopped = 0
-    for pid, ppid in hub.store.sessions_of(role):
+    marker = hub.team.database.parent / "launch" / role / STOP_MARKER
+    if marker.parent.is_dir():  # a program its start script runs again (DeepSeek) stays stopped
+        marker.write_text("stopped by agent-org\n", encoding="utf-8")
+    sessions = hub.store.sessions_of(role)
+    for pid, ppid in sessions:
         if ppid and program_name(ppid) in HARNESS_PROGRAMS:
             subprocess.run(["taskkill", "/PID", str(ppid), "/T", "/F"], capture_output=True, timeout=30,
                            stdin=subprocess.DEVNULL)
             stopped += 1
         hub.store.check_out(pid)
+    if sessions and role in hub.team.roles and hub.team.roles[role].harness == "deepseek":
+        stopped = 1  # one agent: a run, or its waiter between runs (which ends on the marker)
     return stopped
 
 

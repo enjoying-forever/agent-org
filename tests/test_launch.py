@@ -248,3 +248,55 @@ def test_antigravity_hooks_only_edit_tools(tmp_path):
 def test_tests_can_never_open_real_agent_tabs():
     with pytest.raises(launch.HubError, match="inside a test"):
         launch.open_tab(["wt", "new-tab", "pwsh"])
+
+
+def test_deepseek_runs_headless_with_org_tools_and_again_until_stopped(team_file, monkeypatch):
+    monkeypatch.setattr(launch, "deepseek_command", lambda: (r"C:\DSH\DeepSeek Harness.exe",
+                                                             ["--expose-internals", r"C:\DSH\cli.js"],
+                                                             {"ELECTRON_RUN_AS_NODE": "1"}))
+    config = yaml.safe_load(team_file.read_text(encoding="utf-8"))
+    config["roles"]["worker-a"].update(harness="deepseek", model="deepseek-v4-pro", effort="high")
+    team_file.write_text(yaml.safe_dump(config), encoding="utf-8")
+    hub = Hub.open(team_file)
+    try:
+        launch.role_tab(hub, team_file.resolve(), "worker-a")
+        out = team_file.parent / ".agent-org" / "launch" / "worker-a"
+        patch = yaml.safe_load((out / "dsh.patch.yml").read_text(encoding="utf-8"))
+        tools = patch[0]["insert"][0]
+        assert tools["name"] == "@deepseek-ai/dsh-mcp-client" and tools["config"]["serverName"] == "org"
+        assert tools["config"]["args"][-2:] == ["--role", "worker-a"]
+        assert tools["config"]["env"]["AGENT_ORG_ROLE"] == "worker-a"
+        assert tools["config"]["toolCallTimeoutMs"] > launch.WAIT_LIMIT * 1000  # a long wait_for_messages fits
+        assert patch[1] == {"id": "agent-default-model", "config": {
+            "provider": "deepseek-official", "model": "deepseek-v4-pro", "reasoningEffort": "high"}}
+        script = (out / "start.ps1").read_text(encoding="utf-8")
+        assert "$env:ELECTRON_RUN_AS_NODE = '1'" in script
+        assert "'--profile' 'headless' '--patch'" in script and "end your answer" in script
+        # after each run: wait for new messages without a model, then run again with the wake prompt
+        assert "'agent_org.wake'" in script and "you have new messages" in script
+        assert script.count("| Out-Host") == 2  # the app's exe is windowed: PowerShell must wait for each run
+        assert str(out / "stopped") in script and "$LASTEXITCODE -ne 0" in script
+        launch.stop_role(hub, "worker-a")
+        assert (out / "stopped").exists()
+        launch.role_tab(hub, team_file.resolve(), "worker-a")  # starting it again lifts the stop
+        assert not (out / "stopped").exists()
+        assert launch.resumable_session(hub, "worker-a") is None  # each run starts afresh
+    finally:
+        hub.close()
+
+
+
+def test_the_deepseek_waiter_wakes_on_a_message_and_ends_on_stop(team_file, tmp_path):
+    from agent_org import wake
+    hub = Hub.open(team_file)
+    try:
+        marker = tmp_path / "stopped"
+        hub.store.check_in(999999, "worker-a")  # a run that ended without checking out
+        hub.session("leader").send("worker-a", "please start")
+        assert wake.wait_for_work(hub, "worker-a", marker, poll=0.01) == 0  # something new: run again
+        assert hub.store.online().get("worker-a", 0) == 0  # it checked out again, and the leftover is gone
+        hub.session("worker-a").read_inbox()
+        marker.write_text("stopped")
+        assert wake.wait_for_work(hub, "worker-a", marker, poll=0.01) == wake.STOPPED
+    finally:
+        hub.close()

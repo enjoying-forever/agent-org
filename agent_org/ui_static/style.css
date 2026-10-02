@@ -33,6 +33,7 @@
   --codex: #10b981;
   --grok: #b9bec8;
   --antigravity: #818cf8;
+  --deepseek: #6b8cff;
   --owner: #e7e9ee;
 
   --instruction: #60a5fa;
@@ -78,6 +79,7 @@
   --codex: #0b8f63;
   --grok: #5d636d;
   --antigravity: #5b63e6;
+  --deepseek: #3d5afe;
   --owner: #15171c;
   --instruction: #2563eb;
   --report: #16a36b;
@@ -359,6 +361,7 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
 .h-codex { --harness: var(--codex); }
 .h-grok { --harness: var(--grok); }
 .h-antigravity { --harness: var(--antigravity); }
+.h-deepseek { --harness: var(--deepseek); }
 .tag { display: inline-block; font-size: 12px; background: var(--sheet-2); border: 1px solid var(--edge); border-radius: 5px; padding: 0 7px; color: var(--muted); line-height: 19px; }
 
 .state { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--state, var(--idle)); }

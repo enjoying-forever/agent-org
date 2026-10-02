@@ -57,7 +57,9 @@ EFFORTS = {
     "codex": ["minimal", "low", "medium", "high", "xhigh"],
     "grok": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     "antigravity": ["low", "medium", "high"],
+    "deepseek": list(launch.DSH_EFFORTS),
 }
+DEEPSEEK_MODELS = ["deepseek-flash", "deepseek-v4-pro"]  # what its API accepts
 CLAUDE_MODELS = ["opus", "sonnet", "fable", "haiku", "claude-opus-5-5", "claude-sonnet-5",
                  "claude-fable-5-1", "claude-haiku-4-5"]
 
@@ -72,7 +74,8 @@ class ModelCatalog:
     """Asks each installed harness which models it offers, once, in the background."""
 
     def __init__(self, load: bool = True) -> None:
-        self.models: dict[str, list[str]] = {"claude": CLAUDE_MODELS, "codex": [], "grok": [], "antigravity": []}
+        self.models: dict[str, list[str]] = {"claude": CLAUDE_MODELS, "codex": [], "grok": [], "antigravity": [],
+                                             "deepseek": DEEPSEEK_MODELS}
         if load:
             threading.Thread(target=self._load, daemon=True).start()
 

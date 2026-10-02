@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 import subprocess
@@ -113,6 +114,27 @@ def check_antigravity(harnesses: set[str]) -> list[Check]:
     return checks
 
 
+def check_deepseek(harnesses: set[str]) -> Check:
+    """DeepSeek Harness: the desktop app's own CLI (or a dsh on PATH) starts."""
+    from .launch import deepseek_command  # noqa: PLC0415 - launch imports the hub; keep doctor light
+
+    found = deepseek_command()
+    needed = "deepseek" in harnesses
+    if found is None:
+        return Check("DeepSeek Harness", False, "not installed",
+                     "Install the DeepSeek Harness desktop app and sign in once.", needed)
+    command, base, env = found
+    try:
+        r = subprocess.run([command, *base, "--version"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=40, stdin=subprocess.DEVNULL, env={**os.environ, **env})
+        code, out = r.returncode, (r.stdout + r.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        code, out = -1, str(e)
+    if code != 0:
+        return Check("DeepSeek Harness", False, f"installed but does not start: {first_line(out)}", "", needed)
+    return Check("DeepSeek Harness", True, f"dsh {first_line(out)}", "", needed)
+
+
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:
     """All checks, in parallel. `harnesses`: the ones the open team uses (all if None)."""
     used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}  # agy: only if used
@@ -124,9 +146,10 @@ def run_checks(harnesses: set[str] | None = None) -> list[Check]:
               "found" if shutil.which("pwsh") else "not found",
               "Install it: winget install Microsoft.PowerShell"),
     ]
-    with ThreadPoolExecutor(4) as pool:
+    with ThreadPoolExecutor(5) as pool:
         claude = pool.submit(check_claude, used)
         codex = pool.submit(check_codex, used)
         grok = pool.submit(check_grok, used)
         antigravity = pool.submit(check_antigravity, used)
-        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result()]
+        deepseek = pool.submit(check_deepseek, used)
+        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result(), deepseek.result()]

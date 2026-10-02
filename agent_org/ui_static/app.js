@@ -403,8 +403,8 @@ const iconBtn = (name, title, onclick, cls = '') =>
 
 // ---------- the team rail ----------
 
-const PROGRAM = { claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok', antigravity: 'Antigravity' };
-const GLYPH = { claude: 'C', codex: 'X', grok: 'G', antigravity: 'A' };
+const PROGRAM = { claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok', antigravity: 'Antigravity', deepseek: 'DeepSeek Harness' };
+const GLYPH = { claude: 'C', codex: 'X', grok: 'G', antigravity: 'A', deepseek: 'D' };
 const glyph = (harness) => h('span', { class: `hglyph h-${harness}`, title: PROGRAM[harness] || harness }, GLYPH[harness] || '?');
 
 /** Roles in tree order: the leader first, then down the team. */
@@ -614,7 +614,7 @@ function termTheme() {
 
 // Programs that show only their finished answers in the terminal (Antigravity runs in print mode:
 // that is the only way it loads agent-org's tools). Their pane adds a strip with what they are doing.
-const QUIET_PROGRAMS = ['antigravity'];
+const QUIET_PROGRAMS = ['antigravity', 'deepseek'];
 
 function openTerm(p, r) {
   if (p.mode === 'term' && p.term) return;

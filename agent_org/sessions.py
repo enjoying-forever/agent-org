@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
+RESUMABLE = ("claude", "codex", "grok", "antigravity")  # harnesses whose conversations a start resumes
 CAN_CHOOSE_ID = ("claude", "grok")  # these accept an id for a new conversation; Codex picks its own
 SCAN_BYTES = 400_000  # how far into a conversation file to look for the role's first prompt
 SCAN_DAYS = 45  # how old a Codex conversation may be to still be found by searching

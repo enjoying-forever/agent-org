@@ -95,6 +95,22 @@ itself was started from.
 - Without `pywinpty`, or with the environment variable `AGENT_ORG_TABS=1`, agents open in
   Windows Terminal tabs as before, and keep running when agent-org closes.
 
+### DeepSeek Harness
+
+A role can run on **DeepSeek Harness** (`harness: deepseek`, models `deepseek-flash` or
+`deepseek-v4-pro`, reasoning effort `off`, `low`, `high` or `max`). Install the DeepSeek Harness
+desktop app and sign in once; agent-org uses the app's own `dsh` (found through its Windows
+install entry; `AGENT_ORG_DEEPSEEK_APP` points to another `DeepSeek Harness.exe`).
+
+DeepSeek's terminal mode works one task and exits, and has no hooks, so a DeepSeek agent works
+in runs: its start script runs it, then waits - without a model, at no cost - until it has a new
+message (a task arrives as one), and runs it again. Each run starts a new conversation that
+begins with its role, notes, inbox and tasks; it keeps what it must remember with `save_notes`.
+It gets agent-org's tools through DeepSeek's MCP client plugin, added for that role by a patch
+file (your own DeepSeek settings are not changed). *Stop* ends the run or the wait, and it stays
+stopped until you start it again. Like Antigravity, it prints only finished answers, so its pane
+shows a strip with what it is doing.
+
 ## The message law
 
 Every agent works under these rules; the hub enforces them and reminds agents of

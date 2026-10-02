@@ -79,6 +79,14 @@ BUILT_IN: dict[str, dict[str, Any]] = {
                         "short summary.",
         "write_scope": ["research/*"],
     },
+    "deepseek-coder": {
+        "title": "Coder (DeepSeek)", "icon": "🐋", "tags": ["code"],
+        "description": "A coder on DeepSeek Harness, for parallel work on your DeepSeek account.",
+        "harness": "deepseek", "model": "deepseek-flash",
+        "duties": "Implement the tasks you are given, check that they work, and report back.",
+        "instructions": "Keep each change as small as the task allows, and run what you changed before you finish.",
+        "write_scope": ["*"],
+    },
     "gemini-coder": {
         "title": "Coder (Gemini)", "icon": "✨", "tags": ["code"],
         "description": "A second coder on your Google plan, for parallel work.",
