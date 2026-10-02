@@ -773,3 +773,16 @@ button.taskc { text-align: left; cursor: pointer; }
 .keys td { padding: 6px 12px 6px 0; vertical-align: top; }
 kbd { font: 12px var(--font-code); background: var(--well); border: 1px solid var(--rule); border-bottom-width: 2px;
   border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+
+/* an agent asking you something in its terminal */
+.pane.asking { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal), 0 0 26px -8px var(--signal); }
+.rail-item.asking .run-dot { background: var(--signal); box-shadow: 0 0 8px var(--signal); }
+.problem.asking .picon { background: var(--signal-wash); color: var(--signal); }
+
+/* moving a pane by its title */
+.pane-head[draggable="true"] { cursor: grab; }
+body.moving-pane, body.moving-pane * { cursor: grabbing !important; }
+.pane.drop-here { outline: 2px dashed var(--accent); outline-offset: -5px; }
+
+.close-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.close-choices button { text-align: left; padding: 9px 14px; }

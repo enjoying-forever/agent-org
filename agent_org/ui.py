@@ -27,7 +27,9 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -160,6 +162,7 @@ class App:
         self.in_window = (terminals.available() and not os.environ.get("AGENT_ORG_TABS")
                           and not os.environ.get("PYTEST_CURRENT_TEST"))
         self._hosts: dict[Path, terminals.TerminalHost] = {}  # one per team: switching teams keeps them running
+        self.window = WindowControl()
         if watch:
             threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
         if team_file is not None:
@@ -306,6 +309,22 @@ class App:
         if self._hub is not None:
             self._hub.close()
         self._hub = self.team_file = None
+
+    def live_agents(self) -> list[str]:
+        """Agents running in this window's terminals, in any team."""
+        return [name for host in self._hosts.values() for name, t in host.listing().items() if t["alive"]]
+
+    def window_action(self, body: dict[str, Any]) -> dict[str, Any]:
+        action = _str(body, "action")
+        if action == "hide":
+            self.window.hide()
+        elif action == "quit":
+            self.window.quit()
+        elif action == "show":
+            self.window.show()
+        else:
+            raise ApiError("action must be hide, quit or show")
+        return {}
 
     def shutdown(self) -> None:
         """agent-org is ending: its agents' terminals end with it."""
@@ -771,6 +790,7 @@ POST_ROUTES = {
     "/api/role-delete": App.delete_preset, "/api/role-import": App.role_import, "/api/role-place": App.role_place,
     "/api/role-reset": App.role_reset, "/api/role-restore": App.role_restore,
     "/api/term-input": App.term_input, "/api/term-resize": App.term_resize, "/api/open-url": App.open_url,
+    "/api/window": App.window_action,
 }
 
 
@@ -788,6 +808,46 @@ SECURITY_HEADERS = {
     "Cross-Origin-Resource-Policy": "same-origin",
     "Cache-Control": "no-store",
 }
+
+
+LAUNCHER_HEADER = "X-Agent-Org-Launcher"
+
+
+class WindowControl:
+    """agent-org's window: hidden while its agents run in the background, shown again when the
+    owner starts agent-org a second time (that launcher holds `launcher`, a secret good for
+    nothing but asking to be shown), and closed for good."""
+
+    def __init__(self) -> None:
+        self.window = None  # the pywebview window, when there is one
+        self.launcher = secrets.token_urlsafe(32)
+        self.quitting = False
+        self.sign_in: Callable[[], str] | None = None  # a fresh sign-in link, for the browser
+
+    def show(self) -> str:
+        if self.window is None:
+            if self.sign_in is not None:
+                webbrowser.open(self.sign_in())
+            return "browser"
+        self.window.show()
+        try:
+            self.window.restore()  # if it was minimized
+        except Exception:  # noqa: BLE001 - not minimized, or not supported
+            pass
+        return "window"
+
+    def hide(self) -> None:
+        if self.window is None:
+            raise ApiError("agent-org is not running in a window.")
+        self.window.hide()
+        print("agent-org keeps running in the background with its agents. "
+              "Start agent-org again (agent-org-ui.cmd) to bring the window back.", flush=True)
+
+    def quit(self) -> None:
+        if self.window is None:
+            raise ApiError("agent-org is not running in a window.")
+        self.quitting = True
+        self.window.destroy()
 
 
 class Access:
@@ -856,14 +916,17 @@ def make_handler(app: App, access: Access, port_holder: list[int]) -> type[BaseH
 
         def _send(self, status: HTTPStatus, body: bytes, content_type: str,
                   extra: dict[str, str] | None = None) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            for name, value in {**SECURITY_HEADERS, **(extra or {})}.items():
-                self.send_header(name, value)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                for name, value in {**SECURITY_HEADERS, **(extra or {})}.items():
+                    self.send_header(name, value)
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self.close_connection = True  # the page went away (closed, reloaded) while it waited
 
         def _json(self, status: HTTPStatus, data: Any) -> None:
             self._send(status, json.dumps(data, ensure_ascii=False).encode("utf-8"),
@@ -934,7 +997,12 @@ def make_handler(app: App, access: Access, port_holder: list[int]) -> type[BaseH
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": "body must be JSON"})
             if not isinstance(body, dict):
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": "body must be a JSON object"})
-            self._api(POST_ROUTES, urlparse(self.path).path, body)
+            path = urlparse(self.path).path
+            if path == "/api/launcher/show":  # agent-org started again: show this one's window instead
+                if not secrets.compare_digest(self.headers.get(LAUNCHER_HEADER, ""), app.window.launcher):
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "not this agent-org's launcher"})
+                return self._json(HTTPStatus.OK, {"shown": app.window.show()})
+            self._api(POST_ROUTES, path, body)
 
         def do_PUT(self) -> None:
             self._send(HTTPStatus.METHOD_NOT_ALLOWED, b"not allowed", "text/plain", {"Allow": "GET, HEAD, POST"})
@@ -985,10 +1053,12 @@ def window_geometry(state: dict[str, Any], screens: list[tuple[int, int, int, in
     return geo
 
 
-def open_window(url: str) -> None:
+def open_window(url: str, control: WindowControl | None = None,
+                live_agents: Callable[[], list[str]] = list) -> None:
     """Show agent-org in a window of its own (Windows' WebView2, through pywebview), until it is
-    closed, where and as big as it was last time. Raises ImportError or RuntimeError when there is
-    no such window to be had."""
+    closed, where and as big as it was last time. Closing it while agents run asks first (keep them
+    running in the background, or stop them). Raises ImportError or RuntimeError when there is no
+    such window to be had."""
     import webview  # noqa: PLC0415 - optional: without it, agent-org opens in the browser
 
     state = load_window_state()
@@ -997,7 +1067,9 @@ def open_window(url: str) -> None:
     except Exception:  # noqa: BLE001 - no screen list: keep the size, let Windows place it
         screens = []
     window = webview.create_window("agent-org", url, min_size=(900, 600), background_color="#0B0C0F",
-                                   confirm_close=True, text_select=True, **window_geometry(state, screens))
+                                   text_select=True, **window_geometry(state, screens))
+    control = control or WindowControl()
+    control.window = window
 
     def resized(width: int, height: int) -> None:
         if not state.get("maximized"):
@@ -1018,12 +1090,46 @@ def open_window(url: str) -> None:
     window.events.moved += moved
     window.events.maximized += lambda: state.update(maximized=True)
     window.events.restored += lambda: state.update(maximized=False)
-    window.events.closing += save
+    def ask() -> None:
+        """The page asks (keep running, stop and quit, or cancel); without a page, Windows does."""
+        try:
+            asked = window.evaluate_js("typeof askClose === 'function' ? (askClose(), 'asked') : 'no page'")
+        except Exception:  # noqa: BLE001 - the page is not there
+            asked = None
+        if asked != "asked" and window.create_confirmation_dialog(
+                "Close agent-org?", "Agents are running in its terminals. Stop them and close agent-org? "
+                                    "(Their conversations are kept: Start resumes them.)"):
+            control.quit()
+
+    def closing() -> bool:
+        save()
+        if control.quitting or not live_agents():
+            return True
+        threading.Thread(target=ask, daemon=True).start()  # never wait for the page inside this event
+        return False  # stays open until the owner chooses
+
+    window.events.closing += closing
     storage = templates.home_dir() / "window"
     storage.mkdir(parents=True, exist_ok=True)
-    webview.start(private_mode=False, storage_path=str(storage), localization={
-        "global.quitConfirmation": "Close agent-org? Agents running in its terminals stop too; "
-                                   "their conversations are kept, and Start resumes them."})
+    webview.start(private_mode=False, storage_path=str(storage))
+
+
+def instance_file() -> Path:
+    """Where a running agent-org says how a second launcher can reach it."""
+    return templates.home_dir() / "instance.json"
+
+
+def show_running(timeout: float = 3.0) -> bool:
+    """Ask an agent-org that is already running to show its window. True if one did."""
+    try:
+        info = json.loads(instance_file().read_text(encoding="utf-8"))
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{int(info['port'])}/api/launcher/show", data=b"{}", method="POST",
+            headers={"Content-Type": "application/json", LAUNCHER_HEADER: str(info["launcher"])})
+        with urllib.request.urlopen(req, timeout=timeout) as res:  # noqa: S310 - our own local server
+            return res.status == 200
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1034,6 +1140,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-browser", action="store_true", help="open nothing; print the sign-in link")
     args = parser.parse_args(argv)
     team_file = Path(args.team).resolve() if args.team else None
+    if not args.no_browser and show_running():
+        print("agent-org is already running: its window is back in front.")
+        return 0
     try:
         server, app, token = serve(team_file, args.port)
     except TeamError as e:
@@ -1054,12 +1163,19 @@ def main(argv: list[str] | None = None) -> int:
 
     threading.Thread(target=new_links, daemon=True).start()
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    app.window.sign_in = lambda: f"{base}?code={token.new_code()}"
+    try:
+        instance_file().parent.mkdir(parents=True, exist_ok=True)
+        instance_file().write_text(json.dumps({"pid": os.getpid(), "port": server.server_address[1],
+                                               "launcher": app.window.launcher}), encoding="utf-8")
+    except OSError:
+        pass
     try:
         if not args.browser and not args.no_browser:
-            print("Its window is open. Closing the window ends agent-org and the agents in its terminals.")
+            print("Its window is open. Closing it with agents running asks whether to keep them running.")
             print("Press Enter here for a sign-in link, to open it in a browser too.")
             try:
-                open_window(f"{base}?code={token.new_code()}")
+                open_window(f"{base}?code={token.new_code()}", app.window, app.live_agents)
                 return 0
             except Exception as e:  # noqa: BLE001 - no WebView2 or pywebview: the browser still works
                 print(f"cannot open a window ({e}); opening the browser instead", file=sys.stderr)
@@ -1077,6 +1193,11 @@ def main(argv: list[str] | None = None) -> int:
         server.shutdown()
         server.server_close()
         app.shutdown()
+        try:
+            if json.loads(instance_file().read_text(encoding="utf-8")).get("pid") == os.getpid():
+                instance_file().unlink()
+        except (OSError, ValueError):
+            pass
     return 0
 
 

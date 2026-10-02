@@ -247,9 +247,9 @@ $('#board-role').addEventListener('change', renderBoard);
 
 // ---------- problems ----------
 
-const PROBLEM_ICON = { stopped: '⏸', stuck: '⟳', limit: '⌛', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
+const PROBLEM_ICON = { asking: '?', stopped: '⏸', stuck: '⟳', limit: '⌛', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
 
-const NOTIFY_KINDS = ['limit', 'stuck', 'loop', 'duplicate'];  // the rest already arrive as messages
+const NOTIFY_KINDS = ['limit', 'stuck', 'loop', 'duplicate', 'asking'];  // the rest already arrive as messages
 
 /** A desktop notification when an agent runs out of usage, gets stuck, or loops - once each. */
 function notifyProblems(list) {
@@ -263,7 +263,7 @@ function notifyProblems(list) {
 }
 
 function renderProblems() {
-  const list = S.state.problems;
+  const list = [...S.state.problems, ...askingProblems()];
   notifyProblems(list);
   const box = $('#problems');
   box.hidden = !list.length;
@@ -291,6 +291,7 @@ function problemAction(p) {
   if (p.action === 'restart') return btn('Restart', () => restartRole(p.role));
   if (p.action === 'reassign') return btn('Move its tasks', () => openMoveTasks(p.role));
   if (p.action === 'open-task') return btn('Open', () => openTask(p.task_id));
+  if (p.action === 'show-pane') return btn('Show', () => { $('#attention').hidden = true; showView('team'); goToPane(p.role); });
   return null;
 }
 

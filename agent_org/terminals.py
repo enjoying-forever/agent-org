@@ -137,6 +137,7 @@ class Terminal:
         exe = shutil.which(argv[0], path=env.get("PATH") or env.get("Path")) or exe
         self.proc = PtyProcess.spawn([exe, *argv[1:]], cwd=str(cwd), env=env, dimensions=(rows, cols))
         self.started = time.time()
+        self.last_output = self.started
         self._buf = ""
         self._start = 0  # where _buf begins in the whole output
         self._cond = threading.Condition()
@@ -163,6 +164,7 @@ class Terminal:
                 continue
             with self._cond:
                 self._buf += data
+                self.last_output = time.time()
                 if len(self._buf) > KEEP:
                     cut = len(self._buf) - KEEP
                     self._buf, self._start = self._buf[cut:], self._start + cut
@@ -269,4 +271,5 @@ class TerminalHost:
 
     def listing(self) -> dict[str, dict[str, object]]:
         with self._lock:
-            return {n: {"id": t.id, "alive": t.alive, "title": t.title, "color": t.color} for n, t in self._terms.items()}
+            terms = dict(self._terms)
+        return {n: {"id": t.id, "alive": t.alive, "title": t.title, "color": t.color} for n, t in terms.items()}

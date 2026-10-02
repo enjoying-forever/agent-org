@@ -423,7 +423,8 @@ function renderChart() {
     const count = r.unread || r.open_tasks;
     return h('li', {},
       h('button', {
-        class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`,
+        class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`
+          + `${PANES.get(r.name)?.asking ? ' asking' : ''}`,
         style: { paddingLeft: `${8 + depth * 14}px` },
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
@@ -462,7 +463,7 @@ function renderPanes() {
   const st = S.state;
   if (!st) return;
   if (L.team !== st.team_file) loadLayout(st.team_file);
-  const order = teamOrder();
+  const order = arrangeOrder(teamOrder());
   const box = $('#panes');
   const names = new Set(order.map((r) => r.name));
   for (const [name, p] of PANES) if (!names.has(name)) { dropPane(p); PANES.delete(name); }
@@ -486,6 +487,7 @@ function makePane(name) {
   p.el = h('section', { class: 'pane', 'data-role': name, onclick: () => { if (S.focus !== name) focusPane(name); } },
     p.head, p.body, p.foot);
   p.head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleMax(name); });
+  dragPanes(p);
   return p;
 }
 
@@ -505,7 +507,8 @@ function updatePane(p, r) {
   const launchable = st.launchable.includes(r.harness);
   const live = st.in_window && r.terminal;
   p.el.className = ['pane', `h-${r.harness}`, r.name === st.leader && 'wide', r.tier && 'consultant',
-    S.focus === r.name && 'focus', live && 'live', p.outputting && 'outputting'].filter(Boolean).join(' ');
+    S.focus === r.name && 'focus', live && 'live', p.outputting && 'outputting', live && p.asking && 'asking',
+  ].filter(Boolean).join(' ');
   fill(p.head,
     runningDot(r), glyph(r.harness), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
@@ -691,6 +694,42 @@ function markOutput(p) {
   p.el.classList.add('outputting');
   clearTimeout(p.outputTimer);
   p.outputTimer = setTimeout(() => { p.outputting = false; p.el.classList.remove('outputting'); }, 1500);
+  checkAsking(p);
+}
+
+// What a program waiting for its user shows: a permission question, the trust question at the
+// first start, a yes/no. Read from the screen as it is now, once the terminal has gone quiet.
+const ASKING = new RegExp(['do you want to', 'would you like to', 'do you trust',
+  'trust (?:this|the) (?:folder|directory|files)', 'allow (?:this|command|once|always)', '\\[y/n\\]', '\\(y/n\\)',
+  'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');
+const QUIET_MS = 2500;
+
+function screenText(term) {
+  const b = term.buffer.active;
+  const lines = [];
+  for (let i = b.viewportY; i < b.viewportY + term.rows; i += 1) {
+    const line = b.getLine(i);
+    if (line) lines.push(line.translateToString(true));
+  }
+  return lines.join('\n');
+}
+
+function checkAsking(p) {
+  clearTimeout(p.askTimer);
+  p.askTimer = setTimeout(() => {
+    const asking = Boolean(p.term) && ASKING.test(screenText(p.term));
+    if (asking === Boolean(p.asking)) return;
+    p.asking = asking;
+    p.el.classList.toggle('asking', asking);
+    if (S.state) { renderChart(); renderProblems(); }
+  }, QUIET_MS);
+}
+
+/** Agents whose terminal shows a question: they wait for you, in "Needs you". */
+function askingProblems() {
+  return [...PANES.values()].filter((p) => p.asking && p.term).map((p) => ({
+    kind: 'asking', role: p.name, action: 'show-pane', text: `${p.name} is asking something in its terminal: answer it there.`,
+  }));
 }
 
 function closeTerm(p) {
@@ -778,7 +817,7 @@ async function termLoop() {
       }
       if (t.data && replay) {
         p.replaying = true;
-        p.term.write(t.data, () => { p.replaying = false; });
+        p.term.write(t.data, () => { p.replaying = false; checkAsking(p); });
       } else if (t.data) {
         p.term.write(t.data);
         markOutput(p);

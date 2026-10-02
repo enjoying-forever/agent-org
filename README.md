@@ -8,8 +8,9 @@ with the subscription you already have, and you watch, type to and steer all of 
 ## Quick start
 
 1. **Double-click `agent-org-ui.cmd`.** The agent-org window opens. (Keep the small black
-   window open too; closing agent-org ends the agents running in it. Their conversations are
-   kept, and *Start* resumes them.)
+   window open too.) Closing the window while agents run asks: keep them running in the
+   background (double-click `agent-org-ui.cmd` again to bring the window back), or stop them
+   (their conversations are kept, and *Start* resumes them).
 2. **Create a team.** Choose the project folder the agents should work in, pick a
    starting team (Solo, Leader and worker, or Full team) and click *Create team*.
    The *Setup* check on the same page tells you if Claude, Codex or Grok needs fixing.
@@ -47,7 +48,9 @@ agent carries on where it stopped.
   and the edges of the team list and the messages, or hide either with the buttons at the
   top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
   agent keeps running; click it in the team list to bring the pane back). *Needs you* at
-  the top lists what is waiting for you. The arrangement is remembered for each team, and the
+  the top lists what is waiting for you - including an agent whose terminal is asking
+  something (a permission, "trust this folder?"): its pane turns amber until you answer. Drag a
+  pane by its title onto another to swap them. The arrangement is remembered for each team, and the
   window comes back where and as big as it was.
 - **In a terminal:** Ctrl+C copies when text is selected (otherwise it interrupts the agent),
   Ctrl+V pastes, right-click copies or pastes, and links open in your browser. A pane's program

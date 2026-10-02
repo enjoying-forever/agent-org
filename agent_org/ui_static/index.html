@@ -288,6 +288,18 @@
     </form>
   </dialog>
 
+  <dialog id="close-dialog">
+    <form method="dialog">
+      <h2>Close agent-org?</h2>
+      <p class="muted" id="close-sub" style="margin:0"></p>
+      <div class="close-choices">
+        <button value="hide" class="primary">Keep them running in the background</button>
+        <button value="quit" class="danger">Stop them and quit</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" hidden></div>
   <div id="blocker" class="blocker" hidden></div>
 

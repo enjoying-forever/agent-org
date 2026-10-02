@@ -129,3 +129,42 @@ def test_the_window_comes_back_where_it_was():
         "width": 1200, "height": 800, "maximized": True, "x": 100, "y": 50}
     assert "x" not in window_geometry({"x": 3000, "y": 50}, screens)  # that monitor is gone
     assert window_geometry({"width": 300, "height": 200}, screens)["width"] == 900  # never below the minimum
+
+
+class FakeWindow:
+    def __init__(self):
+        self.calls = []
+
+    def show(self):
+        self.calls.append("show")
+
+    def restore(self):
+        self.calls.append("restore")
+
+    def hide(self):
+        self.calls.append("hide")
+
+    def destroy(self):
+        self.calls.append("destroy")
+
+
+def test_the_window_hides_with_agents_running_and_a_second_start_brings_it_back(server):  # noqa: F811
+    from agent_org import ui
+    app = server.app
+    assert server.request("/api/window", {"action": "hide"})[0] == 400  # no window in this test server
+    window = app.window.window = FakeWindow()
+    server.ok("/api/window", {"action": "hide"})
+    assert window.calls == ["hide"]
+    # a second agent-org start finds this one and asks for its window, with the launcher secret only
+    ui.instance_file().parent.mkdir(parents=True, exist_ok=True)
+    port = int(server.base.rsplit(":", 1)[1])
+    ui.instance_file().write_text(f'{{"pid": 1, "port": {port}, "launcher": "{app.window.launcher}"}}', encoding="utf-8")
+    assert ui.show_running()
+    assert window.calls[-2:] == ["show", "restore"]
+    ui.instance_file().write_text(f'{{"pid": 1, "port": {port}, "launcher": "guess"}}', encoding="utf-8")
+    assert not ui.show_running()  # a wrong secret gets nothing
+    status, _ = server.request("/api/launcher/show", {}, token=None)
+    assert status == 403
+    server.ok("/api/window", {"action": "quit"})
+    assert app.window.quitting and window.calls[-1] == "destroy"
+    assert server.request("/api/window", {"action": "explode"})[0] == 400

@@ -18,7 +18,7 @@ function loadLayout(team) {
   try { saved = JSON.parse(localStorage.getItem(`agent-org-layout:${team}`) || '{}'); } catch { /* defaults */ }
   const narrow = innerWidth < 1100;
   Object.assign(L, {
-    team, mode: 'grid', hidden: [], max: null, main: null, cols: {}, rows: {},
+    team, mode: 'grid', hidden: [], max: null, main: null, order: [], cols: {}, rows: {},
     rail: !narrow, side: !narrow, railW: 236, sideW: 400, ...saved,
   });
   L.max = null; // full screen never survives a reload
@@ -194,6 +194,61 @@ function dragEdge(e) {
   document.addEventListener('pointerup', up);
 }
 
+// ---------- moving panes: drag one by its title onto another to swap them ----------
+
+const PANE_DRAG = 'application/x-agent-org-pane';
+
+/** The team's roles in the order you arranged their panes (new ones at the end). */
+function arrangeOrder(roles) {
+  if (!L.order?.length) return roles;
+  const rank = (r) => {
+    const i = L.order.indexOf(r.name);
+    return i < 0 ? L.order.length + roles.indexOf(r) : i;
+  };
+  return [...roles].sort((a, b) => rank(a) - rank(b));
+}
+
+function swapPanes(a, b) {
+  const names = [...$('#panes').children].filter((el) => el.classList.contains('pane')).map((el) => el.dataset.role);
+  const i = names.indexOf(a);
+  const k = names.indexOf(b);
+  if (i < 0 || k < 0 || i === k) return;
+  [names[i], names[k]] = [names[k], names[i]];
+  L.order = names;
+  if (L.mode === 'focus' && (a === mainPane() || b === mainPane())) L.main = a === mainPane() ? b : a;
+  saveLayout();
+  renderPanes();
+}
+
+function dragPanes(p) {
+  p.head.draggable = true;
+  p.head.title = 'Drag onto another pane to swap them; double-click for full screen';
+  p.head.addEventListener('dragstart', (e) => {
+    if (L.max) { e.preventDefault(); return; }
+    e.dataTransfer.setData(PANE_DRAG, p.name);
+    e.dataTransfer.effectAllowed = 'move';
+    document.body.classList.add('moving-pane');
+  });
+  p.head.addEventListener('dragend', () => {
+    document.body.classList.remove('moving-pane');
+    document.querySelectorAll('.pane.drop-here').forEach((el) => el.classList.remove('drop-here'));
+  });
+  p.el.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes(PANE_DRAG)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    p.el.classList.add('drop-here');
+  });
+  p.el.addEventListener('dragleave', (e) => { if (!p.el.contains(e.relatedTarget)) p.el.classList.remove('drop-here'); });
+  p.el.addEventListener('drop', (e) => {
+    const from = e.dataTransfer.getData(PANE_DRAG);
+    p.el.classList.remove('drop-here');
+    if (!from) return;
+    e.preventDefault();
+    if (from !== p.name) swapPanes(from, p.name);
+  });
+}
+
 // ---------- the pane controls ----------
 
 function toggleMax(name) {
@@ -256,6 +311,8 @@ function renderLayoutMenu() {
     h('hr'),
     h('button', { onclick: () => { L.cols = {}; L.rows = {}; saveLayout(); applyLayout(); $('#layout-menu').open = false; } },
       h('span', { class: 'check' }), 'Equal sizes'),
+    h('button', { disabled: !L.order?.length && !L.main, onclick: () => { L.order = []; L.main = null; saveLayout(); renderPanes(); $('#layout-menu').open = false; } },
+      h('span', { class: 'check' }), 'Team order'),
     h('button', { disabled: !L.hidden?.length, onclick: () => { showAllPanes(); $('#layout-menu').open = false; } },
       h('span', { class: 'check' }), L.hidden?.length ? `Show closed panes (${L.hidden.length})` : 'No closed panes'));
 }
@@ -264,7 +321,7 @@ function renderLayoutMenu() {
 
 function updateAttention() {
   const btn = $('#attention-btn');
-  const problems = S.state?.problems?.length || 0;
+  const problems = (S.state?.problems?.length || 0) + askingProblems().length;
   const guide = !$('#guide').hidden;
   btn.hidden = S.mode !== 'team' || (!problems && !guide);
   btn.classList.toggle('warn', problems > 0);
@@ -346,3 +403,19 @@ document.addEventListener('keydown', (e) => {
 
 $('#keys-btn').addEventListener('click', () => showInfo('Keyboard shortcuts',
   h('table', { class: 'keys' }, SHORTCUTS.map(([k, what]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, what))))));
+
+// ---------- closing the window while agents run (agent-org asks the page) ----------
+
+function askClose() {
+  const running = (S.state?.roles || []).filter((r) => r.terminal?.alive).map((r) => r.name);
+  const who = running.length ? `${running.join(', ')} ${running.length === 1 ? 'is' : 'are'}` : 'Agents are';
+  $('#close-sub').textContent = `${who} running in this window. In the background they keep working, and starting `
+    + 'agent-org again brings the window back. Stopped, they keep their conversations: Start resumes them.';
+  $('#close-dialog').returnValue = '';
+  $('#close-dialog').showModal();
+}
+
+$('#close-dialog').addEventListener('close', () => {
+  const choice = $('#close-dialog').returnValue;
+  if (choice === 'hide' || choice === 'quit') api('/api/window', { action: choice }).catch((e) => toast(e.message, true));
+});
