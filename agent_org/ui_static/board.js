@@ -307,6 +307,7 @@ async function refreshActivity() {
     for (const e of events) { A.events.push(e); A.last = Math.max(A.last, e.id); }
     A.events = A.events.slice(-400);
     renderActivity();
+    if (events.length && S.state) renderPanes(); // the progress strips of quiet programs
   } catch { /* next time */ }
 }
 

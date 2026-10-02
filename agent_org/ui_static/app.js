@@ -518,8 +518,7 @@ function updatePane(p, r) {
     launchable && r.online > 0 && iconBtn('stop', `Stop ${r.name}`, () => stopRoles(r.name), 'danger'),
     iconBtn('more', 'Details, tasks and files', () => openDrawer(r.name)),
     windowButtons(r.name));
-  if (live) openTerm(p);
-  else { closeTerm(p); renderSummary(p, r); }
+  if (live) { openTerm(p, r); renderProgress(p, r); } else { closeTerm(p); renderSummary(p, r); }
   fill(p.foot,
     h('span', { class: r.online > 1 ? 'bad' : '' }, !r.online ? 'stopped' : r.online > 1 ? `${r.online} sessions!` : 'running'),
     h('span', {}, modelLine(r)),
@@ -609,12 +608,20 @@ function termTheme() {
     selectionBackground: 'rgba(59, 130, 246, 0.35)' };
 }
 
-function openTerm(p) {
+// Programs that show only their finished answers in the terminal (Antigravity runs in print mode:
+// that is the only way it loads agent-org's tools). Their pane adds a strip with what they are doing.
+const QUIET_PROGRAMS = ['antigravity'];
+
+function openTerm(p, r) {
   if (p.mode === 'term' && p.term) return;
   if (typeof Terminal === 'undefined') { p.mode = ''; return; } // the terminal script did not load
   p.mode = 'term';
   const host = h('div', { class: 'xterm-host' });
-  p.body.replaceChildren(host);
+  p.feed = QUIET_PROGRAMS.includes(r.harness)
+    ? h('div', { class: 'pane-feed', title: `${PROGRAM[r.harness] || r.harness} prints only its finished answers; `
+      + 'this is what it is doing now, from agent-org' })
+    : null;
+  p.body.replaceChildren(host, ...(p.feed ? [p.feed] : []));
   const term = new Terminal({
     fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: 12.5, lineHeight: 1.15,
     cursorBlink: true, scrollback: 5000, theme: termTheme(), allowProposedApi: true,
@@ -732,11 +739,29 @@ function askingProblems() {
   }));
 }
 
+/** The progress strip of a quiet program's pane: its status, then its latest steps. */
+function renderProgress(p, r) {
+  if (!p.feed) return;
+  const steps = [
+    ...S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).map((m) => {
+      const out = m.sender === r.name;
+      return { at: m.sent_at, text: `${out ? '→' : '←'} ${out ? m.recipient : m.sender}  ${KIND_LABEL[m.kind] || m.kind}: ${m.text.replace(/\s+/g, ' ')}` };
+    }),
+    ...A.events.filter((e) => e.role === r.name && ['task', 'file', 'check', 'git', 'safety'].includes(e.kind))
+      .map((e) => ({ at: e.at, text: e.text })),
+  ].sort((a, b) => a.at - b.at).slice(-4);
+  const s = r.status;
+  fill(p.feed,
+    h('div', { class: 'feed-now' }, h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'starting'),
+      s && s.task ? `  ${s.task}` : ''),
+    steps.map((x) => h('div', { class: 'feed-step', title: x.text }, h('span', { class: 't' }, fmtTime(x.at).slice(0, 5)), ` ${x.text}`)));
+}
+
 function closeTerm(p) {
   if (!p.term) return;
   p.resizer?.disconnect();
   p.term.dispose();
-  Object.assign(p, { term: null, fit: null, mode: '' });
+  Object.assign(p, { term: null, fit: null, mode: '', feed: null });
   p.body.replaceChildren();
 }
 

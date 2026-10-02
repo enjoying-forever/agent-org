@@ -18,9 +18,10 @@ with the subscription you already have, and you watch, type to and steer all of 
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
    - Antigravity needs you to have run `agy` once yourself and finished its Google
-     sign-in (including any account check it asks for). Its pane shows the agent's work
-     but takes no typing (Antigravity loads agent-org's tools only in that mode); talk to
-     it with messages, like to any agent.
+     sign-in (including any account check it asks for). It runs in print mode (the only
+     mode in which it loads agent-org's tools): its terminal shows only its finished answers
+     and takes no typing, so its pane adds a strip with what it is doing now - its status and
+     its latest messages, tasks and files. Talk to it with messages, like to any agent.
    - Each program must be signed in on its own command line (run `claude`, `codex`,
      `grok` once in a terminal and log in); the Setup check tells you which is not.
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
