@@ -108,6 +108,7 @@ function applyLayout() {
     p.el.style.gridRow = max ? 'auto' : `${r + 1} / span ${rs}`;
   }
   drawGutters(box, cols, rows, key);
+  fitAllTerms(); // at once: the browser's own resize notice can come late
   const empty = box.querySelector(':scope > .empty');
   if (!visible.length && all.length && !empty) {
     box.append(h('div', { class: 'empty' }, 'Every pane is closed. Click an agent in the team list, or ',
@@ -295,3 +296,53 @@ document.addEventListener('keydown', (e) => {
     renderPanes();
   }
 });
+
+// ---------- keyboard: Ctrl+Alt plus a key (a terminal never gets these) ----------
+
+const SHORTCUTS = [
+  ['Ctrl+Alt+1 … 9', 'Go to pane 1 to 9'],
+  ['Ctrl+Alt+← / →', 'Previous / next pane'],
+  ['Ctrl+Alt+Enter', 'Full screen for this pane, or back'],
+  ['Ctrl+Alt+B', 'Show or hide the team list'],
+  ['Ctrl+Alt+M', 'Show or hide the messages'],
+  ['Ctrl+C / Ctrl+V', 'In a terminal: copy the selection (without one, Ctrl+C interrupts) / paste'],
+  ['Right-click', 'In a terminal: copy the selection, or paste'],
+];
+
+function isShortcut(e) {
+  return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey
+    && (/^Digit[1-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyM'].includes(e.code));
+}
+
+function panesOnScreen() {
+  return [...$('#panes').children].filter((el) => el.classList.contains('pane') && !el.hidden).map((el) => el.dataset.role);
+}
+
+function goToPane(name) {
+  if (!name) return;
+  focusPane(name);
+  const p = PANES.get(name);
+  if (p?.term) p.term.focus();
+  else p?.el.querySelector('.pane-prompt input')?.focus();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!isShortcut(e) || S.mode !== 'team' || !S.state) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
+  if (e.code === 'KeyM') { L.side = !L.side; applyChrome(); saveLayout(); return; }
+  showView('team');
+  const names = L.max ? [...PANES.keys()].filter((n) => !L.hidden.includes(n) || n === L.max) : panesOnScreen();
+  const at = names.indexOf(S.focus);
+  if (e.code === 'Enter') { if (S.focus) toggleMax(S.focus); return; }
+  if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+    const step = e.code === 'ArrowRight' ? 1 : -1;
+    goToPane(names[(at + step + names.length) % names.length]);
+    return;
+  }
+  goToPane(names[Number(e.code.slice(5)) - 1]);
+}, true);
+
+$('#keys-btn').addEventListener('click', () => showInfo('Keyboard shortcuts',
+  h('table', { class: 'keys' }, SHORTCUTS.map(([k, what]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, what))))));

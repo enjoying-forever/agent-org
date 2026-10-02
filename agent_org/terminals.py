@@ -187,7 +187,7 @@ class Terminal:
             self.proc.write(data)
 
     def resize(self, cols: int, rows: int) -> None:
-        cols, rows = max(20, min(int(cols), 500)), max(5, min(int(rows), 200))
+        cols, rows = max(10, min(int(cols), 500)), max(4, min(int(rows), 200))  # as small as a pane may be
         if self.alive and (cols, rows) != (self.cols, self.rows):
             self.cols, self.rows = cols, rows
             self.proc.setwinsize(rows, cols)

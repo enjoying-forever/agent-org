@@ -505,7 +505,7 @@ function updatePane(p, r) {
   const launchable = st.launchable.includes(r.harness);
   const live = st.in_window && r.terminal;
   p.el.className = ['pane', `h-${r.harness}`, r.name === st.leader && 'wide', r.tier && 'consultant',
-    S.focus === r.name && 'focus', live && 'live'].filter(Boolean).join(' ');
+    S.focus === r.name && 'focus', live && 'live', p.outputting && 'outputting'].filter(Boolean).join(' ');
   fill(p.head,
     runningDot(r), glyph(r.harness), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
@@ -622,6 +622,11 @@ function openTerm(p) {
     term.loadAddon(new Unicode11Addon.Unicode11Addon());
     term.unicode.activeVersion = '11';
   }
+  if (typeof WebLinksAddon !== 'undefined') { // links in the output open in your browser (a sign-in link, say)
+    term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => { e.preventDefault(); openLink(uri); }));
+  }
+  term.attachCustomKeyEventHandler((e) => termKey(p, e));
+  host.addEventListener('contextmenu', (e) => { e.preventDefault(); rightClick(p); });
   term.open(host);
   Object.assign(p, { term, fit, termId: 0, next: 0, pending: '', sending: false, size: '' });
   // While old output is replayed into a new screen, xterm answers the questions programs once asked
@@ -632,6 +637,60 @@ function openTerm(p) {
   p.resizer.observe(host);
   fitTerm(p);
   wakeTerms();
+}
+
+// ---------- in a terminal: copy, paste, links, activity ----------
+
+/** Keys a terminal does not get: window shortcuts, and Ctrl+C / Ctrl+V when they mean copy and paste. */
+function termKey(p, e) {
+  if (e.type !== 'keydown') return true;
+  if (isShortcut(e)) return false;
+  const ctrl = e.ctrlKey && !e.altKey && !e.metaKey;
+  const key = e.key.toLowerCase();
+  if (ctrl && key === 'c' && (e.shiftKey || p.term.hasSelection())) { // with a selection it copies; else it interrupts
+    if (p.term.hasSelection()) { copyText(p.term.getSelection()); p.term.clearSelection(); }
+    return false;
+  }
+  if (ctrl && key === 'v') return false; // the browser pastes, and the terminal takes the paste
+  return true;
+}
+
+/** Right-click, as in Windows Terminal: copy the selection, or paste. */
+async function rightClick(p) {
+  if (p.term.hasSelection()) {
+    copyText(p.term.getSelection());
+    p.term.clearSelection();
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) p.term.paste(text);
+  } catch { toast('Press Ctrl+V to paste here.'); }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = h('textarea', { style: { position: 'fixed', opacity: '0' } }, text);
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+}
+
+function openLink(uri) {
+  if (!/^https?:\/\//i.test(uri)) return;
+  act(api('/api/open-url', { url: uri }), () => 'Opened in your browser.');
+}
+
+/** The pane's header lights up while its terminal is writing. */
+function markOutput(p) {
+  p.outputting = true;
+  p.el.classList.add('outputting');
+  clearTimeout(p.outputTimer);
+  p.outputTimer = setTimeout(() => { p.outputting = false; p.el.classList.remove('outputting'); }, 1500);
 }
 
 function closeTerm(p) {
@@ -646,13 +705,27 @@ function retheme() {
   for (const p of PANES.values()) if (p.term) p.term.options.theme = termTheme();
 }
 
+const MIN_COLS = 10; // the server allows the same: both sides must agree on the size, or text wraps wrongly
+const MIN_ROWS = 4;
+
 function fitTerm(p) {
-  if (!p.term || !p.el.isConnected || !p.body.clientWidth) return;
-  try { p.fit.fit(); } catch { return; }
-  const size = `${p.term.cols}x${p.term.rows}`;
+  if (!p.term || !p.el.isConnected || p.el.hidden || !p.body.clientWidth) return;
+  const want = p.fit.proposeDimensions();
+  if (!want || !want.cols || !want.rows) return;
+  const cols = Math.max(MIN_COLS, want.cols);
+  const rows = Math.max(MIN_ROWS, want.rows);
+  if (cols !== p.term.cols || rows !== p.term.rows) p.term.resize(cols, rows);
+  const size = `${cols}x${rows}`;
   if (size === p.size) return;
   p.size = size;
-  api('/api/term-resize', { role: p.name, cols: p.term.cols, rows: p.term.rows }).catch(() => {});
+  clearTimeout(p.resizeTimer); // while a border is dragged, tell the agent once it settles
+  p.resizeTimer = setTimeout(() => {
+    api('/api/term-resize', { role: p.name, cols, rows }).catch(() => {});
+  }, 120);
+}
+
+function fitAllTerms() {
+  for (const p of PANES.values()) fitTerm(p);
 }
 
 /** Keystrokes go one request at a time, so they arrive in the order they were typed. */
@@ -708,6 +781,7 @@ async function termLoop() {
         p.term.write(t.data, () => { p.replaying = false; });
       } else if (t.data) {
         p.term.write(t.data);
+        markOutput(p);
       }
       p.next = t.next;
     }

@@ -220,6 +220,14 @@ class App:
         term.write(data)
         return {}
 
+    def open_url(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Open a web link from an agent's terminal in the owner's own browser (a sign-in page, say)."""
+        url = _str(body, "url").strip()
+        if not url.lower().startswith(("http://", "https://")) or len(url) > 4000 or any(c in url for c in "\r\n\"<> "):
+            raise ApiError("Only web links (http or https) can be opened.")
+        webbrowser.open(url)
+        return {}
+
     def term_resize(self, body: dict[str, Any]) -> dict[str, Any]:
         self.terminals.resize(_str(body, "role"), int(body["cols"]), int(body["rows"]))
         return {}
@@ -762,7 +770,7 @@ POST_ROUTES = {
     "/api/role-save": App.role_save, "/api/role-duplicate": App.role_duplicate,
     "/api/role-delete": App.delete_preset, "/api/role-import": App.role_import, "/api/role-place": App.role_place,
     "/api/role-reset": App.role_reset, "/api/role-restore": App.role_restore,
-    "/api/term-input": App.term_input, "/api/term-resize": App.term_resize,
+    "/api/term-input": App.term_input, "/api/term-resize": App.term_resize, "/api/open-url": App.open_url,
 }
 
 
@@ -949,13 +957,68 @@ def serve(team_file: Path | None, port: int, token: str | None = None,
     return server, app, access
 
 
+def window_state_file() -> Path:
+    return templates.home_dir() / "window" / "state.json"
+
+
+def load_window_state() -> dict[str, Any]:
+    """Where and how big the window was last time ({} the first time)."""
+    try:
+        state = json.loads(window_state_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(state, dict):
+        return {}
+    return {k: v for k, v in state.items() if k in ("x", "y", "width", "height", "maximized")
+            and (isinstance(v, bool) if k == "maximized" else isinstance(v, int))}
+
+
+def window_geometry(state: dict[str, Any], screens: list[tuple[int, int, int, int]]) -> dict[str, Any]:
+    """create_window arguments from the saved state: its size (at least the minimum), and its
+    place only if that is still on one of the `screens` (x, y, width, height) - a monitor may be gone."""
+    geo: dict[str, Any] = {"width": max(900, state.get("width", 1520)), "height": max(600, state.get("height", 950)),
+                           "maximized": bool(state.get("maximized"))}
+    x, y = state.get("x"), state.get("y")
+    if x is not None and y is not None and any(sx <= x + 40 < sx + sw and sy <= y + 10 < sy + sh
+                                               for sx, sy, sw, sh in screens):
+        geo.update(x=x, y=y)
+    return geo
+
+
 def open_window(url: str) -> None:
     """Show agent-org in a window of its own (Windows' WebView2, through pywebview), until it is
-    closed. Raises ImportError or RuntimeError when there is no such window to be had."""
+    closed, where and as big as it was last time. Raises ImportError or RuntimeError when there is
+    no such window to be had."""
     import webview  # noqa: PLC0415 - optional: without it, agent-org opens in the browser
 
-    webview.create_window("agent-org", url, width=1520, height=950, min_size=(900, 600),
-                          background_color="#0B0C0F", confirm_close=True, text_select=True)
+    state = load_window_state()
+    try:
+        screens = [(int(getattr(m, "x", 0)), int(getattr(m, "y", 0)), int(m.width), int(m.height)) for m in webview.screens]
+    except Exception:  # noqa: BLE001 - no screen list: keep the size, let Windows place it
+        screens = []
+    window = webview.create_window("agent-org", url, min_size=(900, 600), background_color="#0B0C0F",
+                                   confirm_close=True, text_select=True, **window_geometry(state, screens))
+
+    def resized(width: int, height: int) -> None:
+        if not state.get("maximized"):
+            state.update(width=int(width), height=int(height))
+
+    def moved(x: int, y: int) -> None:
+        if not state.get("maximized"):
+            state.update(x=int(x), y=int(y))
+
+    def save() -> None:
+        try:
+            window_state_file().parent.mkdir(parents=True, exist_ok=True)
+            window_state_file().write_text(json.dumps(state), encoding="utf-8")
+        except OSError:
+            pass
+
+    window.events.resized += resized
+    window.events.moved += moved
+    window.events.maximized += lambda: state.update(maximized=True)
+    window.events.restored += lambda: state.update(maximized=False)
+    window.events.closing += save
     storage = templates.home_dir() / "window"
     storage.mkdir(parents=True, exist_ok=True)
     webview.start(private_mode=False, storage_path=str(storage), localization={

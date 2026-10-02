@@ -47,7 +47,12 @@ agent carries on where it stopped.
   and the edges of the team list and the messages, or hide either with the buttons at the
   top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
   agent keeps running; click it in the team list to bring the pane back). *Needs you* at
-  the top lists what is waiting for you. The arrangement is remembered for each team.
+  the top lists what is waiting for you. The arrangement is remembered for each team, and the
+  window comes back where and as big as it was.
+- **In a terminal:** Ctrl+C copies when text is selected (otherwise it interrupts the agent),
+  Ctrl+V pastes, right-click copies or pastes, and links open in your browser. A pane's program
+  badge lights up while it writes. Ctrl+Alt+1-9, Ctrl+Alt+arrows and Ctrl+Alt+Enter move between
+  panes and go full screen (*More* > *Keyboard shortcuts* lists them all).
 - **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.

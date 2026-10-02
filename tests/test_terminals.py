@@ -108,3 +108,24 @@ def test_agents_keep_agent_orgs_way_to_the_internet(monkeypatch):
     assert env["HTTP_PROXY"] == env["HTTPS_PROXY"] == "http://127.0.0.1:7890" and "127.0.0.1" in env["NO_PROXY"]
     monkeypatch.setattr(terminals, "system_proxy", lambda: None)
     assert "HTTPS_PROXY" not in terminals.network_env({"PATH": "x"})
+
+
+def test_links_from_a_terminal_open_in_the_browser(server, monkeypatch):  # noqa: F811
+    from agent_org import ui
+    opened = []
+    monkeypatch.setattr(ui.webbrowser, "open", opened.append)
+    server.ok("/api/open-url", {"url": "https://claude.ai/oauth/authorize?code=1"})
+    assert opened == ["https://claude.ai/oauth/authorize?code=1"]
+    for bad in ("file:///C:/Windows/system32/calc.exe", "javascript:alert(1)", "https://x.test/a b", "ms-settings:"):
+        assert server.request("/api/open-url", {"url": bad})[0] == 400
+    assert len(opened) == 1
+
+
+def test_the_window_comes_back_where_it_was():
+    from agent_org.ui import window_geometry
+    screens = [(0, 0, 2560, 1440)]
+    assert window_geometry({}, screens) == {"width": 1520, "height": 950, "maximized": False}
+    assert window_geometry({"x": 100, "y": 50, "width": 1200, "height": 800, "maximized": True}, screens) == {
+        "width": 1200, "height": 800, "maximized": True, "x": 100, "y": 50}
+    assert "x" not in window_geometry({"x": 3000, "y": 50}, screens)  # that monitor is gone
+    assert window_geometry({"width": 300, "height": 200}, screens)["width"] == 900  # never below the minimum

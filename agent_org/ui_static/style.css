@@ -765,3 +765,11 @@ button.taskc { text-align: left; cursor: pointer; }
 .team-view > .side-gutter { grid-column: 4; }
 .team-view > .side { grid-column: 5; }
 .team-view > * { grid-row: 1; }
+
+/* a terminal writing: its program badge lights up */
+.pane .hglyph { transition: box-shadow .3s ease; }
+.pane.outputting .hglyph { box-shadow: 0 0 0 1.5px var(--harness), 0 0 12px var(--harness); }
+.keys { border-collapse: collapse; }
+.keys td { padding: 6px 12px 6px 0; vertical-align: top; }
+kbd { font: 12px var(--font-code); background: var(--well); border: 1px solid var(--rule); border-bottom-width: 2px;
+  border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
