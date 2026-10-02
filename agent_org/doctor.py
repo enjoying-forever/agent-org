@@ -122,7 +122,8 @@ def check_deepseek(harnesses: set[str]) -> Check:
     needed = "deepseek" in harnesses
     if found is None:
         return Check("DeepSeek Harness", False, "not installed",
-                     "Install the DeepSeek Harness desktop app and sign in once.", needed)
+                     "Install DeepSeek Harness and sign in once (in its desktop app); for the command "
+                     "line: npm install -g @deepseek-ai/dsh", needed)
     command, base, env = found
     try:
         r = subprocess.run([command, *base, "--version"], capture_output=True, text=True, encoding="utf-8",

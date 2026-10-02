@@ -198,7 +198,9 @@ def test_antigravity_gets_a_project_plugin_and_starts_interactively(team_file):
     stop = hooks["Stop"][0]["command"]
     assert '"' not in stop and stop.endswith("org_hook.py stop agy")  # runs as it is in cmd /c
     script = (base / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    assert "& 'agy' '--print-timeout' '0s' '-p' 'You are the ''worker-b'' agent" in script  # print mode loads the plugin
+    # print mode loads the plugin; its steps come as JSON events, shown by runview
+    assert "& 'agy' '--print-timeout' '0s' '--output-format' 'stream-json' '-p' 'You are the ''worker-b'' agent" in script
+    assert "| & " in script and "'agent_org.runview'" in script
 
 
 def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
@@ -215,7 +217,7 @@ def test_antigravity_resumes_by_conversation(team_file, tmp_path, monkeypatch):
     finally:
         hub.close()
     script = (team_file.parent / ".agent-org" / "launch" / "worker-b" / "start.ps1").read_text(encoding="utf-8")
-    assert f"'--conversation' '{sid}' '--print-timeout' '0s' '-p' 'agent-org: the team was restarted" in script
+    assert f"'--conversation' '{sid}' '--print-timeout' '0s' '--output-format' 'stream-json' '-p' 'agent-org: the team was restarted" in script
     assert tab
 
 
@@ -250,10 +252,8 @@ def test_tests_can_never_open_real_agent_tabs():
         launch.open_tab(["wt", "new-tab", "pwsh"])
 
 
-def test_deepseek_runs_headless_with_org_tools_and_again_until_stopped(team_file, monkeypatch):
-    monkeypatch.setattr(launch, "deepseek_command", lambda: (r"C:\DSH\DeepSeek Harness.exe",
-                                                             ["--expose-internals", r"C:\DSH\cli.js"],
-                                                             {"ELECTRON_RUN_AS_NODE": "1"}))
+def test_deepseek_runs_headless_with_org_tools_shown_live_and_again_until_stopped(team_file, monkeypatch):
+    monkeypatch.setattr(launch, "deepseek_command", lambda: ("node.exe", ["bin.js"], {}))
     config = yaml.safe_load(team_file.read_text(encoding="utf-8"))
     config["roles"]["worker-a"].update(harness="deepseek", model="deepseek-v4-pro", effort="high")
     team_file.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -270,20 +270,49 @@ def test_deepseek_runs_headless_with_org_tools_and_again_until_stopped(team_file
         assert patch[1] == {"id": "agent-default-model", "config": {
             "provider": "deepseek-official", "model": "deepseek-v4-pro", "reasoningEffort": "high"}}
         script = (out / "start.ps1").read_text(encoding="utf-8")
-        assert "$env:ELECTRON_RUN_AS_NODE = '1'" in script
-        assert "'--profile' 'headless' '--patch'" in script and "end your answer" in script
+        # each run: JSON events shown live by runview, continuing the conversation kept in dsh.session
+        assert "'--profile' 'headless' '--patch'" in script and "'--json' @resume" in script
+        assert "'agent_org.runview' '--session-file'" in script and str(out / "dsh.session") in script
+        assert "'--session-id', $sid" in script
         # after each run: wait for new messages without a model, then run again with the wake prompt
         assert "'agent_org.wake'" in script and "you have new messages" in script
-        assert script.count("| Out-Host") == 2  # the app's exe is windowed: PowerShell must wait for each run
         assert str(out / "stopped") in script and "$LASTEXITCODE -ne 0" in script
         launch.stop_role(hub, "worker-a")
         assert (out / "stopped").exists()
-        launch.role_tab(hub, team_file.resolve(), "worker-a")  # starting it again lifts the stop
-        assert not (out / "stopped").exists()
-        assert launch.resumable_session(hub, "worker-a") is None  # each run starts afresh
+        (out / "dsh.session").write_text("session-1234", encoding="utf-8")  # a run kept its conversation
+        assert launch.resumable_session(hub, "worker-a") == "session-1234"
+        launch.role_tab(hub, team_file.resolve(), "worker-a")  # Start: lifts the stop, resumes it
+        assert not (out / "stopped").exists() and (out / "dsh.session").exists()
+        assert "agent-org: the team was restarted" in (out / "start.ps1").read_text(encoding="utf-8")
+        launch.role_tab(hub, team_file.resolve(), "worker-a", fresh=True)  # Start fresh: a new conversation
+        assert not (out / "dsh.session").exists()
     finally:
         hub.close()
 
+
+def test_runview_shows_a_deepseek_run_and_keeps_its_session(tmp_path, monkeypatch):
+    import io
+    import sys as _sys
+    from agent_org import runview
+    events = "\n".join(json.dumps(e) for e in [
+        {"type": "session", "sessionId": "session-abc"},
+        {"type": "status", "phase": "turn_start"},
+        {"type": "tool_call", "tool": "mcp__org__send_message", "input": {"to": "you", "text": "done"}},
+        {"type": "tool_result", "status": "completed", "result": "Sent #7."},
+        {"type": "tool_call", "tool": "read", "input": {"file_path": "x.py"}},
+        {"type": "tool_result", "status": "failed", "result": "no such file"},
+        {"type": "text", "text": "All done."},
+        {"type": "final", "text": "All done."},
+    ]) + "\n"
+    monkeypatch.setattr(_sys, "stdin", io.TextIOWrapper(io.BytesIO(events.encode("utf-8"))))
+    shown = io.BytesIO()
+    monkeypatch.setattr(_sys, "stdout", io.TextIOWrapper(shown, encoding="utf-8"))
+    assert runview.main(["--session-file", str(tmp_path / "sid")]) == 0
+    text = re.sub(r"\x1b\[[0-9;]*m", "", shown.getvalue().decode("utf-8"))  # without its colors
+    assert "org.send_message(to=you, text=done)" in text and "Sent #7." in text
+    assert "failed: no such file" in text
+    assert text.count("All done.") == 1  # the final answer is not shown twice
+    assert (tmp_path / "sid").read_text(encoding="utf-8") == "session-abc"
 
 
 def test_the_deepseek_waiter_wakes_on_a_message_and_ends_on_stop(team_file, tmp_path):
@@ -300,3 +329,32 @@ def test_the_deepseek_waiter_wakes_on_a_message_and_ends_on_stop(team_file, tmp_
         assert wake.wait_for_work(hub, "worker-a", marker, poll=0.01) == wake.STOPPED
     finally:
         hub.close()
+
+
+
+def test_runview_shows_an_antigravity_run_as_it_streams(monkeypatch):
+    import io
+    import sys as _sys
+    from agent_org import runview
+    step = lambda **kw: json.dumps({"event": "step_update", "step_update": kw})  # noqa: E731
+    events = "\n".join([
+        json.dumps({"event": "init", "conversation_id": "c-1", "init": {"tools": []}}),
+        step(step_index=1, state="ACTIVE", step_type="tool", tool_name="mcp_org_read_inbox",
+             tool_info={"name": "mcp_org_read_inbox", "parameters": {}}),
+        step(step_index=1, state="DONE", step_type="tool", tool_name="mcp_org_read_inbox",
+             tool_info={"name": "mcp_org_read_inbox", "output": "1 new message"}),
+        step(step_index=3, state="ACTIVE", step_type="tool", tool_name="call_mcp_tool", tool_info={
+            "name": "call_mcp_tool", "parameters": {"ServerName": "agent-org_org", "ToolName": "send_message",
+                                                    "Arguments": '{"to": "you", "text": "pong"}'}}),
+        step(step_index=2, state="ACTIVE", step_type="agent_response", text_delta="Working on "),
+        step(step_index=2, state="DONE", step_type="agent_response", text_delta="task #3.\n"),
+        json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "Working on task #3."}}),
+    ]) + "\n"
+    monkeypatch.setattr(_sys, "stdin", io.TextIOWrapper(io.BytesIO(events.encode("utf-8"))))
+    shown = io.BytesIO()
+    monkeypatch.setattr(_sys, "stdout", io.TextIOWrapper(shown, encoding="utf-8"))
+    assert runview.main([]) == 0
+    text = re.sub(r"\x1b\[[0-9;]*m", "", shown.getvalue().decode("utf-8"))  # without its colors
+    assert "conversation c-1" in text and "org.read_inbox()" in text and "1 new message" in text
+    assert "Working on task #3." in text  # the streamed pieces join into one line
+    assert "org.send_message(to=you, text=pong)" in text  # its MCP wrapper reads like the other programs'

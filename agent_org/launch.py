@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import os
@@ -46,11 +47,7 @@ class Launch:
     env: dict[str, str] = field(default_factory=dict)
     setup: list[list[str]] = field(default_factory=list)  # commands run first, in the project folder
     cwd: Path | None = None  # where it works (branch mode: its own worktree); default the project folder
-    # A program that does one task per run (DeepSeek): `between` waits for new work after a run,
-    # then it runs again with `again` (its arguments for every run after the first).
-    between: list[str] | None = None
-    again: list[str] | None = None
-    gui: bool = False  # a windowed program (an Electron app run as Node): PowerShell waits only through a pipe
+    script: str | None = None  # PowerShell that runs it, when one command line is not enough (DeepSeek)
 
 
 def kickoff(role: str) -> str:
@@ -90,7 +87,11 @@ def resumable_session(hub: Hub, role: str) -> str | None:
     were trusted) and records what it finds.
     """
     spec = hub.team.roles[role]
-    if spec.harness not in sessions.RESUMABLE:  # it starts afresh each time (DeepSeek's one-task runs)
+    if spec.harness == "deepseek":  # its runs keep their conversation's id in the launch folder
+        kept = hub.team.database.parent / "launch" / role / DSH_SESSION
+        sid = kept.read_text(encoding="utf-8").strip() if kept.is_file() else ""
+        return sid or None
+    if spec.harness not in sessions.RESUMABLE:
         return None
     record = hub.store.get_session(role)
     if record is not None and record.harness == spec.harness and sessions.exists(spec.harness, record.session_id):
@@ -322,21 +323,28 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli += ["--conversation", resume]
     # Antigravity has no flag for extra instructions: the kickoff sends it to my_role.
     # Print mode, not --prompt-interactive: the interactive CLI does not load the project's
-    # plugin (no org tools, no hooks - checked in its own logs), print mode does. The tab
-    # still shows its work, and the Stop hook keeps it going as messages arrive.
-    cli += ["--print-timeout", "0s", "-p", resume_kickoff(role) if resume else kickoff(role)]
-    return Launch(role, "antigravity", "agy", cli)
+    # plugin (no org tools, no hooks - checked in its own logs), print mode does. Plain print mode
+    # shows only answers, so it writes its steps as JSON events and agent_org.runview shows them
+    # as they happen. The Stop hook keeps it going as messages arrive.
+    cli += ["--print-timeout", "0s", "--output-format", "stream-json", "-p", resume_kickoff(role) if resume else kickoff(role)]
+    viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview"])
+    script = "\n".join(["[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+                         "& 'agy' " + " ".join(ps(a) for a in cli) + f" | & {viewer}"])
+    return Launch(role, "antigravity", "agy", cli, script=script,
+                  env={"PYTHONPATH": str(PACKAGE_ROOT), "PYTHONIOENCODING": "utf-8"})
 
 
 # ---- DeepSeek Harness ----
 # Its terminal mode ("headless") answers one task and exits, with no hooks; agent-org's tools come
 # in through its MCP client plugin, added for each role by a patch file. Its start script runs it,
 # and after each run waits - with agent_org.wake, no model - until the role has a new message,
-# then runs it again (until the role is stopped). The desktop app's own CLI is used when it is
-# installed: its credentials file is written by the app, and an older separately installed `dsh`
-# may not read it.
+# then runs it again (until the role is stopped). Each run continues the same conversation
+# (--session-id) and writes its steps as JSON events, which agent_org.runview shows as they
+# happen: plain headless mode prints only the final answer. The `dsh` command (0.2 or later) runs
+# it; without one, the desktop app's own copy (an older `dsh` cannot read the app's credentials).
 
 DSH_EFFORTS = ("off", "low", "high", "max")
+DSH_SESSION = "dsh.session"  # in a role's launch folder: the conversation its runs continue
 STOP_MARKER = "stopped"  # in a role's launch folder: its start script does not run it again
 
 
@@ -349,10 +357,36 @@ def deepseek_kickoff(role: str) -> str:
 
 
 def deepseek_wake(role: str) -> str:
-    return (f"agent-org: you are the '{role}' agent and you have new messages. Call the {SERVER_NAME} tool "
-            "my_role first (your role, the law and your notes), then read_inbox and list_tasks, and handle "
-            "them. Save what you need to remember with save_notes: each start begins a new conversation. "
-            "When nothing is left to do, end your answer: agent-org starts you again when a new message arrives.")
+    return (f"agent-org: '{role}', you have new messages. Call read_inbox and handle them (and list_tasks; "
+            f"my_role if you need your role again). When nothing is left to do, end your answer: agent-org "
+            "starts you again when a new message arrives.")
+
+
+DSH_MIN_VERSION = (0, 2)
+_dsh_versions: dict[str, tuple[int, ...] | None] = {}
+
+
+def dsh_cli() -> tuple[str, list[str]] | None:
+    """The `dsh` command line (node and its bin.js), if one new enough is installed."""
+    shim = shutil.which("dsh")
+    if shim is None:
+        return None
+    folder = Path(shim).parent
+    bin_js = folder / "node_modules" / "@deepseek-ai" / "dsh" / "lib" / "bin.js"
+    node = str(folder / "node.exe") if (folder / "node.exe").is_file() else shutil.which("node")
+    if not bin_js.is_file() or node is None:
+        return None
+    key = f"{bin_js}|{bin_js.stat().st_mtime}"
+    if key not in _dsh_versions:
+        try:
+            out = subprocess.run([node, str(bin_js), "--version"], capture_output=True, text=True, timeout=60,
+                                 stdin=subprocess.DEVNULL).stdout
+            found = re.match(r"\s*(\d+)\.(\d+)", out)
+            _dsh_versions[key] = tuple(int(x) for x in found.groups()) if found else None
+        except (OSError, subprocess.SubprocessError):
+            _dsh_versions[key] = None
+    version = _dsh_versions[key]
+    return (node, [str(bin_js)]) if version is not None and version >= DSH_MIN_VERSION else None
 
 
 def deepseek_app() -> Path | None:
@@ -387,15 +421,17 @@ def deepseek_app() -> Path | None:
 
 
 def deepseek_command() -> tuple[str, list[str], dict[str, str]] | None:
-    """How to run `dsh`: the desktop app's own CLI (its exe as Node), or a `dsh` on PATH."""
+    """How to run `dsh`: the `dsh` command (0.2 or later), else the desktop app's own copy (its exe as Node)."""
+    cli = dsh_cli()
+    if cli is not None:
+        return cli[0], cli[1], {}
     app = deepseek_app()
     if app is not None:
         asar = app.parent / "resources" / "app.asar"
         if asar.is_file():
             cli = asar / "dsh" / "node_modules" / "@deepseek-ai" / "dsh-desktop-host" / "lib" / "cli.js"
             return str(app), ["--expose-internals", str(cli)], {"ELECTRON_RUN_AS_NODE": "1"}
-    found = shutil.which("dsh")
-    return (found, [], {}) if found else None
+    return None
 
 
 def yaml_text(value: str) -> str:
@@ -439,15 +475,36 @@ def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
     command, base, env = found
     patch_file = out / "dsh.patch.yml"
     patch_file.write_text(deepseek_patch(hub, team_file, role), encoding="utf-8")
-    run = [*base, "--profile", "headless", "--patch", str(patch_file)]
-    between = [sys.executable, "-m", "agent_org.wake", "--team", str(team_file), "--role", role,
-               "--stop", str(out / STOP_MARKER)]
-    env = {**env, "PYTHONPATH": str(PACKAGE_ROOT)}
+    session_file = out / DSH_SESSION
+    if not resume:
+        session_file.unlink(missing_ok=True)  # Start fresh (or its first start): a new conversation
+    env = {**env, "PYTHONPATH": str(PACKAGE_ROOT), "PYTHONIOENCODING": "utf-8"}
     if os.environ.get("ALL_PROXY", os.environ.get("all_proxy", "")).lower().startswith("socks"):
         env["ALL_PROXY"] = ""  # dsh cannot use a SOCKS proxy and says so on every run; it uses HTTPS_PROXY
-    return Launch(role, "deepseek", command, [*run, deepseek_kickoff(role)],
-                  env=env, between=between, again=[*run, deepseek_wake(role)],
-                  gui=command.lower().endswith(".exe"))
+    dsh = " ".join(ps(a) for a in [command, *base, "--profile", "headless", "--patch", str(patch_file), "--json"])
+    viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview", "--session-file", str(session_file)])
+    waiter = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.wake", "--team", str(team_file),
+                                      "--role", role, "--stop", str(out / STOP_MARKER)])
+    sid = ps(str(session_file))
+
+    def run(prompt: str) -> str:  # one run, continuing its conversation if it has one, shown as it happens
+        return "\n".join([
+            f"$sid = if (Test-Path -LiteralPath {sid}) {{ (Get-Content -LiteralPath {sid} -Raw).Trim() }} else {{ '' }}",
+            "$resume = if ($sid) { @('--session-id', $sid) } else { @() }",
+            f"& {dsh} @resume {ps(prompt)} | & {viewer}",
+        ])
+
+    marker = ps(str(out / STOP_MARKER))
+    script = "\n".join([
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+        run(resume_kickoff(role) if resume else deepseek_kickoff(role)),
+        f"while (-not (Test-Path -LiteralPath {marker})) {{",  # after each run: wait (no model), run again
+        f"    & {waiter}",
+        "    if ($LASTEXITCODE -ne 0) { break }",
+        *("    " + line for line in run(deepseek_wake(role)).splitlines()),
+        "}",
+    ])
+    return Launch(role, "deepseek", command, [], env=env, script=script)
 
 
 BUILDERS = {"claude": claude_launch, "codex": codex_launch, "grok": grok_launch,
@@ -474,22 +531,9 @@ def ps(text: str) -> str:
     return "'" + text.replace("'", "''") + "'"
 
 
-def role_script(launch: Launch, team: Team, team_file: Path, stop_marker: Path | None = None) -> str:
+def role_script(launch: Launch, team: Team, team_file: Path) -> str:
     env = {"AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": launch.role, **launch.env}
-    wait = " | Out-Host" if launch.gui else ""  # without it, the next line would start while this one runs
-    run = f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args) + wait
-    if launch.between and launch.again is not None and stop_marker is not None:
-        # one task per run: after each run, wait (no model) for new messages, then run again; until stopped
-        marker = ps(str(stop_marker))
-        again = f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.again) + wait
-        run = "\n".join([
-            run,
-            f"while (-not (Test-Path -LiteralPath {marker})) {{",
-            "    " + " ".join(["&", *(ps(a) for a in launch.between)]),
-            "    if ($LASTEXITCODE -ne 0) { break }",
-            f"    {again}",
-            "}",
-        ])
+    run = launch.script or f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args)
     return "\n".join([
         f"# agent-org: role '{launch.role}' on {launch.harness}. Written by agent_org.launch; rerunning it overwrites this.",
         f"$Host.UI.RawUI.WindowTitle = {ps(launch.role)}",
@@ -555,7 +599,7 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
         hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
     (out / STOP_MARKER).unlink(missing_ok=True)  # starting it again lifts an earlier Stop
-    script.write_text(role_script(launch, team, team_file, out / STOP_MARKER), encoding="utf-8")
+    script.write_text(role_script(launch, team, team_file), encoding="utf-8")
     title = f"{role} ({spec.tier})" if spec.is_consultant else role
     return tab_command(title, TAB_COLORS[spec.harness], cwd, script)
 

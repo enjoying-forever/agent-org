@@ -20,8 +20,8 @@ with the subscription you already have, and you watch, type to and steer all of 
    - Antigravity needs you to have run `agy` once yourself and finished its Google
      sign-in (including any account check it asks for). It runs in print mode (the only
      mode in which it loads agent-org's tools): its terminal shows only its finished answers
-     and takes no typing, so its pane adds a strip with what it is doing now - its status and
-     its latest messages, tasks and files. Talk to it with messages, like to any agent.
+     and takes no typing; agent-org runs it with JSON output and shows each step - its tool calls,
+     their results, its answers - in its pane as it happens. Talk to it with messages, like to any agent.
    - Each program must be signed in on its own command line (run `claude`, `codex`,
      `grok` once in a terminal and log in); the Setup check tells you which is not.
 4. **Give the leader a task.** Open the **Board**, click **New task**, write one line
@@ -98,18 +98,20 @@ itself was started from.
 ### DeepSeek Harness
 
 A role can run on **DeepSeek Harness** (`harness: deepseek`, models `deepseek-flash` or
-`deepseek-v4-pro`, reasoning effort `off`, `low`, `high` or `max`). Install the DeepSeek Harness
-desktop app and sign in once; agent-org uses the app's own `dsh` (found through its Windows
-install entry; `AGENT_ORG_DEEPSEEK_APP` points to another `DeepSeek Harness.exe`).
+`deepseek-v4-pro`, reasoning effort `off`, `low`, `high` or `max`). Sign in to DeepSeek Harness
+once (in its desktop app) and install its command line, version 0.2 or later:
+`npm install -g @deepseek-ai/dsh`. Without it, agent-org uses the desktop app's own copy (found
+through its Windows install entry; `AGENT_ORG_DEEPSEEK_APP` points to another `DeepSeek Harness.exe`).
 
 DeepSeek's terminal mode works one task and exits, and has no hooks, so a DeepSeek agent works
 in runs: its start script runs it, then waits - without a model, at no cost - until it has a new
-message (a task arrives as one), and runs it again. Each run starts a new conversation that
-begins with its role, notes, inbox and tasks; it keeps what it must remember with `save_notes`.
+message (a task arrives as one), and runs it again. Each run continues the same conversation
+(*Start fresh* begins a new one).
 It gets agent-org's tools through DeepSeek's MCP client plugin, added for that role by a patch
 file (your own DeepSeek settings are not changed). *Stop* ends the run or the wait, and it stays
-stopped until you start it again. Like Antigravity, it prints only finished answers, so its pane
-shows a strip with what it is doing.
+stopped until you start it again. Its terminal mode prints only the final answer, so agent-org
+runs it with JSON output and shows each step - thinking, tool calls and results, answers - in its
+pane as it happens.
 
 ## The message law
 
