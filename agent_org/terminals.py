@@ -180,7 +180,7 @@ class Terminal:
             reset = not self._start <= offset <= self.end
             frm = self._start if reset else offset
             return {"id": self.id, "data": self._buf[frm - self._start:], "next": self.end,
-                    "reset": reset, "alive": self.alive}
+                    "reset": reset, "alive": self.alive, "age": round(time.time() - self.started, 1)}
 
     def write(self, data: str) -> None:
         if self.alive:

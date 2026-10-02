@@ -222,7 +222,7 @@ function enterHome() {
   $('#drawer').hidden = true;
   resetActivity();
   for (const id of ['#view-team', '#view-board', '#view-editor', '#view-roles', '#views', '#conn', '#switch-btn',
-    '#stop-all', '#launch-all']) {
+    '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
   $('#market-btn').hidden = false;
@@ -359,8 +359,10 @@ function renderGuide() {
       h('button', { class: 'small', title: 'Hide these steps for this team', onclick: () => {
         try { localStorage.setItem(key, '1'); } catch { /* shown again next load */ }
         g.hidden = true;
+        updateAttention();
       } }, 'Hide')),
     h('ol', {}, steps.map((s) => h('li', { class: s.done ? 'done' : '' }, s.text))));
+  updateAttention();
 }
 
 // ---------- icons (inline SVG, drawn with the text color) ----------
@@ -372,6 +374,10 @@ const ICON_PATHS = {
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   task: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+  max: 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
+  restore: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
+  close: 'M18 6 6 18M6 6l12 12',
+  main: 'M3 3h11v18H3zM18 3h3M18 9h3M18 15h3M18 21h3',
   sun: 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z',
 };
 
@@ -417,7 +423,8 @@ function renderChart() {
     const count = r.unread || r.open_tasks;
     return h('li', {},
       h('button', {
-        class: `rail-item${S.focus === r.name ? ' focus' : ''}`, style: { paddingLeft: `${8 + depth * 14}px` },
+        class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`,
+        style: { paddingLeft: `${8 + depth * 14}px` },
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
       },
@@ -435,6 +442,8 @@ function renderChart() {
 }
 
 function focusPane(name) {
+  showPane(name); // a closed pane comes back
+  if (L.max && L.max !== name) L.max = name; // full screen: switch to that agent
   S.focus = name;
   renderChart();
   renderPanes();
@@ -452,6 +461,7 @@ const PANES = new Map(); // role -> { name, el, head, body, foot, term, fit, ter
 function renderPanes() {
   const st = S.state;
   if (!st) return;
+  if (L.team !== st.team_file) loadLayout(st.team_file);
   const order = teamOrder();
   const box = $('#panes');
   const names = new Set(order.map((r) => r.name));
@@ -467,6 +477,7 @@ function renderPanes() {
     updatePane(p, r);
     if (box.children[i] !== p.el) box.insertBefore(p.el, box.children[i] || null);
   });
+  applyLayout();
 }
 
 function makePane(name) {
@@ -474,6 +485,7 @@ function makePane(name) {
     foot: h('footer', { class: 'pane-status' }), term: null, termId: 0, next: 0, mode: '' };
   p.el = h('section', { class: 'pane', 'data-role': name, onclick: () => { if (S.focus !== name) focusPane(name); } },
     p.head, p.body, p.foot);
+  p.head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleMax(name); });
   return p;
 }
 
@@ -498,11 +510,11 @@ function updatePane(p, r) {
     runningDot(r), glyph(r.harness), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }, s && r.online ? `${s.state}${s.task ? `: ${s.task}` : ''}`
       : r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`),
-    !r.tier && iconBtn('task', `Give ${r.name} a task`, () => openNewTask(r.name)),
     launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
     launchable && r.online > 0 && r.stuck && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),
     launchable && r.online > 0 && iconBtn('stop', `Stop ${r.name}`, () => stopRoles(r.name), 'danger'),
-    iconBtn('more', 'Details, tasks and files', () => openDrawer(r.name)));
+    iconBtn('more', 'Details, tasks and files', () => openDrawer(r.name)),
+    windowButtons(r.name));
   if (live) openTerm(p);
   else { closeTerm(p); renderSummary(p, r); }
   fill(p.foot,
@@ -612,7 +624,9 @@ function openTerm(p) {
   }
   term.open(host);
   Object.assign(p, { term, fit, termId: 0, next: 0, pending: '', sending: false, size: '' });
-  term.onData((data) => sendKeys(p, data));
+  // While old output is replayed into a new screen, xterm answers the questions programs once asked
+  // the terminal ("what are you?"): those answers must not reach the agent as typing.
+  term.onData((data) => { if (!p.replaying) sendKeys(p, data); });
   term.textarea?.addEventListener('focus', () => { if (S.focus !== p.name) focusPane(p.name); });
   p.resizer = new ResizeObserver(() => fitTerm(p));
   p.resizer.observe(host);
@@ -682,12 +696,19 @@ async function termLoop() {
     for (const [name, t] of Object.entries(res.terms || {})) {
       const p = PANES.get(name);
       if (!p || !p.term || t.none) continue;
+      let replay = false;
       if (t.reset || t.id !== p.termId) {
         p.term.reset();
         if (t.id !== p.termId) { p.size = ''; fitTerm(p); } // a new terminal: tell it this pane's size
         p.termId = t.id;
+        replay = t.age > 5; // a terminal just started still waits for real answers
       }
-      if (t.data) p.term.write(t.data);
+      if (t.data && replay) {
+        p.replaying = true;
+        p.term.write(t.data, () => { p.replaying = false; });
+      } else if (t.data) {
+        p.term.write(t.data);
+      }
       p.next = t.next;
     }
   }
@@ -1099,6 +1120,8 @@ function showView(v) {
   $('#view-editor').hidden = v !== 'editor';
   $('#view-roles').hidden = v !== 'roles';
   $('#launch-all').hidden = S.mode !== 'team' || v === 'editor';
+  for (const id of ['#rail-toggle', '#side-toggle', '#layout-menu']) $(id).hidden = S.mode !== 'team' || v !== 'team';
+  if (v === 'team' && S.state) setTimeout(applyLayout, 0); // once the view has its size again
   if (v === 'editor') { closeDrawer(); if (!E.draft) loadEditor(); }
   if (v === 'roles') { closeDrawer(); loadRoles(); }
 }

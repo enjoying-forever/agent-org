@@ -41,6 +41,13 @@ agent carries on where it stopped.
   restart or stop it, and its details (notes, files, usage). An agent that is not running
   shows a summary instead: its program and model, what it does, and its recent messages.
   On the right, the team's messages. Dark or light with the button at the top.
+- **Arranging the workspace:** the page never scrolls; the panes tile the space. The grid
+  button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
+  *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
+  and the edges of the team list and the messages, or hide either with the buttons at the
+  top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
+  agent keeps running; click it in the team list to bring the pane back). *Needs you* at
+  the top lists what is waiting for you. The arrangement is remembered for each team.
 - **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.

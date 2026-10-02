@@ -9,7 +9,9 @@
 </head>
 <body>
   <header class="bar">
-    <div class="brand"><span class="logo" aria-hidden="true"></span><b>agent-org</b><span id="project"></span></div>
+    <div class="brand"><span class="logo" aria-hidden="true"></span><b>agent-org</b>
+      <button id="rail-toggle" class="icon-btn" hidden title="Show or hide the team list" aria-label="Show or hide the team list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <span id="project"></span></div>
     <nav class="views" id="views" hidden>
       <button data-view="team" class="active">Team</button>
       <button data-view="board">Board <span id="board-count" class="count"></span></button>
@@ -18,6 +20,18 @@
     </nav>
     <div class="bar-right">
     <span id="conn" class="conn" hidden>connecting</span>
+    <div class="attention-wrap">
+      <button id="attention-btn" class="pill-btn" hidden title="What needs you, and how to get started"></button>
+      <div id="attention" class="popover" hidden>
+        <div id="problems" class="problems" hidden></div>
+        <div id="guide" class="guide" hidden></div>
+      </div>
+    </div>
+    <details class="menu" id="layout-menu" hidden>
+      <summary class="icon-btn" title="Arrange the agent panes" aria-label="Arrange the agent panes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></summary>
+      <div class="menu-list" id="layout-list"></div>
+    </details>
+    <button id="side-toggle" class="icon-btn" hidden title="Show or hide messages" aria-label="Show or hide messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
     <button id="market-btn" class="ghost" title="Browse the Role Market">Role Market</button>
     <button id="theme-btn" class="icon-btn" title="Switch between dark and light" aria-label="Switch between dark and light">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -85,11 +99,11 @@
         </button>
       </div>
     </nav>
+    <div class="gutter rail-gutter" data-edge="rail" title="Drag to resize"></div>
     <section class="chart-pane">
-      <div id="problems" class="problems" hidden></div>
-      <div id="guide" class="guide" hidden></div>
       <div id="panes" class="panes"></div>
     </section>
+    <div class="gutter side-gutter" data-edge="side" title="Drag to resize"></div>
     <aside class="side">
       <div class="tabs">
         <button data-tab="messages" class="active">Messages <span id="inbox-badge" class="badge" hidden></span></button>
@@ -283,5 +297,6 @@
   <script src="/static/board.js"></script>
   <script src="/static/editor.js"></script>
   <script src="/static/roles.js"></script>
+  <script src="/static/layout.js"></script>
 </body>
 </html>

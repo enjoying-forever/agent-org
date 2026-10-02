@@ -90,7 +90,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; } /* the app never scrolls as a page: its panels do */
 body {
   margin: 0;
   background: var(--paper);
@@ -222,21 +222,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 
 /* ---------- team view: rail, agent panes, messages ---------- */
 .team-view {
-  flex: 1; min-height: 0; display: grid; gap: 10px; padding: 0 10px 10px;
-  grid-template-columns: 236px minmax(0, 1fr) 400px;
+  flex: 1; min-height: 0; display: grid; padding: 0 10px 10px;
+  grid-template-columns: var(--rail-w, 236px) 10px minmax(0, 1fr) 10px var(--side-w, 400px);
+  grid-template-rows: minmax(0, 1fr);
 }
+.team-view.no-rail { grid-template-columns: 0 0 minmax(0, 1fr) 10px var(--side-w, 400px); }
+.team-view.no-side { grid-template-columns: var(--rail-w, 236px) 10px minmax(0, 1fr) 0 0; }
+.team-view.no-rail.no-side { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
+.team-view.no-rail .rail, .team-view.no-rail .rail-gutter,
+.team-view.no-side .side, .team-view.no-side .side-gutter { display: none; }
 .rail, .side {
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
   background: var(--sheet); border: 1px solid var(--edge); border-radius: 12px; overflow: hidden;
 }
-.chart-pane { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-@media (max-width: 1300px) { .team-view { grid-template-columns: 210px minmax(0, 1fr) 350px; } }
-@media (max-width: 1050px) {
-  .team-view { display: flex; flex-direction: column; overflow-y: auto; }
-  .rail, .chart-pane { flex-shrink: 0; overflow: visible; }
-  .rail .rail-tree { max-height: 240px; }
-  .side { flex-shrink: 0; height: 640px; }
-}
+.chart-pane { min-height: 0; min-width: 0; overflow: hidden; display: flex; }
+/* the edges of the team list and the messages panel: drag to resize */
+.gutter { cursor: col-resize; position: relative; touch-action: none; }
+.gutter::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 4px; width: 2px; border-radius: 2px; }
+.gutter:hover::after, body.dragging-x .gutter::after { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+body.dragging-x, body.dragging-x * { cursor: col-resize !important; user-select: none; }
+body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select: none; }
 
 /* the team rail */
 .rail-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 6px 16px; font-size: 13px; color: var(--muted); }
@@ -260,12 +265,24 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .rail-foot .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* agent panes */
-.panes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+/* the panes tile the space exactly (layout.js sets the tracks and where each pane goes) */
+.panes { flex: 1; min-width: 0; min-height: 0; position: relative; display: grid; gap: 8px; }
+.panes > .empty { grid-column: 1 / -1; grid-row: 1 / -1; align-self: center; }
 .pane {
-  display: flex; flex-direction: column; height: 310px; min-width: 0;
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
   background: var(--term); border: 1px solid var(--edge); border-radius: 12px; overflow: hidden;
 }
-.pane.wide { grid-column: 1 / -1; height: 340px; }
+.pane.max { position: absolute; inset: 0; z-index: 4; }
+.panes.has-max > .pane:not(.max), .panes.has-max > .pane-gutter { visibility: hidden; }
+.pane-head { cursor: default; user-select: none; }
+.pane-gutter { position: absolute; z-index: 3; touch-action: none; }
+.pane-gutter.x { top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; }
+.pane-gutter.y { left: 0; right: 0; height: 10px; margin-top: -5px; cursor: row-resize; }
+.pane-gutter::after { content: ""; position: absolute; border-radius: 2px; }
+.pane-gutter.x::after { top: 0; bottom: 0; left: 4px; width: 2px; }
+.pane-gutter.y::after { left: 0; right: 0; top: 4px; height: 2px; }
+.pane-gutter:hover::after, body.dragging-x .pane-gutter.x::after, body.dragging-y .pane-gutter.y::after {
+  background: color-mix(in srgb, var(--accent) 60%, transparent); }
 .pane.consultant { border-style: dashed; }
 .pane.focus { border-color: var(--accent); box-shadow: var(--glow); }
 .pane-head { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
@@ -308,8 +325,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .logline.result { --kind: var(--result); }
 .pane-empty { color: var(--faint); }
 /* a live terminal: the pane is the agent's own console */
-.pane.live { height: 380px; }
-.pane.live.wide { height: 460px; }
 .pane.live .pane-body { padding: 6px 2px 2px 10px; }
 .xterm-host { flex: 1 1 auto !important; min-height: 0; }
 .xterm-host .xterm { height: 100%; }
@@ -718,3 +733,35 @@ button.taskc { text-align: left; cursor: pointer; }
   .builder-row { grid-template-columns: 32px 1fr auto; }
   .builder-row input, .builder-row select { grid-column: 2 / -1; }
 }
+
+/* ---------- title-bar window controls ---------- */
+.brand .icon-btn { margin-left: 2px; }
+#rail-toggle.on, #side-toggle.on { color: var(--ink); }
+.rail-item.closed { opacity: .5; }
+.rail-item.closed .nm::after { content: "  closed"; font-size: 11.5px; color: var(--faint); font-weight: 400; }
+.menu-list button { display: flex; align-items: center; gap: 4px; }
+.menu-list .check { width: 18px; color: var(--accent-ink); flex-shrink: 0; }
+.menu-list button.checked { font-weight: 600; }
+#layout-menu > summary { list-style: none; }
+#layout-menu > summary::after { display: none; }
+.attention-wrap { position: relative; }
+.pill-btn { border-radius: 999px; padding: 3px 12px; font-size: 12.5px; font-weight: 600; background: var(--sheet-2); color: var(--muted); }
+.pill-btn.warn { background: var(--signal-wash); border-color: color-mix(in srgb, var(--signal) 45%, transparent); color: var(--signal); }
+.popover {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: min(460px, calc(100vw - 24px));
+  max-height: min(70vh, 620px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--lift);
+}
+.popover .problems, .popover .guide { border: 0; padding: 4px 6px; background: none; }
+.pane-head { gap: 6px; padding: 0 4px 0 10px; }
+.pane-head .nm { flex-shrink: 0; max-width: 55%; }
+.pane-head .sub { flex: 1 1 0; }
+.pane-head .icon-btn { width: 24px; height: 24px; }
+.pane-head .icon-btn svg { width: 13px; height: 13px; }
+/* fixed columns, so hiding the team list or the messages never moves the panes into their place */
+.team-view > .rail { grid-column: 1; }
+.team-view > .rail-gutter { grid-column: 2; }
+.team-view > .chart-pane { grid-column: 3; }
+.team-view > .side-gutter { grid-column: 4; }
+.team-view > .side { grid-column: 5; }
+.team-view > * { grid-row: 1; }

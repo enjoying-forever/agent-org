@@ -267,6 +267,7 @@ function renderProblems() {
   notifyProblems(list);
   const box = $('#problems');
   box.hidden = !list.length;
+  if (typeof updateAttention === 'function') updateAttention();
   if (!list.length) return;
   box.replaceChildren(h('b', {}, `Needs you (${list.length})`),
     ...list.map((p) => h('div', { class: `problem ${p.kind}` },
