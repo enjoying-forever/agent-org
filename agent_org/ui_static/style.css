@@ -652,3 +652,8 @@ button.taskc { text-align: left; cursor: pointer; }
   .builder-row { grid-template-columns: 32px 1fr auto; }
   .builder-row input, .builder-row select { grid-column: 2 / -1; }
 }
+
+/* a dropdown of known models or effort levels, with "Other…" revealing a text field */
+.choice { display: flex; flex-direction: column; gap: 6px; font-weight: 400; color: var(--ink); }
+.role-tile .mine:empty { display: none; }
+.role-tile .foot { flex-wrap: wrap; row-gap: 6px; }

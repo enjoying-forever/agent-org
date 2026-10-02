@@ -161,6 +161,7 @@
         </div>
       </div>
       <div id="roles-grid" class="roles-grid"></div>
+      <p id="roles-restore-row" class="muted small" hidden><button id="roles-restore" class="link"></button></p>
     </div>
   </main>
 
@@ -174,8 +175,8 @@
         <label class="wide">Icon<div class="icon-picks" id="rd-icons"></div></label>
         <label class="wide">One-line description<input id="rd-description" placeholder="What this role is good at"></label>
         <label>Program<select id="rd-harness"></select></label>
-        <label>Model<input id="rd-model" placeholder="the program's default"></label>
-        <label>Reasoning effort<input id="rd-effort" placeholder="default"></label>
+        <label>Model<span id="rd-model" class="choice"></span></label>
+        <label>Reasoning effort<span id="rd-effort" class="choice"></span></label>
         <label>Tags<input id="rd-tags" placeholder="e.g. code, review"></label>
         <label class="wide">Tasks it does (its duties)<textarea id="rd-duties" rows="2" placeholder="Review finished work when asked, and report a clear verdict."></textarea></label>
         <label class="wide">Prompt (its instructions: how to work, what to check)<textarea id="rd-instructions" rows="6" placeholder="Step-by-step habits, style rules, what a good result looks like..."></textarea></label>

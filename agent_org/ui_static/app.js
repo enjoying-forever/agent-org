@@ -30,6 +30,32 @@ function fill(el, ...kids) {
   return el;
 }
 
+/**
+ * A dropdown of known choices (models, effort levels), with "Other…" to type any name.
+ * `onchange(value)` gets the chosen text ('' = the program's default); `.read()` returns it too.
+ */
+function choiceField(value, options, { blank = 'default', onchange = () => {} } = {}) {
+  const OTHER = '\u0000other';
+  value = value || '';
+  const listed = !value || options.includes(value);
+  const input = h('input', { value: listed ? '' : value, placeholder: 'type a name', hidden: listed,
+    oninput: (e) => onchange(e.target.value.trim()) });
+  const select = h('select', {
+    onchange: (e) => {
+      const other = e.target.value === OTHER;
+      input.hidden = !other;
+      if (other) input.focus();
+      onchange(other ? input.value.trim() : e.target.value);
+    },
+  },
+  h('option', { value: '', selected: !value }, blank),
+  options.map((m) => h('option', { value: m, selected: m === value }, m)),
+  h('option', { value: OTHER, selected: !listed }, 'Other…'));
+  const box = h('span', { class: 'choice' }, select, input);
+  box.read = () => (select.value === OTHER ? input.value.trim() : select.value);
+  return box;
+}
+
 // Signing in happens before this page loads: the one-time link sets an HttpOnly cookie that
 // no script (this one included) can read. Every request adds the page's own header.
 const PAGE_HEADERS = { 'X-Agent-Org': '1' };

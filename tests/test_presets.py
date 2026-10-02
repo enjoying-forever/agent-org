@@ -27,10 +27,32 @@ def test_save_use_and_delete_your_own():
     presets.delete(preset)
     with pytest.raises(KeyError):
         presets.get(preset)
-    with pytest.raises(KeyError):
-        presets.delete("reviewer")  # the ready-made ones stay
     with pytest.raises(ValueError):
         presets.save("x", {"duties": "no program"})
+
+
+def test_ready_made_roles_can_be_edited_reset_deleted_and_restored():
+    assert presets.save("Reviewer", {"title": "Reviewer", "harness": "codex", "model": "gpt-6-luna"},
+                        "reviewer") == "reviewer"  # the id stays, so teams and hires still find it
+    card = next(p for p in presets.catalogue() if p["id"] == "reviewer")
+    assert (card["harness"], card["model"], card["edited"], card["mine"]) == ("codex", "gpt-6-luna", True, False)
+    assert presets.get("reviewer")["model"] == "gpt-6-luna"
+    presets.reset("reviewer")
+    assert presets.get("reviewer")["model"] == "claude-sonnet-5"
+    assert not next(p for p in presets.catalogue() if p["id"] == "reviewer")["edited"]
+
+    presets.delete("reviewer")
+    assert "reviewer" not in presets.names() and presets.hidden() == ["reviewer"]
+    with pytest.raises(KeyError):
+        presets.get("reviewer")
+    with pytest.raises(KeyError):
+        presets.delete("reviewer")
+    with pytest.raises(ValueError):
+        presets.save("Reviewer", {"title": "Reviewer", "harness": "claude"}, "reviewer")
+    assert presets.restore() == ["reviewer"] and "reviewer" in presets.names()
+    assert presets.restore() == []
+    with pytest.raises(KeyError):
+        presets.reset("my:nothing")
 
 
 def test_hiring_from_a_preset(hub, team_file):  # noqa: F811

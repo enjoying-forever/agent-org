@@ -2,7 +2,7 @@
 
 const BUILD = '__build';
 const ICONS = ['🧭', '⌨️', '🔍', '🧪', '📚', '✨', '🛠️', '🎨', '📝', '🧠', '🛡️', '📊', '🚀', '🤖', '🧩', '🗂️'];
-const R = { list: [], meta: null, editing: null, placing: null, icon: '' };
+const R = { list: [], meta: null, editing: null, placing: null, icon: '', model: null, effort: null };
 const B = { picked: [] }; // the team being built on the welcome page: [{ id, name, superior }]
 
 async function loadRoles() {
@@ -19,6 +19,12 @@ async function loadRoles() {
   renderRoles();
 }
 
+function renderRestore() {
+  const n = R.meta?.deleted_built_ins || 0;
+  $('#roles-restore-row').hidden = !n;
+  $('#roles-restore').textContent = `Bring back the ${n === 1 ? 'ready-made role' : `${n} ready-made roles`} you deleted`;
+}
+
 function matches(p, words) {
   const hay = [p.title, p.description, p.harness, p.model, p.duties, p.instructions, ...(p.tags || [])]
     .join(' ').toLowerCase();
@@ -31,6 +37,7 @@ function renderRoles() {
   const shown = R.list.filter((p) => (!program || p.harness === program) && matches(p, words));
   fill($('#roles-grid'), shown.length ? shown.map(roleTile)
     : h('div', { class: 'empty' }, R.list.length ? 'No role matches. Try other words.' : 'No roles yet.'));
+  renderRestore();
 }
 
 function roleIcon(p) {
@@ -39,7 +46,7 @@ function roleIcon(p) {
 
 function roleTile(p) {
   return h('div', { class: `role-tile h-${p.harness}` },
-    p.mine && h('span', { class: 'mine' }, 'Yours'),
+    h('span', { class: 'mine' }, p.mine ? 'Yours' : p.edited ? 'Edited' : ''),
     h('div', { class: 'top' }, roleIcon(p),
       h('div', {}, h('h3', {}, p.title),
         h('div', { class: 'specs' },
@@ -57,32 +64,31 @@ function roleTile(p) {
     h('div', { class: 'foot' },
       h('button', { class: 'primary small', onclick: () => placeRole(p) }, 'Add to team'),
       h('span', { class: 'grow' }),
-      p.mine
-        ? h('button', { class: 'ghost small', onclick: () => openRoleDesigner(p) }, 'Edit')
-        : h('button', { class: 'ghost small', title: 'Make your own editable copy', onclick: () => duplicateRole(p) }, 'Duplicate'),
+      h('button', { class: 'ghost small', onclick: () => openRoleDesigner(p) }, 'Edit'),
+      h('button', { class: 'ghost small', title: 'Make a copy to change separately', onclick: () => duplicateRole(p) }, 'Duplicate'),
       h('button', { class: 'ghost small', title: 'Download as a file to share or keep', onclick: () => exportRole(p) }, 'Export'),
-      p.mine && h('button', { class: 'ghost small danger', onclick: () => deleteRole(p) }, 'Delete')));
+      p.edited && h('button', { class: 'ghost small', title: 'Undo your edits to this ready-made role', onclick: () => resetRole(p) }, 'Reset'),
+      h('button', { class: 'ghost small danger', onclick: () => deleteRole(p) }, 'Delete')));
 }
 
 // ---------- designing a role ----------
 
-function openRoleDesigner(p) {
-  R.editing = p && p.mine ? p.id : null;
+async function openRoleDesigner(p) {
+  try { R.meta = await api('/api/roles'); } catch { /* keep the lists we have */ }
+  R.editing = p ? p.id : null;
   const v = p || { harness: 'claude', title: '', icon: '', description: '', model: '', effort: '', tags: [],
     duties: '', instructions: '', write_scope: [] };
-  $('#role-dialog-title').textContent = R.editing ? `Edit "${v.title}"` : p ? `New role, based on "${v.title}"` : 'New role';
+  $('#role-dialog-title').textContent = R.editing ? `Edit "${v.title}"` : 'New role';
   $('#rd-title').value = v.title || '';
   $('#rd-description').value = v.description || '';
   $('#rd-harness').replaceChildren(...R.meta.harnesses.map((x) => h('option', { value: x, selected: x === v.harness }, x)));
-  $('#rd-model').value = v.model || '';
-  $('#rd-effort').value = v.effort || '';
   $('#rd-tags').value = (v.tags || []).join(', ');
   $('#rd-duties').value = v.duties || '';
   $('#rd-instructions').value = v.instructions || '';
   $('#rd-scope').value = (v.write_scope || []).join(', ');
   R.icon = v.icon || '';
   renderIconPicks();
-  suggestModels();
+  renderModelFields(v.model, v.effort);
   $('#role-dialog').showModal();
 }
 
@@ -92,26 +98,31 @@ function renderIconPicks() {
   }, i)));
 }
 
-function suggestModels() {
+function renderModelFields(model, effort) {
   const harness = $('#rd-harness').value;
-  for (const [id, values] of [['rd-model', R.meta.models[harness] || []],
-    ['rd-effort', R.meta.efforts[harness] || []]]) {
-    const list = `${id}-list`;
-    let dl = document.getElementById(list);
-    if (!dl) { dl = h('datalist', { id: list }); document.body.append(dl); }
-    dl.replaceChildren(...values.map((m) => h('option', { value: m })));
-    $(`#${id}`).setAttribute('list', list);
-  }
+  const models = R.meta.models[harness] || [];
+  const efforts = R.meta.efforts[harness] || [];
+  R.model = choiceField(model, models, { blank: "program's default" });
+  R.effort = choiceField(effort, efforts, { blank: 'default' });
+  $('#rd-model').replaceChildren(...R.model.childNodes);
+  $('#rd-effort').replaceChildren(...R.effort.childNodes);
 }
 
-$('#rd-harness').addEventListener('change', suggestModels);
+// another program has other models: keep only what it offers
+$('#rd-harness').addEventListener('change', () => {
+  const harness = $('#rd-harness').value;
+  const model = R.model.read();
+  const effort = R.effort.read();
+  renderModelFields((R.meta.models[harness] || []).includes(model) ? model : '',
+    (R.meta.efforts[harness] || []).includes(effort) ? effort : '');
+});
 
 $('#role-form').addEventListener('submit', async (e) => {
   if (e.submitter?.value !== 'ok') return;
   e.preventDefault();
   const role = {
     title: $('#rd-title').value.trim(), icon: R.icon, description: $('#rd-description').value.trim(),
-    harness: $('#rd-harness').value, model: $('#rd-model').value.trim(), effort: $('#rd-effort').value.trim(),
+    harness: $('#rd-harness').value, model: R.model.read(), effort: R.effort.read(),
     tags: $('#rd-tags').value.split(',').map((x) => x.trim()).filter(Boolean),
     duties: $('#rd-duties').value.trim(), instructions: $('#rd-instructions').value.trim(),
     write_scope: $('#rd-scope').value.split(',').map((x) => x.trim()).filter(Boolean),
@@ -127,10 +138,22 @@ async function duplicateRole(p) {
 }
 
 async function deleteRole(p) {
-  if (!confirm(`Delete your role "${p.title}"? Teams that already use it keep their copy.`)) return;
+  const again = p.mine ? '' : ' You can bring it back from the bottom of this page.';
+  if (!confirm(`Delete "${p.title}" from the market? Teams that already use it keep their copy.${again}`)) return;
   const res = await act(api('/api/role-delete', { id: p.id }), () => `Deleted "${p.title}".`);
   if (res) { await loadRoles(); }
 }
+
+async function resetRole(p) {
+  if (!confirm(`Undo your edits to "${p.title}" and go back to the original?`)) return;
+  const res = await act(api('/api/role-reset', { id: p.id }), () => `"${p.title}" is back to the original.`);
+  if (res) { R.list = res.roles; renderRoles(); }
+}
+
+$('#roles-restore').addEventListener('click', async () => {
+  const res = await act(api('/api/role-restore', {}), (r) => `Brought back ${r.restored.join(', ')}.`);
+  if (res) { await loadRoles(); }
+});
 
 async function exportRole(p) {
   let res;

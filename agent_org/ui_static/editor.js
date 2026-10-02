@@ -152,17 +152,26 @@ function bound(obj, key, props = {}) {
 }
 
 function harnessSelect(obj) {
-  return h('select', { onchange: (e) => { obj.harness = e.target.value; touch(); renderEditor(); } },
-    E.meta.harnesses.map((x) => h('option', { value: x, selected: x === obj.harness }, x)));
+  return h('select', {
+    onchange: (e) => {
+      obj.harness = e.target.value;
+      // another program has other models: keep only what it offers
+      if (obj.model && !(E.meta.models[obj.harness] || []).includes(obj.model)) obj.model = '';
+      if (obj.effort && !(E.meta.efforts[obj.harness] || []).includes(obj.effort)) obj.effort = '';
+      touch();
+      renderEditor();
+    },
+  }, E.meta.harnesses.map((x) => h('option', { value: x, selected: x === obj.harness }, x)));
 }
 
-function datalists() {
-  const lists = [];
-  for (const hname of E.meta.harnesses) {
-    lists.push(h('datalist', { id: `models-${hname}` }, (E.meta.models[hname] || []).map((m) => h('option', { value: m }))));
-    lists.push(h('datalist', { id: `efforts-${hname}` }, (E.meta.efforts[hname] || []).map((m) => h('option', { value: m }))));
-  }
-  return lists;
+function modelField(obj) {
+  return choiceField(obj.model, E.meta.models[obj.harness] || [],
+    { blank: "program's default", onchange: (v) => { obj.model = v; touch(); } });
+}
+
+function effortField(obj) {
+  return choiceField(obj.effort, E.meta.efforts[obj.harness] || [],
+    { blank: 'default', onchange: (v) => { obj.effort = v; touch(); } });
 }
 
 function renderEditor() {
@@ -190,8 +199,8 @@ function renderEditor() {
           !d.roles.some((x) => x.name === r.superior) && r.superior !== d.owner
             ? h('option', { value: '', selected: true }, 'choose...') : null)),
         h('label', {}, 'Harness', harnessSelect(r)),
-        h('label', {}, 'Model', bound(r, 'model', { list: `models-${r.harness}`, placeholder: 'harness default' })),
-        h('label', {}, 'Effort', bound(r, 'effort', { list: `efforts-${r.harness}`, placeholder: 'default' })),
+        h('label', {}, 'Model', modelField(r)),
+        h('label', {}, 'Effort', effortField(r)),
         h('label', { class: 'wide' }, 'Files it may write (comma separated, * matches anything)',
           bound(r, 'write_scope', { class: 'mono', placeholder: 'e.g. src/*, tests/*   (empty: edits nothing)' })),
         h('label', { class: 'wide' }, 'Duties (one line: what it is for)', h('textarea', {
@@ -210,13 +219,12 @@ function renderEditor() {
     h('div', { class: 'grid' },
       h('label', {}, 'Tier name', h('input', { value: t.name, oninput: (e) => { t.name = e.target.value; touch(); }, onchange: renderEditor })),
       h('label', {}, 'Harness', harnessSelect(t)),
-      h('label', {}, 'Model', bound(t, 'model', { list: `models-${t.harness}`, placeholder: 'harness default' })),
-      h('label', {}, 'Effort', bound(t, 'effort', { list: `efforts-${t.harness}`, placeholder: 'default' })),
+      h('label', {}, 'Model', modelField(t)),
+      h('label', {}, 'Effort', effortField(t)),
       h('label', {}, 'At once (max)', bound(t, 'max_active', { type: 'number', min: 1 })),
       h('label', { class: 'wide' }, 'Use it for (the superior reads this to choose a tier)', bound(t, 'use_for')))));
 
   $('#editor').replaceChildren(
-    ...datalists(),
     h('div', { class: 'card' },
       h('h2', {}, 'Team'),
       h('p', {}, `Saved to ${S.state?.team_file || 'team.yaml'}. Paths are relative to that file.`),

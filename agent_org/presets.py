@@ -4,11 +4,14 @@ tags to find it by. Place one in any team from the Roles page, build a new team 
 or let a manager hire one (hire_agent preset=...).
 
 A few come ready-made; the owner's own live in ~/.agent-org/roles/<id>.yaml, and can be
-exported to a file and imported again (to share them, or keep them safe).
+exported to a file and imported again (to share them, or keep them safe). The ready-made ones
+can be edited too (the edited copy lives in roles/built-in/<id>.yaml, and "reset" goes back to
+the original) and deleted (hidden; "restore" brings every deleted one back).
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -95,6 +98,47 @@ def roles_dir():
     return templates.home_dir() / "roles"
 
 
+def _edited_dir():
+    return roles_dir() / "built-in"
+
+
+def _hidden_file():
+    return roles_dir() / "hidden-built-ins.json"
+
+
+def hidden() -> list[str]:
+    """The ready-made roles the owner deleted."""
+    try:
+        data = json.loads(_hidden_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [x for x in data if x in BUILT_IN] if isinstance(data, list) else []
+
+
+def _set_hidden(ids: list[str]) -> None:
+    roles_dir().mkdir(parents=True, exist_ok=True)
+    _hidden_file().write_text(json.dumps(sorted(set(ids))), encoding="utf-8")
+
+
+def _edited(preset: str) -> dict[str, Any] | None:
+    try:
+        spec = yaml.safe_load((_edited_dir() / f"{preset}.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    return spec if isinstance(spec, dict) and spec.get("harness") else None
+
+
+def _built_in() -> dict[str, dict[str, Any]]:
+    """The ready-made roles still in the market, with the owner's edits."""
+    gone = set(hidden())
+    return {k: _edited(k) or v for k, v in BUILT_IN.items() if k not in gone}
+
+
+def _write(path, spec: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=100), encoding="utf-8")
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-")[:40]
 
@@ -143,7 +187,7 @@ def _saved() -> dict[str, dict[str, Any]]:
 
 def package(preset: str) -> dict[str, Any]:
     """Everything about a role in the market (settings and description)."""
-    spec = _saved().get(preset) if preset.startswith(MINE) else BUILT_IN.get(preset)
+    spec = _saved().get(preset) if preset.startswith(MINE) else _built_in().get(preset)
     if spec is None:
         raise KeyError(preset)
     return dict(spec)
@@ -158,30 +202,33 @@ def get(preset: str) -> dict[str, Any]:
 def catalogue() -> list[dict[str, Any]]:
     def card(key: str, mine: bool) -> dict[str, Any]:
         spec = package(key)
-        return {"id": key, "mine": mine, "title": spec.get("title", key), "icon": spec.get("icon", ""),
+        return {"id": key, "mine": mine, "edited": not mine and _edited(key) is not None,
+                "title": spec.get("title", key), "icon": spec.get("icon", ""),
                 "description": spec.get("description", ""), "tags": list(spec.get("tags") or []), **get(key)}
-    return [card(k, True) for k in _saved()] + [card(k, False) for k in BUILT_IN]
+    return [card(k, True) for k in _saved()] + [card(k, False) for k in _built_in()]
 
 
 def names() -> list[str]:
-    return [*_saved(), *BUILT_IN]
+    return [*_saved(), *_built_in()]
 
 
 def save(name: str, role: dict[str, Any], preset: str | None = None) -> str:
-    """Keep a role in your market: a new one (named `name`), or - with `preset` - your existing one."""
+    """Keep a role in your market: a new one (named `name`), or - with `preset` - change an existing
+    one (yours, or a ready-made one: its edited copy is kept beside the original)."""
     spec = clean({**role, "title": role.get("title") or name})
+    if preset and not preset.startswith(MINE):
+        if preset not in _built_in():
+            raise RoleError("there is no such role")
+        _write(_edited_dir() / f"{preset}.yaml", spec)
+        return preset
     if preset:
-        if not preset.startswith(MINE):
-            raise RoleError("ready-made roles cannot be changed; duplicate one first")
         stem = preset[len(MINE):]
     else:
         stem = _slug(spec["title"]) or "role"
         base, n = stem, 2
         while (roles_dir() / f"{stem}.yaml").exists():
             stem, n = f"{base}-{n}", n + 1
-    roles_dir().mkdir(parents=True, exist_ok=True)
-    (roles_dir() / f"{stem}.yaml").write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=100),
-                                              encoding="utf-8")
+    _write(roles_dir() / f"{stem}.yaml", spec)
     return MINE + stem
 
 
@@ -191,9 +238,28 @@ def duplicate(preset: str) -> str:
 
 
 def delete(preset: str) -> None:
-    if not preset.startswith(MINE):
+    """Remove a role from the market. Teams that use it keep their own copy of its settings."""
+    if preset.startswith(MINE):
+        (roles_dir() / f"{preset[len(MINE):]}.yaml").unlink(missing_ok=True)
+        return
+    if preset not in _built_in():
         raise KeyError(preset)
-    (roles_dir() / f"{preset[len(MINE):]}.yaml").unlink(missing_ok=True)
+    _set_hidden([*hidden(), preset])
+
+
+def reset(preset: str) -> None:
+    """Undo the owner's edits to a ready-made role."""
+    if preset not in _built_in():
+        raise KeyError(preset)
+    (_edited_dir() / f"{preset}.yaml").unlink(missing_ok=True)
+
+
+def restore() -> list[str]:
+    """Bring back every deleted ready-made role (with its edits, if it had any); returns their ids."""
+    back = hidden()
+    if back:
+        _set_hidden([])
+    return back
 
 
 def export_text(preset: str) -> tuple[str, str]:

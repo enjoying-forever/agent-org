@@ -558,7 +558,7 @@ class App:
 
     def roles(self) -> dict[str, Any]:
         return {"roles": presets.catalogue(), "harnesses": list(HARNESSES), "models": self.catalog.models,
-                "efforts": EFFORTS, "team_open": self._hub is not None,
+                "efforts": EFFORTS, "deleted_built_ins": len(presets.hidden()), "team_open": self._hub is not None,
                 "team_roles": list(self.hub.team.roles) if self._hub is not None else [],
                 "owner": self.hub.base_team.owner if self._hub is not None else ""}
 
@@ -629,8 +629,18 @@ class App:
         try:
             presets.delete(_str(body, "id"))
         except KeyError:
-            raise ApiError("Only your own saved roles can be deleted.") from None
+            raise ApiError("There is no such role.") from None
         return {"presets": presets.catalogue()}
+
+    def role_reset(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            presets.reset(_str(body, "id"))
+        except KeyError:
+            raise ApiError("Only a ready-made role can be reset.") from None
+        return {"roles": presets.catalogue()}
+
+    def role_restore(self, body: dict[str, Any]) -> dict[str, Any]:
+        return {"restored": presets.restore(), "roles": presets.catalogue()}
 
     def default_template(self, body: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -696,6 +706,7 @@ POST_ROUTES = {
     "/api/save-preset": App.save_preset, "/api/delete-preset": App.delete_preset,
     "/api/role-save": App.role_save, "/api/role-duplicate": App.role_duplicate,
     "/api/role-delete": App.delete_preset, "/api/role-import": App.role_import, "/api/role-place": App.role_place,
+    "/api/role-reset": App.role_reset, "/api/role-restore": App.role_restore,
 }
 
 

@@ -172,8 +172,10 @@ The **Roles** page is a marketplace of them: ready-made ones (planner, coder, re
 tester, researcher, Gemini coder) and your own.
 
 - **Search** and **filter** by program; open *Tasks and prompt* on a card to see what it does.
-- **New role** designs one; **Duplicate** makes your own editable copy of a ready-made one;
-  **Edit** and **Delete** your own.
+- **New role** designs one; **Duplicate** copies any role. **Edit** and **Delete** work on every
+  role, the ready-made ones too: an edited ready-made role shows *Edited* and has **Reset** to
+  go back to the original, and a deleted one comes back with the link at the bottom of the page.
+- Model and reasoning effort are dropdowns of what each program offers; **Other…** takes any name.
 - **Export** downloads a role as a `.role.yaml` file; **Import…** adds one - share roles, or
   keep them safe.
 - **Add to team** places a role in the open team: choose its name and whom it reports to.

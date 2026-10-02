@@ -430,7 +430,7 @@ def test_role_presets_from_the_editor(server):
     mine = next(p for p in server.ok("/api/team")["presets"] if p["id"] == "my:careful-coder")
     assert mine["mine"] and mine["instructions"] == "Run the tests."
     server.ok("/api/delete-preset", {"id": "my:careful-coder"})
-    assert server.request("/api/delete-preset", {"id": "coder"})[0] == 400
+    assert server.request("/api/delete-preset", {"id": "nope"})[0] == 400
 
 
 def test_the_role_market(server, tmp_path):
@@ -447,7 +447,19 @@ def test_the_role_market(server, tmp_path):
                                                                 "duties": "Write and fix the docs."}})
     mine = next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "my:doc-writer")
     assert mine["duties"] == "Write and fix the docs." and mine["mine"]
-    assert server.request("/api/role-save", {"id": "reviewer", "role": {"title": "x", "harness": "claude"}})[0] == 400
+    # a ready-made one can be edited, reset, deleted and brought back
+    server.ok("/api/role-save", {"id": "reviewer", "role": {"title": "Strict reviewer", "harness": "claude",
+                                                            "model": "opus"}})
+    edited = next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "reviewer")
+    assert (edited["title"], edited["model"], edited["edited"]) == ("Strict reviewer", "opus", True)
+    assert server.ok("/api/role-reset", {"id": "reviewer"})
+    assert next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "reviewer")["model"] == "claude-sonnet-5"
+    assert server.request("/api/role-reset", {"id": "my:doc-writer"})[0] == 400
+    server.ok("/api/role-delete", {"id": "tester"})
+    market = server.ok("/api/roles")
+    assert "tester" not in {p["id"] for p in market["roles"]} and market["deleted_built_ins"] == 1
+    assert server.ok("/api/role-restore", {})["restored"] == ["tester"]
+    assert server.ok("/api/roles")["deleted_built_ins"] == 0
     copy = server.ok("/api/role-duplicate", {"id": "reviewer"})
     assert copy["id"].startswith("my:reviewer")
     # export, delete, import: the same role comes back
