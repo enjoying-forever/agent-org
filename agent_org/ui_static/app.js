@@ -734,7 +734,7 @@ function checkAsking(p) {
   }, QUIET_MS);
 }
 
-/** Agents whose terminal shows a question: they wait for you, in "Needs you". */
+/** Agents whose terminal shows a question: they wait for you (a desktop notification while you are away). */
 function askingProblems() {
   return [...PANES.values()].filter((p) => p.asking && p.term).map((p) => ({
     kind: 'asking', role: p.name, action: 'show-pane', text: `${p.name} is asking something in its terminal: answer it there.`,

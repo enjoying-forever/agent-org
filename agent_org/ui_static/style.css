@@ -560,7 +560,7 @@ select.add-role { width: auto; font-weight: 600; }
 .check .fix { font-size: 12.5px; margin-top: 3px; font-family: var(--font-code); word-break: break-all; }
 .check button { margin-top: 6px; }
 
-/* first-run guide & what needs you (top of the panes column) */
+/* first-run guide (in the title bar's popover) */
 .guide { background: var(--sheet); border: 1px solid var(--edge); border-radius: 12px; padding: 12px 16px; flex-shrink: 0; }
 .guide-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .guide-head b { font-weight: 600; font-size: 14.5px; }
@@ -568,16 +568,6 @@ select.add-role { width: auto; font-weight: 600; }
 .guide li { margin: 3px 0; }
 .guide li::marker { color: var(--accent-ink); font-weight: 600; }
 .guide li.done { color: var(--faint); text-decoration: line-through; }
-.problems { background: var(--sheet); border: 1px solid color-mix(in srgb, var(--signal) 45%, var(--edge));
-  border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-.problems > b { font-weight: 600; font-size: 14.5px; color: var(--signal); }
-.problem { display: flex; gap: 10px; align-items: center; font-size: 13.5px; }
-.picon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--sheet-2); flex-shrink: 0; font-size: 11.5px; color: var(--muted); }
-.problem.question .picon, .problem.review .picon { background: var(--accent-wash); color: var(--accent-ink); }
-.problem.stopped .picon, .problem.stuck .picon, .problem.stalled .picon, .problem.blocked .picon, .problem.loop .picon,
-.problem.duplicate .picon { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
-.problem.limit .picon { background: var(--signal-wash); color: var(--signal); }
-.ptext { flex: 1; }
 
 /* ---------- tasks ---------- */
 .taskc { border: 1px solid var(--edge); border-left: 3px solid var(--tcolor, var(--rule)); border-radius: 6px 9px 9px 6px;
@@ -755,7 +745,7 @@ button.taskc { text-align: left; cursor: pointer; }
   max-height: min(70vh, 620px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px;
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--lift);
 }
-.popover .problems, .popover .guide { border: 0; padding: 4px 6px; background: none; }
+.popover .guide { border: 0; padding: 4px 6px; background: none; }
 .pane-head { gap: 6px; padding: 0 4px 0 10px; }
 .pane-head .nm { flex-shrink: 0; max-width: 55%; }
 .pane-head .sub { flex: 1 1 0; }
@@ -780,7 +770,6 @@ kbd { font: 12px var(--font-code); background: var(--well); border: 1px solid va
 /* an agent asking you something in its terminal */
 .pane.asking { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal), 0 0 26px -8px var(--signal); }
 .rail-item.asking .run-dot { background: var(--signal); box-shadow: 0 0 8px var(--signal); }
-.problem.asking .picon { background: var(--signal-wash); color: var(--signal); }
 
 /* moving a pane by its title */
 .pane-head[draggable="true"] { cursor: grab; }

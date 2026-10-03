@@ -53,9 +53,11 @@ agent carries on where it stopped.
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
   and the edges of the team list and the messages, or hide either with the buttons at the
   top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
-  agent keeps running; click it in the team list to bring the pane back). *Needs you* at
-  the top lists what is waiting for you - including an agent whose terminal is asking
-  something (a permission, "trust this folder?"): its pane turns amber until you answer. Drag a
+  agent keeps running; click it in the team list to bring the pane back). What waits for you
+  shows where it is: a stuck agent or a second session in its pane's title, unread messages
+  as a count, and an agent whose terminal is asking something (a permission, "trust this
+  folder?") as an amber outline on its pane until you answer. While the window is in the
+  background, an agent that gets stuck or runs out of usage brings a desktop notification. Drag a
   pane by its title onto another to swap them. The arrangement is remembered for each team, and the
   window comes back where and as big as it was.
 - **Changing the team right there:** the **+** in the team list opens your roles: drag one onto

@@ -247,8 +247,6 @@ $('#board-role').addEventListener('change', renderBoard);
 
 // ---------- problems ----------
 
-const PROBLEM_ICON = { asking: '?', stopped: '⏸', stuck: '⟳', limit: '⌛', stalled: '⏳', question: '?', review: '✓', blocked: '⛔', loop: '↻', duplicate: '⧉' };
-
 const NOTIFY_KINDS = ['limit', 'stuck', 'loop', 'duplicate', 'asking'];  // the rest already arrive as messages
 
 /** A desktop notification when an agent runs out of usage, gets stuck, or loops - once each. */
@@ -262,37 +260,9 @@ function notifyProblems(list) {
   } catch { /* notifications unavailable */ }
 }
 
+/** Problems show where they are (a pane's title and outline); this only notifies you while away. */
 function renderProblems() {
-  const list = [...S.state.problems, ...askingProblems()];
-  notifyProblems(list);
-  const box = $('#problems');
-  box.hidden = !list.length;
-  if (typeof updateAttention === 'function') updateAttention();
-  if (!list.length) return;
-  box.replaceChildren(h('b', {}, `Needs you (${list.length})`),
-    ...list.map((p) => h('div', { class: `problem ${p.kind}` },
-      h('span', { class: 'picon' }, PROBLEM_ICON[p.kind] || '!'),
-      h('span', { class: 'ptext' }, p.text),
-      problemAction(p))));
-}
-
-function problemAction(p) {
-  const btn = (label, fn) => h('button', { class: 'small', onclick: fn }, label);
-  if (p.action === 'start') return btn('Start', () => launchRoles([p.role]));
-  if (p.action === 'stop') return btn('Stop', () => stopRoles(p.role));
-  if (p.action === 'answer') {
-    return btn('Answer', () => {
-      const m = S.messages.find((x) => x.id === p.message_id);
-      showView('team'); showTab('messages');
-      if (m) { jumpTo(m.id); replyTo(m); }
-    });
-  }
-  if (p.action === 'review') return btn('Review', () => openTask(p.task_id));
-  if (p.action === 'restart') return btn('Restart', () => restartRole(p.role));
-  if (p.action === 'reassign') return btn('Move its tasks', () => openMoveTasks(p.role));
-  if (p.action === 'open-task') return btn('Open', () => openTask(p.task_id));
-  if (p.action === 'show-pane') return btn('Show', () => { $('#attention').hidden = true; showView('team'); goToPane(p.role); });
-  return null;
+  notifyProblems([...S.state.problems, ...askingProblems()]);
 }
 
 // ---------- activity ----------

@@ -317,15 +317,14 @@ function renderLayoutMenu() {
       h('span', { class: 'check' }), L.hidden?.length ? `Show closed panes (${L.hidden.length})` : 'No closed panes'));
 }
 
-// ---------- what needs you: one button in the title bar ----------
+// ---------- the first-run steps: one button in the title bar ----------
+// What waits for you shows where it is (the pane's title, its amber outline, the messages),
+// not in a list of its own.
 
 function updateAttention() {
   const btn = $('#attention-btn');
-  const problems = (S.state?.problems?.length || 0) + askingProblems().length;
-  const guide = !$('#guide').hidden;
-  btn.hidden = S.mode !== 'team' || (!problems && !guide);
-  btn.classList.toggle('warn', problems > 0);
-  btn.textContent = problems ? `Needs you ${problems}` : 'Getting started';
+  btn.hidden = S.mode !== 'team' || $('#guide').hidden;
+  btn.textContent = 'Getting started';
   if (btn.hidden) $('#attention').hidden = true;
 }
 
