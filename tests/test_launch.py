@@ -130,6 +130,12 @@ def test_claude_gets_the_hooks_through_settings(team_file):
     assert f"'--settings' '{out / 'settings.json'}'" in script
 
 
+def test_a_claude_agent_runs_without_your_mods_and_tips(team_file):
+    settings = json.loads((run_dry(team_file, "leader") / "leader" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == ""  # no personal status lines under every agent
+    assert settings["spinnerTipsEnabled"] is False
+
+
 def test_codex_gets_the_hooks_through_config_overrides(team_file, tmp_path):
     hub = Hub.open(team_file)
     try:

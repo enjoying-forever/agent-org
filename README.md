@@ -46,6 +46,8 @@ agent carries on where it stopped.
   On the right, the team's messages. Dark or light with the button at the top.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
   buttons) and the terminal below; hover the title for its status, model, usage, tasks and files.
+  Claude agents start without your personal Claude Code mods (their status lines, such as a
+  token counter) and without spinner tips, so a terminal shows only the agent's work.
 - **Arranging the workspace:** the page never scrolls; the panes tile the space. The grid
   button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)

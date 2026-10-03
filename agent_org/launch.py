@@ -189,6 +189,13 @@ def grok_hooks_state() -> str:
         return "outdated"
 
 
+# An agent's terminal shows its work, not your personal extras: no mods of yours (their
+# status lines, such as a token counter, show in yellow under every agent) and no spinner tips.
+# These go in the agent's own settings because Claude Code applies your settings' "env"
+# over whatever environment it starts with.
+AGENT_CLAUDE_SETTINGS = {"env": {"CLAUDE_CODE_PLUGIN_DIRS": ""}, "spinnerTipsEnabled": False}
+
+
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
                   resume: str | None = None, new_id: str | None = None) -> Launch:
     spec = hub.team.roles[role]
@@ -200,8 +207,8 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
         {"mcpServers": {SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}},
         indent=2), encoding="utf-8")
     settings = out / "settings.json"
-    settings.write_text(json.dumps({"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")}, indent=2),
-                        encoding="utf-8")
+    settings.write_text(json.dumps(AGENT_CLAUDE_SETTINGS | {"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")},
+                                   indent=2), encoding="utf-8")
     cli = ["--mcp-config", str(config), "--allowedTools", f"mcp__{SERVER_NAME}",
            "--append-system-prompt-file", str(card), "--settings", str(settings)]
     if spec.model:
