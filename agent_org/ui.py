@@ -1216,12 +1216,25 @@ def open_window(url: str, control: WindowControl | None = None,
     control = control or WindowControl()
     control.window = window
 
+    def normal() -> bool:
+        """The window shows at its own size and place: not maximized or minimized. Windows reports
+        the move to the maximized place before pywebview's maximized event comes, so ask it."""
+        if state.get("maximized"):
+            return False
+        try:
+            import ctypes  # noqa: PLC0415 - Windows only
+
+            hwnd = int(window.native.Handle.ToInt64())
+            return not (ctypes.windll.user32.IsZoomed(hwnd) or ctypes.windll.user32.IsIconic(hwnd))
+        except Exception:  # noqa: BLE001 - not on Windows' own window: trust the events
+            return True
+
     def resized(width: int, height: int) -> None:
-        if not state.get("maximized"):
+        if normal():
             state.update(width=int(width), height=int(height))
 
     def moved(x: int, y: int) -> None:
-        if not state.get("maximized"):
+        if normal():
             state.update(x=int(x), y=int(y))
 
     def save() -> None:

@@ -1003,15 +1003,13 @@ function startFresh(r) {
 // ---------- messages ----------
 
 function addMessages(list) {
-  const feed = $('#feed');
-  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   for (const m of list) {
     S.messages.push(m);
     S.lastId = Math.max(S.lastId, m.id);
   }
   notifyOwner(list);
   if (S.state) {
-    renderFeed(atBottom ? 'bottom' : null);
+    renderFeed(); // it stays at the newest message unless you scrolled up (see stickFeed)
     renderPanes();
     renderGuide();
   }
@@ -1048,8 +1046,27 @@ function renderFeed(scroll) {
     ? 'No messages match this filter.'
     : 'No messages yet. Launch the team, then give your leader a task below.';
   feed.replaceChildren(...(shown.length ? shown.map((m) => messageEl(m)) : [h('div', { class: 'empty' }, empty)]));
-  if (scroll === 'bottom') feed.scrollTop = feed.scrollHeight;
+  if (scroll === 'bottom') S.feedStick = true;
+  stickFeed();
 }
+
+// The conversation opens at its newest message and follows new ones - unless you scrolled up to
+// read. It is set again once the messages have their final height (fonts, a panel shown again).
+function stickFeed() {
+  if (S.feedStick === false) return;
+  const feed = $('#feed');
+  const down = () => { if (S.feedStick !== false) feed.scrollTop = feed.scrollHeight; };
+  down();
+  requestAnimationFrame(down);
+  setTimeout(down, 300);
+}
+
+$('#feed').addEventListener('scroll', () => {
+  const feed = $('#feed');
+  if (!feed.clientHeight) return; // hidden: no position to keep
+  S.feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+});
+new ResizeObserver(stickFeed).observe($('#feed'));
 
 const KIND_LABEL = {
   instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer',
@@ -1289,6 +1306,7 @@ function showTab(t) {
   $('#tab-messages').hidden = t !== 'messages';
   $('#tab-activity').hidden = t !== 'activity';
   $('#tab-files').hidden = t !== 'files';
+  if (t === 'messages') stickFeed();
 }
 
 for (const b of document.querySelectorAll('.views button')) b.addEventListener('click', () => showView(b.dataset.view));

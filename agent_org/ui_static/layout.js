@@ -413,9 +413,12 @@ $('#keys-btn').addEventListener('click', () => showInfo('Keyboard shortcuts',
 
 function askClose() {
   const running = (S.state?.roles || []).filter((r) => r.terminal?.alive).map((r) => r.name);
-  const who = running.length ? `${running.join(', ')} ${running.length === 1 ? 'is' : 'are'}` : 'Agents are';
-  $('#close-sub').textContent = `${who} running in this window. In the background they keep working, and starting `
-    + 'agent-org again brings the window back. Stopped, they keep their conversations: Start resumes them.';
+  const one = running.length === 1;
+  const who = running.length ? `${running.join(', ')} ${one ? 'is' : 'are'}` : 'Agents are';
+  const [they, keep] = one ? ['it', 'keeps'] : ['they', 'keep'];
+  $('#close-sub').textContent = `${who} running in this window. In the background ${they} ${keep} working, and starting `
+    + `agent-org again brings the window back. Stopped, ${they} ${keep} ${one ? 'its conversation' : 'their conversations'}: `
+    + `Start resumes ${one ? 'it' : 'them'}.`;
   $('#close-dialog').returnValue = '';
   $('#close-dialog').showModal();
 }
