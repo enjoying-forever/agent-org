@@ -527,11 +527,12 @@ select.add-role { width: auto; font-weight: 600; }
 .tree li:last-child::before { border-right: 1.5px solid var(--rule); border-radius: 0 8px 0 0; }
 .tree li:first-child::after { border-radius: 8px 0 0 0; }
 .tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 24px; border-left: 1.5px solid var(--rule); }
-.node { width: 150px; background: var(--term); border: 1px solid var(--edge); border-top: 3px solid var(--harness, var(--rule));
+.node { width: max-content; min-width: 150px; max-width: 240px; background: var(--term); border: 1px solid var(--edge); border-top: 3px solid var(--harness, var(--rule));
   border-radius: 8px; padding: 7px 10px 8px; text-align: left; display: flex; flex-direction: column; gap: 2px; }
 .node.owner { --harness: var(--owner); align-items: center; text-align: center; }
 .node.consultant { border-style: dashed; border-top-style: solid; }
 .node .name { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.node .name > :not(.nm) { flex-shrink: 0; }
 .node .name .nm { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node .model { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

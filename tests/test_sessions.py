@@ -180,6 +180,20 @@ def test_an_unrecorded_claude_conversation_is_found_by_its_kickoff(team_file, fa
         hub.close()
 
 
+def test_another_teams_conversation_in_the_same_folder_is_not_resumed(team_file, fake_home, monkeypatch):
+    project = (team_file.parent / "project").resolve()
+    theirs = "44444444-4444-4444-8444-444444444444"
+    path = claude_folder(fake_home, project) / f"{theirs}.jsonl"
+    path.write_text(json.dumps({"text": launch.kickoff("leader")}) + "\n", encoding="utf-8")
+    hub = Hub.open(team_file)  # a new team, in a folder where another team's 'leader' worked before
+    try:
+        born = sessions.born
+        monkeypatch.setattr(sessions, "born", lambda p: born(p) - 86400 if p == path else born(p))  # a day older
+        assert launch.plan_session(hub, "leader")[0] is None  # a new conversation, not theirs
+    finally:
+        hub.close()
+
+
 def test_codex_conversations_are_matched_by_folder_and_kickoff(team_file, fake_home):
     project = (team_file.parent / "project").resolve()
     day = fake_home / ".codex" / "sessions" / "2026" / "09" / "28"

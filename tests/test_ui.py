@@ -453,7 +453,7 @@ def test_the_role_market(server, tmp_path):
     edited = next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "reviewer")
     assert (edited["title"], edited["model"], edited["edited"]) == ("Strict reviewer", "opus", True)
     assert server.ok("/api/role-reset", {"id": "reviewer"})
-    assert next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "reviewer")["model"] == "claude-sonnet-5"
+    assert next(p for p in server.ok("/api/roles")["roles"] if p["id"] == "reviewer")["model"] == "claude-sonnet-5-5"
     assert server.request("/api/role-reset", {"id": "my:doc-writer"})[0] == 400
     server.ok("/api/role-delete", {"id": "tester"})
     market = server.ok("/api/roles")

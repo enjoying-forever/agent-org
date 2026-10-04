@@ -60,7 +60,7 @@ EFFORTS = {
     "deepseek": list(launch.DSH_EFFORTS),
 }
 DEEPSEEK_MODELS = ["deepseek-flash", "deepseek-v4-pro"]  # what its API accepts
-CLAUDE_MODELS = ["opus", "sonnet", "fable", "haiku", "claude-opus-5-5", "claude-sonnet-5",
+CLAUDE_MODELS = ["opus", "sonnet", "fable", "haiku", "claude-opus-5-5", "claude-sonnet-5-5",
                  "claude-fable-5-1", "claude-haiku-4-5"]
 
 
@@ -210,6 +210,28 @@ class App:
         title, color, cwd, argv = launch.tab_parts(tab)
         self.terminals.open(launch.tab_role(tab), argv, cwd, title, color)
 
+    def start_for_agent(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Start a role an agent just hired or summoned, in a terminal of this window.
+
+        The agent's own tool server asks (launch.window_start): it cannot reach the window's
+        terminals itself. Only for a team whose agents run here; otherwise it opens a tab.
+        """
+        team_file, role = Path(_str(body, "team")).resolve(), _str(body, "role")
+        if not self.in_window or (team_file not in self._hosts and team_file != self.team_file):
+            raise ApiError("that team's agents do not run in this window", HTTPStatus.CONFLICT)
+        own = team_file == self.team_file and self._hub is not None
+        hub = self._hub if own else Hub.open(team_file)
+        try:
+            if role not in hub.team.roles:
+                raise ApiError(f"'{role}' is not a role", HTTPStatus.NOT_FOUND)
+            tab = launch.role_tab(hub, team_file, role, quiet=True)
+        finally:
+            if not own:
+                hub.close()
+        title, color, cwd, argv = launch.tab_parts(tab)
+        self._hosts.setdefault(team_file, terminals.TerminalHost()).open(role, argv, cwd, title, color)
+        return {"started": role}
+
     def term_read(self, wants: str) -> dict[str, Any]:
         """New output of the terminals the page shows. `wants` is JSON: {role: [terminal id, offset]}."""
         try:
@@ -257,16 +279,21 @@ class App:
 
     def _wake(self) -> None:
         """Type a line into agents resting at their prompt when work waits for them (agent_org.waker)."""
+        hubs: dict[Path, Hub] = {}  # its own connections: a team you switched away from keeps running
         while True:
             time.sleep(waker.EVERY)
-            hub, team_file = self._hub, self.team_file
-            host = self._hosts.get(team_file) if team_file else None
-            if hub is None or host is None:
-                continue
-            try:
-                self.waker.tick(hub, host)
-            except Exception as e:  # noqa: BLE001 - a failed look must not end the UI
-                print(f"waker: {e}", file=sys.stderr)
+            for team_file, host in list(self._hosts.items()):
+                if not any(term.alive for _, term in host.items()):
+                    continue
+                try:
+                    if team_file not in hubs:
+                        hubs[team_file] = Hub.open(team_file)
+                    self.waker.tick(hubs[team_file], host)
+                except Exception as e:  # noqa: BLE001 - a failed look must not end the UI
+                    print(f"waker: {e}", file=sys.stderr)
+                    stale = hubs.pop(team_file, None)  # opened afresh next time (team.yaml may have changed)
+                    if stale is not None:
+                        stale.close()
 
     def _autostart(self, hub: Hub, problems: list[watchdog.Problem]) -> None:
         """Start agents that have work but are not running (Gas Town's 'sling'), within the cap,
@@ -895,7 +922,7 @@ SECURITY_HEADERS = {
 }
 
 
-LAUNCHER_HEADER = "X-Agent-Org-Launcher"
+LAUNCHER_HEADER = launch.LAUNCHER_HEADER
 TEAMMATE_FIELDS = ("harness", "model", "effort", "duties", "instructions", "write_scope", "superior")
 
 
@@ -1026,8 +1053,12 @@ def make_handler(app: App, access: Access, port_holder: list[int]) -> type[BaseH
             route = routes.get(path)
             if route is None:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": f"no such endpoint: {path}"})
+            self._call(lambda: route(app, arg), path)
+
+        def _call(self, run: Callable[[], Any], path: str) -> None:
+            """Answer with what `run` returns, or with its error - never a traceback."""
             try:
-                self._json(HTTPStatus.OK, route(app, arg))
+                self._json(HTTPStatus.OK, run())
             except ApiError as e:
                 self._json(e.status, {"error": str(e)})
             except HubError as e:
@@ -1088,6 +1119,10 @@ def make_handler(app: App, access: Access, port_holder: list[int]) -> type[BaseH
                 if not secrets.compare_digest(self.headers.get(LAUNCHER_HEADER, ""), app.window.launcher):
                     return self._json(HTTPStatus.FORBIDDEN, {"error": "not this agent-org's launcher"})
                 return self._json(HTTPStatus.OK, {"shown": app.window.show()})
+            if path == "/api/launcher/start":  # an agent hired one or summoned a consultant: start it here
+                if not secrets.compare_digest(self.headers.get(LAUNCHER_HEADER, ""), app.window.launcher):
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "not this agent-org's launcher"})
+                return self._call(lambda: app.start_for_agent(body), path)
             self._api(POST_ROUTES, path, body)
 
         def do_PUT(self) -> None:

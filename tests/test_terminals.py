@@ -1,6 +1,8 @@
 """Agents' terminals inside the agent-org window (pseudo-terminals the UI server owns)."""
 
+import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -129,6 +131,35 @@ def test_the_window_comes_back_where_it_was():
         "width": 1200, "height": 800, "maximized": True, "x": 100, "y": 50}
     assert "x" not in window_geometry({"x": 3000, "y": 50}, screens)  # that monitor is gone
     assert window_geometry({"width": 300, "height": 200}, screens)["width"] == 900  # never below the minimum
+
+
+def test_an_agent_hired_by_an_agent_starts_in_the_window(server, monkeypatch):  # noqa: F811
+    import urllib.error
+    import urllib.request
+
+    from agent_org import launch, terminals, ui
+    app = server.app
+
+    def post(secret):
+        req = urllib.request.Request(server.base + "/api/launcher/start", method="POST",
+                                     data=json.dumps({"team": str(app.team_file), "role": "worker-a"}).encode(),
+                                     headers={"Content-Type": "application/json", ui.LAUNCHER_HEADER: secret})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as res:
+                return res.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    assert post("guess") == 403  # only with this agent-org's launcher secret
+    assert post(app.window.launcher) == 409  # its agents run in tabs here: the tool server opens one
+    opened = []
+    monkeypatch.setattr(terminals.TerminalHost, "open", lambda self, *a: opened.append(a))
+    app.in_window = True
+    assert post(app.window.launcher) == 200
+    (role, argv, cwd, title, color), = opened
+    assert role == "worker-a" and argv[-1].endswith("start.ps1")
+    assert "AGENT_ORG_STOP_IDLE" in Path(argv[-1]).read_text(encoding="utf-8")  # quiet: the window wakes it
+    assert not launch.window_start(app.team_file, "worker-a")  # and a test never reaches a real window
 
 
 class FakeWindow:

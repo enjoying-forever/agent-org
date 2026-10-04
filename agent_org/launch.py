@@ -106,7 +106,9 @@ def resumable_session(hub: Hub, role: str) -> str | None:
         if own and sessions.exists(spec.harness, own):  # the record named a helper conversation: fix it
             hub.store.record_session_id(role, spec.harness, own)
             return own
-    found = sessions.find(spec.harness, hub.root_of(role), role)
+    database = hub.team.database
+    since = sessions.born(database) - 60 if database.is_file() else 0.0  # not another team's (see find)
+    found = sessions.find(spec.harness, hub.root_of(role), role, since)
     if found and sessions.exists(spec.harness, found):
         hub.store.record_session_id(role, spec.harness, found)
         return found
@@ -201,6 +203,11 @@ def grok_hooks_state() -> str:
 AGENT_CLAUDE_SETTINGS = {"env": {"CLAUDE_CODE_PLUGIN_DIRS": ""}, "spinnerTipsEnabled": False}
 
 
+def claude_model(model: str) -> str:
+    """Claude model ids write versions with dashes: 'claude-sonnet-5.5' (as people write it) is claude-sonnet-5-5."""
+    return re.sub(r"(?<=\d)\.(?=\d)", "-", model) if model.lower().startswith("claude-") else model
+
+
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
                   resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
@@ -217,7 +224,7 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
     cli = ["--mcp-config", str(config), "--allowedTools", f"mcp__{SERVER_NAME}",
            "--append-system-prompt-file", str(card), "--settings", str(settings)]
     if spec.model:
-        cli += ["--model", spec.model]
+        cli += ["--model", claude_model(spec.model)]
     if spec.effort:
         cli += ["--effort", spec.effort]
     if resume:
@@ -746,11 +753,40 @@ def stop_role(hub: Hub, role: str) -> int:
     return stopped
 
 
+LAUNCHER_HEADER = "X-Agent-Org-Launcher"
+
+
+def window_start(team_file: Path, role: str, timeout: float = 20.0) -> bool:
+    """Ask the running agent-org window to start `role` in a terminal of its own. True if it did.
+
+    An agent that hires a teammate or summons a consultant does it through its own tool server,
+    which cannot reach the window's terminals; the window says how to reach it in instance.json.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):  # a test must never start real agents
+        return False
+    import urllib.request  # noqa: PLC0415
+
+    from . import templates  # noqa: PLC0415
+
+    try:
+        info = json.loads((templates.home_dir() / "instance.json").read_text(encoding="utf-8"))
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{int(info['port'])}/api/launcher/start", method="POST",
+            data=json.dumps({"team": str(team_file), "role": role}).encode("utf-8"),
+            headers={"Content-Type": "application/json", LAUNCHER_HEADER: str(info["launcher"])})
+        with urllib.request.urlopen(req, timeout=timeout) as res:  # noqa: S310 - our own local server
+            return res.status == 200
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def tab_opener(team_file: Path, opener: Callable[[list[str]], None] | None = None, quiet: bool = False) -> Opener:
     """What the hub calls to show a newly summoned consultant: in its own tab, or with
     `opener` (the agent-org window opens it in a terminal of its own, `quiet`)."""
 
     def open_consultant(role: Role) -> None:
+        if opener is None and window_start(team_file, role.name):  # an agent asked: into the window, if it runs
+            return
         hub = Hub.open(team_file)  # a fresh connection sees the consultant just registered
         try:
             tab = role_tab(hub, team_file, role.name, quiet=quiet)

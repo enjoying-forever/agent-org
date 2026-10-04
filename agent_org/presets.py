@@ -50,7 +50,7 @@ BUILT_IN: dict[str, dict[str, Any]] = {
     "reviewer": {
         "title": "Reviewer", "icon": "🔍", "tags": ["quality", "review"],
         "description": "Checks finished work for bugs, gaps and security issues, without touching the code.",
-        "harness": "claude", "model": "claude-sonnet-5", "effort": "medium",
+        "harness": "claude", "model": "claude-sonnet-5-5", "effort": "medium",
         "duties": "Review finished work when asked: read the changes, run them or their tests, and report a "
                   "clear verdict.",
         "instructions": "Check, in this order: does it meet the task's 'done when'; bugs and missing cases; "

@@ -55,6 +55,12 @@ def test_claude_role_files(team_file):
                      r"'You are the ''leader'' agent", script)
 
 
+def test_a_claude_model_written_with_a_dot_still_starts():
+    assert launch.claude_model("claude-sonnet-5.5") == "claude-sonnet-5-5"
+    assert launch.claude_model("claude-opus-5-5") == "claude-opus-5-5"
+    assert launch.claude_model("sonnet") == "sonnet"
+
+
 def test_codex_script_passes_valid_toml(team_file, tmp_path):
     out = run_dry(team_file, "worker-a") / "worker-a"
     script = (out / "start.ps1").read_text(encoding="utf-8")

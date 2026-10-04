@@ -38,7 +38,7 @@ def test_ready_made_roles_can_be_edited_reset_deleted_and_restored():
     assert (card["harness"], card["model"], card["edited"], card["mine"]) == ("codex", "gpt-6-luna", True, False)
     assert presets.get("reviewer")["model"] == "gpt-6-luna"
     presets.reset("reviewer")
-    assert presets.get("reviewer")["model"] == "claude-sonnet-5"
+    assert presets.get("reviewer")["model"] == "claude-sonnet-5-5"
     assert not next(p for p in presets.catalogue() if p["id"] == "reviewer")["edited"]
 
     presets.delete("reviewer")
@@ -57,7 +57,7 @@ def test_ready_made_roles_can_be_edited_reset_deleted_and_restored():
 
 def test_hiring_from_a_preset(hub, team_file):  # noqa: F811
     role = hub.session("leader").hire("rev", preset="reviewer", write_scope=["docs/*"])
-    assert (role.harness, role.model) == ("claude", "claude-sonnet-5")
+    assert (role.harness, role.model) == ("claude", "claude-sonnet-5-5")
     assert role.write_scope == ("docs/*",)  # what you give overrides the preset
     assert "reviews/task-<number>.md" in roles_in(team_file)["rev"]["instructions"]
     with pytest.raises(HubError, match="no role preset 'nope'"):

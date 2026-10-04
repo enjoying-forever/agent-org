@@ -94,11 +94,19 @@ def markers(role: str) -> tuple[str, ...]:
     return (f"You are the '{role}' agent in a team", f"you are back as '{role}'", f"agent-org: '{role}', ")
 
 
-def find(harness: str, project_root: Path, role: str) -> str | None:
+def born(path: Path) -> float:
+    """When a file was created (Windows keeps it; elsewhere the last change of its metadata)."""
+    st = path.stat()
+    return float(getattr(st, "st_birthtime", st.st_ctime))
+
+
+def find(harness: str, project_root: Path, role: str, since: float = 0.0) -> str | None:
     """The id of the newest conversation `harness` had as `role` in this project, if any.
 
     Used when the hub has no id on record: a team started before agent-org kept them,
-    or a Codex agent whose hooks were not trusted yet.
+    or a Codex agent whose hooks were not trusted yet. Only conversations begun after `since`
+    (when the team's hub was made) count: another team in the same folder may have roles of
+    the same names, and its conversations are not this team's.
     """
     wanted = markers(role)
     # Antigravity keeps every project's conversations together: also require this project's path.
@@ -109,6 +117,8 @@ def find(harness: str, project_root: Path, role: str) -> str | None:
         try:
             mtime = path.stat().st_mtime
             if best and mtime <= best[0]:
+                continue
+            if since and born(path) < since:
                 continue
             with path.open("rb") as f:
                 head = f.read(SCAN_BYTES).decode("utf-8", errors="replace")
