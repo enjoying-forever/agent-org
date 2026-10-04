@@ -5,7 +5,7 @@ Modelled on Gas Town's Witness. `patrol` runs every half minute while the UI is 
 problem - the hub remembers what it already did - and returns what still needs a
 person's attention, for the UI's Problems list.
 
-- Leases that ran out are released.
+- Leases that ran out are released (and noted in the activity, not sent: that would wake the agent).
 - A task with no progress for STALL minutes gets a nudge; after another STALL
   minutes, whoever assigned it is told.
 - A question left unanswered for HELP_WAIT minutes is passed up one level.
@@ -99,12 +99,10 @@ def patrol(hub: Hub, act: bool = True, now: float | None = None) -> list[Problem
     if act:
         hub.set_stuck({n: s.to_dict() for n, s in stuck.items()})
 
-    if act:  # leases whose holder went quiet
+    if act:  # leases whose holder went quiet: noted, not sent - a message would wake an idle agent for
+        # nothing, and its next edit takes the file again (or says who has it)
         for lock in store.expire():
             hub.event("file", lock.owner, f"lease on {lock.path} ran out and was released")
-            if team.is_member(lock.owner) and lock.owner != owner:
-                hub.notice(lock.owner, f"Your lease on {lock.path} ran out after an hour without activity "
-                                       "and was released. claim_file it again before you edit it.")
 
     open_tasks = store.tasks(open_only=True)
     for name in team.roles:

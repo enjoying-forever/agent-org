@@ -321,7 +321,7 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
 .logline .txt { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .88; }
 .logline.instruction { --kind: var(--instruction); }
 .logline.report { --kind: var(--report); }
-.logline.help, .logline.notice { --kind: var(--help); }
+.logline.help, .logline.notice, .logline.note { --kind: var(--help); }
 .logline.peer { --kind: var(--peer); }
 .logline.task { --kind: var(--task); }
 .logline.result { --kind: var(--result); }
@@ -404,7 +404,7 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
 .msg.task { --kind: var(--task); }
 .msg.result { --kind: var(--result); }
 .msg.reply { --kind: var(--faint); }
-.msg.notice { --kind: var(--help); }
+.msg.notice, .msg.note { --kind: var(--help); }
 .msg.help, .msg.to-me.unread { background: linear-gradient(90deg, color-mix(in srgb, var(--kind, var(--accent)) 10%, transparent), transparent 75%); }
 .msg.urgent::after { content: "urgent"; position: absolute; right: 2px; top: 11px; font-size: 11.5px; font-weight: 700; color: var(--danger); }
 .msg .head { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }

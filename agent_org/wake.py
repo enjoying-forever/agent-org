@@ -71,7 +71,7 @@ def wait_for_work(hub: Hub, role: str, stop_marker: Path, poll: float = 1.0) -> 
         while True:
             if stop_marker.exists():
                 return STOPPED
-            if hub.store.unread_counts().get(role, 0) > 0:
+            if hub.store.unread_count(role, waking=True) > 0:  # a note alone waits for real mail
                 return 0
             if time.time() - last_beat > HEARTBEAT:
                 hub.store.check_in(pid, role)

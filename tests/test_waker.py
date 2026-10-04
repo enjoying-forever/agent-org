@@ -163,6 +163,13 @@ def test_a_stuck_agent_is_not_woken(hub):
     assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
 
 
+def test_a_note_alone_does_not_wake_an_agent(hub):
+    hub.note("researcher", "leader changed your role (duties). Call my_role to see it now.")
+    now = later()
+    term = FakeTerm(now)
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
+
+
 def test_an_idle_agent_without_mail_is_left_alone(hub):
     now = later()
     term = FakeTerm(now)

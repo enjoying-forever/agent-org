@@ -218,13 +218,13 @@ def test_activity_renews_leases(hub):
 # the watchdog (after Gas Town's Witness)
 
 
-def test_watchdog_releases_expired_leases_and_tells_the_holder(hub):
+def test_watchdog_releases_expired_leases_without_waking_the_holder(hub):
     hub.session("worker-a").claim("src/app.py")
     hub.store._db.execute("UPDATE locks SET expires_at = ?", (time.time() - 1,))
     watchdog.patrol(hub)
     assert hub.store.locks() == []
-    [note] = hub.session("worker-a").read_inbox()
-    assert note.sender == "hub" and "Your lease on src/app.py ran out" in note.text
+    assert hub.session("worker-a").read_inbox() == []  # no message: it would wake an idle agent for nothing
+    assert any("lease on src/app.py ran out" in e.text for e in hub.store.events_after(0))
 
 
 def test_watchdog_lists_agents_that_stopped_with_work(hub):

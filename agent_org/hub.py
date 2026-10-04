@@ -347,8 +347,14 @@ class Hub:
     # the hub's own voice
 
     def notice(self, to: str, text: str, task_id: int | None = None, urgent: bool = False) -> Message:
-        """A message from the hub itself: reminders, escalations, expired leases."""
+        """A message from the hub itself: reminders and escalations. It wakes its receiver."""
         return self.store.add_message(HUB, to, "notice", text, None, urgent, task_id)
+
+    def note(self, to: str, text: str) -> Message:
+        """Mail from the hub that does not wake its receiver: it comes with the next message that does
+        (or the next read_inbox). For news that changes nothing right now - a role changed, say -
+        which would otherwise cost an idle agent a turn."""
+        return self.store.add_message(HUB, to, "note", text, None, False, None)
 
     def event(self, kind: str, role: str, text: str, task_id: int | None = None) -> None:
         self.store.add_event(kind, role, text, task_id)
@@ -526,9 +532,11 @@ class RoleSession:
         while True:
             if stop is not None and stop.is_set():
                 return []
-            messages = self.read_inbox()
-            if messages or time.monotonic() >= deadline:
-                return messages
+            self.team  # noqa: B018 - a consultant dismissed meanwhile is told so
+            if self.store.unread_count(self.name, waking=True):  # notes alone do not end the wait
+                return self.read_inbox()
+            if time.monotonic() >= deadline:
+                return []
             delay = min(poll, max(0.0, deadline - time.monotonic()))
             if stop is not None:
                 stop.wait(delay)
@@ -966,7 +974,7 @@ class RoleSession:
         self.hub.edit_team(change)
         self._announce(f"changed {name}: " + ", ".join(f"{k} -> {v}" for k, v in what.items())[:300])
         if superior is not None or duties is not None or write_scope is not None:
-            self.hub.notice(name, f"{self.name} changed your role ({', '.join(what)}). Call my_role to see it now.")
+            self.hub.note(name, f"{self.name} changed your role ({', '.join(what)}). Call my_role to see it now.")
         return self.hub.team.roles[name]
 
     def let_go(self, name: str, reason: str = "") -> list[str]:
@@ -997,7 +1005,7 @@ class RoleSession:
         self._announce(f"let go of {name}" + (f": {reason.strip()}" if reason.strip() else "")
                        + (f"; {', '.join(moved)} now report to {above}" if moved else ""))
         for sub in moved:
-            self.hub.notice(sub, f"{name} has left the team; you now report to {above}. Call my_role.")
+            self.hub.note(sub, f"{name} has left the team; you now report to {above}. Call my_role.")
         return moved
 
     def _scope_allowed(self, team: Team, scope: list[str] | tuple[str, ...]) -> None:

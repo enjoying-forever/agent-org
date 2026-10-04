@@ -374,25 +374,29 @@ class Store:
         self._db.executemany("UPDATE messages SET read_at = ? WHERE id = ? AND read_at IS NULL",
                              [(time.time(), i) for i in ids])
 
+    # A "note" is mail that does not wake its receiver (see Hub.note); `waking` counts only the rest.
+
     @_locked
-    def unread_count(self, recipient: str) -> int:
+    def unread_count(self, recipient: str, waking: bool = False) -> int:
         row = self._db.execute(
-            "SELECT COUNT(*) FROM messages WHERE recipient = ? AND read_at IS NULL", (recipient,)
+            "SELECT COUNT(*) FROM messages WHERE recipient = ? AND read_at IS NULL"
+            + (" AND kind != 'note'" if waking else ""), (recipient,)
         ).fetchone()
         return row[0]
 
     @_locked
-    def unread_counts(self) -> dict[str, int]:
+    def unread_counts(self, waking: bool = False) -> dict[str, int]:
         rows = self._db.execute(
-            "SELECT recipient, COUNT(*) FROM messages WHERE read_at IS NULL GROUP BY recipient"
+            "SELECT recipient, COUNT(*) FROM messages WHERE read_at IS NULL"
+            + (" AND kind != 'note'" if waking else "") + " GROUP BY recipient"
         ).fetchall()
         return {r[0]: r[1] for r in rows}
 
     @_locked
     def unread_since(self) -> dict[str, float]:
-        """When each recipient's oldest unread message was sent."""
+        """When each recipient's oldest unread message that wakes it was sent."""
         rows = self._db.execute(
-            "SELECT recipient, MIN(sent_at) FROM messages WHERE read_at IS NULL GROUP BY recipient"
+            "SELECT recipient, MIN(sent_at) FROM messages WHERE read_at IS NULL AND kind != 'note' GROUP BY recipient"
         ).fetchall()
         return {r[0]: r[1] for r in rows}
 

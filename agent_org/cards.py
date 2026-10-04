@@ -70,7 +70,7 @@ def role_card(me: RoleSession) -> str:
             "work is over. Every agent costs the owner's subscriptions, so hire only for real need and pick "
             "the cheapest model that can do the job.",
         ] if team.settings.team_changes and (subs or superior == team.owner) else []),
-        "- Messages from 'hub' are the system's own reminders: a quiet task, an expired file lease, a "
+        "- Messages from 'hub' are the system's own reminders: a quiet task, a "
         "question passed up to you. Act on them.",
         "- Keep your status current with set_status, so everyone can see what you are doing.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "

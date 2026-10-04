@@ -128,8 +128,8 @@ def out_of_usage(me: RoleSession, payload: dict[str, Any]) -> bool:
 def on_stop(me: RoleSession, payload: dict[str, Any], wait: float | None = None, poll: float = 1.0):
     if out_of_usage(me, payload):
         return None  # a new turn would fail at once and use up its mail; it is restarted after the reset
-    # Mail first: an agent can't finish work it hasn't read yet.
-    waiting = me.read_inbox()
+    # Mail first: an agent can't finish work it hasn't read yet. (Notes alone wait for real mail.)
+    waiting = me.read_inbox() if me.store.unread_count(me.name, waking=True) else []
     if waiting:
         return deliver(me, waiting)
     if not field(payload, "stop_hook_active"):

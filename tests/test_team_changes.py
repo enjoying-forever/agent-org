@@ -79,8 +79,13 @@ def test_changing_an_agent_below_you(hub, team_file):
     role = lead.change_role("worker-a", duties="Only the API.", model="gpt-6-luna", write_scope=["src/api/*"])
     assert (role.duties, role.model, role.write_scope) == ("Only the API.", "gpt-6-luna", ("src/api/*",))
     assert roles_in(team_file)["worker-a"]["write_scope"] == ["src/api/*"]
-    [told] = hub.session("worker-a").read_inbox()
-    assert "changed your role" in told.text
+    worker = hub.session("worker-a")
+    # it is told, without being woken for it: the news comes with its next real message
+    assert hub.store.unread_count("worker-a", waking=True) == 0 and hub.store.unread_since().get("worker-a") is None
+    assert worker.wait_for_messages(0.05, poll=0.01) == []  # a note alone does not end a wait
+    lead.send("worker-a", "Start on the API.")
+    told, work = worker.wait_for_messages(1, poll=0.01)
+    assert (told.kind, work.text) == ("note", "Start on the API.") and "changed your role" in told.text
     with pytest.raises(PermissionDenied):
         lead.change_role("leader", duties="x")  # not below it
     with pytest.raises(PermissionDenied, match="only move under you"):

@@ -1051,7 +1051,7 @@ function renderFeed(scroll) {
 
 const KIND_LABEL = {
   instruction: 'instruction', report: 'report', help: 'help request', peer: 'peer',
-  task: 'task', result: 'result', reply: 'reply', notice: 'hub notice',
+  task: 'task', result: 'result', reply: 'reply', notice: 'hub notice', note: 'hub note',
 };
 
 function messageEl(m, compact = false) {
