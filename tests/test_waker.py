@@ -23,6 +23,8 @@ def team_file(tmp_path):
 @pytest.fixture
 def hub(team_file):
     h = Hub.open(team_file)
+    for i, role in enumerate(h.team.roles):  # every agent's program runs (its tool server checked in)
+        h.store.check_in(900000 + i, role)
     yield h
     h.close()
 
@@ -170,6 +172,14 @@ def test_a_note_alone_does_not_wake_an_agent(hub):
     hub.note("researcher", "leader changed your role (duties). Call my_role to see it now.")
     now = later()
     term = FakeTerm(now)
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
+
+
+def test_a_terminal_whose_program_ended_gets_no_line(hub):
+    hub.session("leader").send("researcher", "look into X")
+    hub.store.check_out(900000 + list(hub.team.roles).index("researcher"))  # its program exited: a shell is left
+    now = later()
+    term = FakeTerm(now, output="PS E:\\project> ")
     assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
 
 

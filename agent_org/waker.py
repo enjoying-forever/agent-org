@@ -88,10 +88,11 @@ class Waker:
         team = hub.team
         unread_since = hub.store.unread_since()
         stuck = hub.stuck()  # out of usage, or broken: a line would change nothing (it is restarted later)
+        online = hub.store.online()  # its program runs (its tool server checks in): else the line would go to a shell
         woken = []
         for name, term in host.items():
             spec = team.roles.get(name)
-            if spec is None or spec.harness == "deepseek" or not term.alive or name in stuck:
+            if spec is None or spec.harness == "deepseek" or not term.alive or name in stuck or not online.get(name):
                 continue
             if now - term.started < READY or now - term.last_output < QUIET or now - term.last_input < TYPED:
                 continue
