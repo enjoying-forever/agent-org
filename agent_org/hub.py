@@ -31,12 +31,30 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
-from . import gitops, presets, safety, verify
+from . import presets, safety, verify
 import yaml
 
 from .filelock import file_lock
 from .store import ACTIVE, CLOSED, Consultant, Lock, Message, Status, Store, Task
 from .team import HARNESSES, NAME_RE, Role, Team, TeamError
+
+
+class _OnFirstUse:
+    """A module imported when first used: a hook (a new process on every tool call) that never needs
+    git starts faster without it."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def __getattr__(self, attr: str):
+        import importlib  # noqa: PLC0415
+
+        module = importlib.import_module(self._name)
+        globals()[self._name.rsplit(".", 1)[-1]] = module
+        return getattr(module, attr)
+
+
+gitops = _OnFirstUse("agent_org.gitops")
 
 STATES = ("idle", "working", "waiting", "blocked", "done")
 OUTCOMES = ("done", "blocked", "failed", "rejected")

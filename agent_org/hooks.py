@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import safety, sessions, usage
+from . import safety, sessions
 from .hub import Hub, HubError, RoleSession
 from .store import Message
 
@@ -116,6 +116,7 @@ def deliver(me: RoleSession, messages: list[Message]) -> dict[str, Any]:
 
 def out_of_usage(me: RoleSession, payload: dict[str, Any]) -> bool:
     """True if this conversation just ran into its subscription's usage limit."""
+    from . import usage  # noqa: PLC0415 - only the stop hook needs it: every other hook starts faster
     role = me.hub.team.roles.get(me.name)
     session_id = field(payload, "session_id") or payload.get("conversationId")
     if role is None or not isinstance(session_id, str):

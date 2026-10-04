@@ -65,13 +65,6 @@ def role_card(me: RoleSession) -> str:
             "was built and where.",
         ] if superior == team.owner else []),
         *([
-            "- Give work as tasks with a done_when, and split big work into several tasks; after= makes a "
-            "task wait for others. Review each result (review_task) before building on it.",
-            "- Each program runs on its own subscription. When the hub tells you a subordinate is out of "
-            "its usage limit, move its urgent tasks with reassign_task to someone free - preferably on "
-            "another program - and let the rest wait for the reset.",
-        ] if subs else []),
-        *([
             "- Your team is not fixed: if the work needs another agent (a tester, a second worker, a "
             "researcher), hire_agent one under you; change_agent adjusts one; let_go_agent removes one whose "
             "work is over. Every agent costs the owner's subscriptions, so hire only for real need and pick "

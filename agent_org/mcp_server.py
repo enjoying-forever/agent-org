@@ -161,8 +161,8 @@ class Tools:
                           "effort": text, "write_scope": {"type": "array", "items": {"type": "string"},
                           "description": "files it may write, e.g. [\"src/*\", \"tests/*\"]; [] for none"}}
             self._add("hire_agent",
-                      "Add an agent to the team, under you (or under someone below you). It opens in its own "
-                      "tab and starts at once. Pick the cheapest program and model that can do the work; every "
+                      "Add an agent to the team, under you (or under someone below you). It starts at once, in "
+                      "its own terminal. Pick the cheapest program and model that can do the work; every "
                       "agent uses the owner's subscriptions.",
                       {"name": text, "harness": {"type": "string", "enum": list(HARNESSES)},
                        "superior": {"type": "string", "description": "who it reports to (default: you)"},
