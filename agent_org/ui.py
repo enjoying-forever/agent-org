@@ -142,6 +142,13 @@ def load_recent() -> list[str]:
         return []
 
 
+def forget_recent(path: str) -> None:
+    """Take a team off the recent list (its files stay as they are)."""
+    paths = [p for p in load_recent() if p != path]
+    recent_file().parent.mkdir(parents=True, exist_ok=True)
+    recent_file().write_text(json.dumps(paths, indent=2), encoding="utf-8")
+
+
 def remember_recent(team_file: Path) -> None:
     paths = [str(team_file)] + [p for p in load_recent() if Path(p) != team_file]
     recent_file().parent.mkdir(parents=True, exist_ok=True)
@@ -460,6 +467,10 @@ class App:
         if r.returncode != 0:
             raise ApiError(f"Could not create the shortcut: {r.stderr.strip()[:300]}")
         return {"shortcut": r.stdout.strip()}
+
+    def forget_recent(self, body: dict[str, Any]) -> dict[str, Any]:
+        forget_recent(_str(body, "path"))
+        return {}
 
     def close_team(self, body: dict[str, Any]) -> dict[str, Any]:
         self.close()
@@ -900,6 +911,7 @@ GET_ROUTES = {
 }
 POST_ROUTES = {
     "/api/open": App.open_team, "/api/create": App.create_team, "/api/close": App.close_team,
+    "/api/forget-recent": App.forget_recent,
     "/api/pick-folder": App.pick_folder, "/api/install-grok-hooks": App.install_grok_hooks,
     "/api/desktop-shortcut": App.desktop_shortcut,
     "/api/send": App.send, "/api/task": App.assign, "/api/cancel-task": App.cancel_task,

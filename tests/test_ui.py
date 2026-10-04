@@ -240,6 +240,8 @@ def test_welcome_mode_without_a_team(tmp_path, monkeypatch):
         assert Path(created["team_file"]) == (folder / "team.yaml").resolve()
         assert [r["name"] for r in app.state()["roles"]] == ["leader", "worker"]
         assert app.home()["recent"][0]["name"] == "my app"
+        app.forget_recent({"path": app.home()["recent"][0]["path"]})  # off the list; its files stay
+        assert app.home()["recent"] == [] and (folder / "team.yaml").is_file()
         with pytest.raises(ui.ApiError, match="already exists"):
             app.create_team({"folder": str(folder), "template": "solo"})
         app.close_team({})

@@ -237,9 +237,11 @@ async function renderHome() {
   try { home = await api('/api/home'); } catch (e) { toast(e.message, true); return; }
   const recent = home.recent.filter((r) => r.exists);
   $('#recent-card').hidden = !recent.length;
-  $('#recent').replaceChildren(...recent.map((r) => h('button', {
-    class: 'list-item', title: r.path, onclick: () => openTeam(r.path),
-  }, h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path))));
+  $('#recent').replaceChildren(...recent.map((r) => h('div', { class: 'recent-row' },
+    h('button', { class: 'list-item', title: r.path, onclick: () => openTeam(r.path) },
+      h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path)),
+    h('button', { class: 'icon-btn forget', title: 'Take it off this list (its files stay)',
+      onclick: () => act(api('/api/forget-recent', { path: r.path })).then(renderHome) }, icon('close')))));
   const chosen = document.querySelector('#templates input:checked')?.value || home.default;
   const buildChoice = h('label', { class: 'tier' },
     h('input', { type: 'radio', name: 'template', value: BUILD, checked: chosen === BUILD,
@@ -252,9 +254,9 @@ async function renderHome() {
       h('span', { class: 'muted' }, `  ${t.roles}`)),
     h('small', {}, t.summary,
       !t.default && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('default', t); } },
-        ' Make default'),
+        'Make default'),
       t.mine && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('delete', t); } },
-        ' Delete')))));
+        'Delete')))));
   renderChecks($('#home-checks'));
   renderBuilder();
 }

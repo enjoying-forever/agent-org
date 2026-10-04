@@ -820,3 +820,10 @@ body.adding-role .rail-item:not(.drop-here), body.adding-role .pane:not(.drop-he
 .pane-head .icon-btn { width: 22px; height: 22px; }
 .pane.live .pane-body { padding: 4px 0 2px 8px; }
 .pane-status { display: none; }
+
+/* the recent list: open a team, or take it off the list */
+.recent-row { display: flex; align-items: center; gap: 4px; }
+.recent-row .list-item { flex: 1; min-width: 0; }
+.recent-row .forget { opacity: 0; flex-shrink: 0; }
+.recent-row:hover .forget, .recent-row .forget:focus-visible { opacity: 1; }
+.tier small .link { margin-left: 10px; }
