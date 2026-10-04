@@ -38,7 +38,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, gitops, launch, presets, templates, terminals, usage, watchdog
+from . import doctor, gitops, launch, presets, templates, terminals, usage, waker, watchdog
 from .hub import BRANCH_RULE, LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -166,8 +166,11 @@ class App:
                           and not os.environ.get("PYTEST_CURRENT_TEST"))
         self._hosts: dict[Path, terminals.TerminalHost] = {}  # one per team: switching teams keeps them running
         self.window = WindowControl()
+        self.waker = waker.Waker()
         if watch:
             threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
+            if self.in_window:
+                threading.Thread(target=self._wake, name="waker", daemon=True).start()
         if team_file is not None:
             self._open(team_file)
 
@@ -185,7 +188,7 @@ class App:
 
     def _open(self, team_file: Path) -> None:
         team_file = team_file.resolve()
-        hub = Hub.open(team_file, opener=launch.tab_opener(team_file, self._open_tab))  # raises TeamError
+        hub = Hub.open(team_file, opener=launch.tab_opener(team_file, self._open_tab, quiet=self.in_window))  # raises TeamError
         hub.stopper = lambda role: launch.stop_role(hub, role)
         if self._hub is not None:
             self._hub.close()
@@ -223,7 +226,7 @@ class App:
         data = body.get("data")
         if term is None or not isinstance(data, str) or len(data) > 65536:
             raise ApiError("That agent has no terminal here.")
-        term.write(data)
+        term.typed(data)
         return {}
 
     def open_url(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -252,6 +255,19 @@ class App:
             except Exception as e:  # noqa: BLE001 - a failed patrol must not end the UI
                 print(f"watchdog: {e}", file=sys.stderr)
 
+    def _wake(self) -> None:
+        """Type a line into agents resting at their prompt when work waits for them (agent_org.waker)."""
+        while True:
+            time.sleep(waker.EVERY)
+            hub, team_file = self._hub, self.team_file
+            host = self._hosts.get(team_file) if team_file else None
+            if hub is None or host is None:
+                continue
+            try:
+                self.waker.tick(hub, host)
+            except Exception as e:  # noqa: BLE001 - a failed look must not end the UI
+                print(f"waker: {e}", file=sys.stderr)
+
     def _autostart(self, hub: Hub, problems: list[watchdog.Problem]) -> None:
         """Start agents that have work but are not running (Gas Town's 'sling'), within the cap,
         and restart agents left idle at their prompt by a usage limit that has reset or an API error."""
@@ -268,7 +284,7 @@ class App:
                     hub.event("agent", p.role, "could not be restarted automatically: its program did not stop")
                     continue
             tabs, _ = launch.prepare(hub, self.team_file, [p.role], owner_tab=False,
-                                     limit=hub.base_team.settings.max_running)
+                                     limit=hub.base_team.settings.max_running, quiet=self.in_window)
             if not tabs:
                 continue  # at the cap: it waits for a free place
             self._autostarted[p.role] = now
@@ -602,7 +618,7 @@ class App:
                 raise ApiError(f"'{name}' is not a role")
         tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
                                        force=bool(body.get("force")), fresh=bool(body.get("fresh")),
-                                       limit=self.hub.base_team.settings.max_running)
+                                       limit=self.hub.base_team.settings.max_running, quiet=self.in_window)
         self._resumable.clear()
 
         in_window = self.in_window

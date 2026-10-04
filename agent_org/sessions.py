@@ -89,8 +89,9 @@ def main_session(harness: str, session_id: str) -> str | None:
 
 
 def markers(role: str) -> tuple[str, ...]:
-    """Text only a conversation started by agent-org for `role` contains: its kickoff prompts."""
-    return (f"You are the '{role}' agent in a team", f"you are back as '{role}'")
+    """Text only a conversation started by agent-org for `role` contains: its kickoff prompts, or
+    the line agent-org types to wake it (an agent in the window starts with no prompt)."""
+    return (f"You are the '{role}' agent in a team", f"you are back as '{role}'", f"agent-org: '{role}', ")
 
 
 def find(harness: str, project_root: Path, role: str) -> str | None:

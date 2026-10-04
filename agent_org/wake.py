@@ -1,8 +1,8 @@
 """Between two runs of an agent whose program does one task per run (DeepSeek Harness).
 
-Its start script runs the program, and when a run ends, runs this: it waits - without a model,
-so at no cost - until the role has a new message (a task arrives as one too), then exits 0 and
-the script starts the next run. Stopping the role (its stop marker appears) ends it with 3.
+Its start script runs this first, and again after each run: it waits - without a model, so at
+no cost - until the role has a new message (a task arrives as one too), then exits 0 and the
+script starts a run. At the start (--first) unfinished tasks count too: the team was restarted. Stopping the role (its stop marker appears) ends it with 3.
 While it waits, it keeps the role checked in, so the team sees the agent as running and the
 watchdog does not start a second one.
 """
@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from .hub import Hub
+from .waker import unfinished
 
 HEARTBEAT = 10  # seconds between check-ins (presence counts the last 30)
 STOPPED = 3
@@ -86,8 +87,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--role", required=True)
     parser.add_argument("--stop", required=True, help="the role's stop marker file")
     parser.add_argument("--input", action="store_true", help="show an input line: what the owner types is sent to the role")
+    parser.add_argument("--first", action="store_true", help="the agent's start: unfinished tasks are work too")
     args = parser.parse_args(argv)
     hub = Hub.open(Path(args.team))
+    stop = Path(args.stop)
+    if args.first and not stop.exists() and unfinished(hub.session(args.role)):
+        hub.close()
+        print(f"\x1b[2m{args.role} has unfinished tasks: carrying on with them\x1b[0m", flush=True)
+        return 0
     if args.input:  # an input line, as an interactive program has one
         sys.stdout.write(prompt_line(args.role))
         sys.stdout.flush()
@@ -96,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"agent-org: {args.role} is waiting for messages (no model runs meanwhile).", flush=True)
     try:
-        code = wait_for_work(hub, args.role, Path(args.stop))
+        code = wait_for_work(hub, args.role, stop)
     except KeyboardInterrupt:
         code = STOPPED
     finally:

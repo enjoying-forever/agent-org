@@ -7,6 +7,8 @@ agent-org tab each hook does nothing. Any failure lets the harness carry on.
 - stop       The agent is ending its turn. Once per turn, remind it of unfinished
              duties (reporting to its superior, releasing its files). Then wait for new
              messages and hand them over, so an idle agent wakes up when mail arrives.
+             In the agent-org window (AGENT_ORG_STOP_IDLE) a wait that runs out lets the
+             agent rest; the window wakes it later (agent_org.waker).
 - post-tool  After each tool call: mention messages that arrived meanwhile, once each.
 - pre-edit   Before a file edit: the agent must hold the file's lock. A free file in
              its write scope is claimed for it; anything else is refused with the reason.
@@ -137,6 +139,8 @@ def on_stop(me: RoleSession, payload: dict[str, Any], wait: float | None = None,
     before = me.store.get_status(me.name)
     me.set_status("waiting", before.task if before else "")
     messages = me.wait_for_messages(stop_wait() if wait is None else wait, poll)
+    if not messages and os.environ.get("AGENT_ORG_STOP_IDLE"):
+        return None  # in the agent-org window: rest at the prompt; the window wakes it when mail comes
     if not messages:
         return block("agent-org: no new messages yet. End your turn again to keep waiting; "
                      "you will be woken as soon as a message arrives.")

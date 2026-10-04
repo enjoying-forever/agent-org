@@ -389,6 +389,14 @@ class Store:
         return {r[0]: r[1] for r in rows}
 
     @_locked
+    def unread_since(self) -> dict[str, float]:
+        """When each recipient's oldest unread message was sent."""
+        rows = self._db.execute(
+            "SELECT recipient, MIN(sent_at) FROM messages WHERE read_at IS NULL GROUP BY recipient"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    @_locked
     def messages_after(self, after: int, limit: int = 300) -> list[Message]:
         """Up to `limit` of the newest messages with an id above `after`, oldest first."""
         rows = self._db.execute(

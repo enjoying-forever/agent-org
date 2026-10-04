@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import shutil
 import threading
 import time
@@ -25,6 +26,7 @@ except ImportError:  # not Windows, or pywinpty missing: agents open in terminal
 
 KEEP = 400_000  # characters of output kept per terminal: what a page opened later still sees
 _ids = itertools.count(1)
+_ESCAPES = re.compile(r"\x1b\[[0-9;?<>=!]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bO.|\x1b.")  # keys and replies, not text
 
 
 def available() -> bool:
@@ -138,6 +140,7 @@ class Terminal:
         self.proc = PtyProcess.spawn([exe, *argv[1:]], cwd=str(cwd), env=env, dimensions=(rows, cols))
         self.started = time.time()
         self.last_output = self.started
+        self.last_input = 0.0  # when the owner last typed text here (see typed)
         self._buf = ""
         self._start = 0  # where _buf begins in the whole output
         self._cond = threading.Condition()
@@ -187,6 +190,13 @@ class Terminal:
     def write(self, data: str) -> None:
         if self.alive:
             self.proc.write(data)
+
+    def typed(self, data: str) -> None:
+        """Input from the owner's keyboard. Text (not the page's own replies to the program's
+        queries, arrow keys or Ctrl keys) counts as typing: agent-org then leaves the prompt alone."""
+        if any(c >= " " for c in _ESCAPES.sub("", data)):
+            self.last_input = time.time()
+        self.write(data)
 
     def resize(self, cols: int, rows: int) -> None:
         cols, rows = max(10, min(int(cols), 500)), max(4, min(int(rows), 200))  # as small as a pane may be
@@ -268,6 +278,10 @@ class TerminalHost:
             terms, self._terms = list(self._terms.values()), {}
         for term in terms:
             term.close()
+
+    def items(self) -> list[tuple[str, Terminal]]:
+        with self._lock:
+            return list(self._terms.items())
 
     def listing(self) -> dict[str, dict[str, object]]:
         with self._lock:

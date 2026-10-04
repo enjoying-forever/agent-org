@@ -280,8 +280,11 @@ def test_deepseek_runs_headless_with_org_tools_shown_live_and_again_until_stoppe
         assert "'--profile' 'headless' '--patch'" in script and "'--json' @resume" in script
         assert "'agent_org.runview' '--session-file'" in script and str(out / "dsh.session") in script
         assert "'--session-id', $sid" in script
-        # after each run: wait for new messages without a model, then run again with the wake prompt
-        assert "'agent_org.wake'" in script and "you have new messages" in script
+        # nothing runs at the start: it waits (no model) for work - at first unfinished tasks count too -
+        # then runs: a new conversation is told its role, a continued one only that messages wait
+        assert script.index("'agent_org.wake'") < script.index("'--profile' 'headless'")
+        assert "@first" in script and "$first = @('--first')" in script
+        assert "you have new messages" in script and "You are the ''worker-a'' agent" in script
         assert str(out / "stopped") in script and "$LASTEXITCODE -ne 0" in script
         launch.stop_role(hub, "worker-a")
         assert (out / "stopped").exists()
@@ -289,7 +292,6 @@ def test_deepseek_runs_headless_with_org_tools_shown_live_and_again_until_stoppe
         assert launch.resumable_session(hub, "worker-a") == "session-1234"
         launch.role_tab(hub, team_file.resolve(), "worker-a")  # Start: lifts the stop, resumes it
         assert not (out / "stopped").exists() and (out / "dsh.session").exists()
-        assert "agent-org: the team was restarted" in (out / "start.ps1").read_text(encoding="utf-8")
         launch.role_tab(hub, team_file.resolve(), "worker-a", fresh=True)  # Start fresh: a new conversation
         assert not (out / "dsh.session").exists()
     finally:

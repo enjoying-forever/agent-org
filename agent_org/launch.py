@@ -50,6 +50,11 @@ class Launch:
     script: str | None = None  # PowerShell that runs it, when one command line is not enough (DeepSeek)
 
 
+# A started agent gets one first prompt, the kickoff, so it reads its role and carries on - except
+# in the agent-org window ("quiet"): there it starts with no prompt (its role is in its system
+# prompt) and agent-org types a line into its terminal only when work arrives (agent_org.waker).
+
+
 def kickoff(role: str) -> str:
     return (f"You are the '{role}' agent in a team. Call the {SERVER_NAME} tool my_role to read "
             "your role, the message law and where you left off. Then carry on with your open tasks, "
@@ -197,7 +202,7 @@ AGENT_CLAUDE_SETTINGS = {"env": {"CLAUDE_CODE_PLUGIN_DIRS": ""}, "spinnerTipsEna
 
 
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                  resume: str | None = None, new_id: str | None = None) -> Launch:
+                  resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
     card = out / "role.md"
     card.write_text(role_card(hub.session(role)) + "\n", encoding="utf-8")
@@ -221,7 +226,9 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli += ["--session-id", new_id]
     # --mcp-config and --allowedTools take several values, so a plain option must
     # come between them and the prompt or they would swallow it.
-    cli += ["--name", role, resume_kickoff(role) if resume else kickoff(role)]
+    cli += ["--name", role]
+    if not quiet:
+        cli.append(resume_kickoff(role) if resume else kickoff(role))
     # Several agents share one Claude Code install; an update started by one tab can't
     # replace the program while the others run it, and leaves a broken install behind.
     env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1"}
@@ -229,7 +236,7 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
 
 
 def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                 resume: str | None = None, new_id: str | None = None) -> Launch:
+                 resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
     command, args, env = mcp_server(team_file, role)
     key = f"mcp_servers.{SERVER_NAME}"
@@ -249,14 +256,15 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli += ["-m", spec.model]
     if spec.effort:
         cli += ["-c", f"model_reasoning_effort={toml(spec.effort)}"]
-    if resume:  # codex resume [OPTIONS] SESSION_ID PROMPT
-        return Launch(role, "codex", "codex", ["resume", *cli, resume, resume_kickoff(role)])
-    cli.append(kickoff(role))
+    if resume:  # codex resume [OPTIONS] SESSION_ID [PROMPT]
+        return Launch(role, "codex", "codex", ["resume", *cli, resume, *([] if quiet else [resume_kickoff(role)])])
+    if not quiet:
+        cli.append(kickoff(role))
     return Launch(role, "codex", "codex", cli)
 
 
 def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                resume: str | None = None, new_id: str | None = None) -> Launch:
+                resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
     if grok_hooks_state() == "outdated":  # the owner installed them once; keep them working
         install_grok_hooks()
@@ -276,7 +284,8 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli += ["--resume", resume]
     elif new_id:
         cli += ["--session-id", new_id]
-    cli.append(resume_kickoff(role) if resume else kickoff(role))
+    if not quiet:
+        cli.append(resume_kickoff(role) if resume else kickoff(role))
     return Launch(role, "grok", "grok", cli, {"GROK_DISABLE_AUTOUPDATER": "1"}, setup=[register])
 
 
@@ -355,7 +364,7 @@ def antigravity_kickoff(role: str, resume: bool) -> str:
 
 
 def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                       resume: str | None = None, new_id: str | None = None) -> Launch:
+                       resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
     install_antigravity_plugin()
     cli: list[str] = []
@@ -365,18 +374,20 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli += ["--effort", spec.effort]
     if resume:
         cli += ["--conversation", resume]
-    # Antigravity has no flag for extra instructions: the kickoff sends it to my_role.
-    # Interactive (-i): its own full terminal, typeable like any agent's. Its tools and hooks come
-    # from the user-level plugin (install_antigravity_plugin); the Stop hook delivers new messages.
-    cli += ["-i", antigravity_kickoff(role, bool(resume))]
+    # Antigravity has no flag for extra instructions: the kickoff (or, quiet, the first line
+    # agent-org types) sends it to my_role. Interactive: its own full terminal, typeable like any
+    # agent's. Its tools and hooks come from the user-level plugin (install_antigravity_plugin);
+    # the Stop hook delivers new messages.
+    if not quiet:
+        cli += ["-i", antigravity_kickoff(role, bool(resume))]
     return Launch(role, "antigravity", "agy", cli)
 
 
 # ---- DeepSeek Harness ----
 # Its terminal mode ("headless") answers one task and exits, with no hooks; agent-org's tools come
-# in through its MCP client plugin, added for each role by a patch file. Its start script runs it,
-# and after each run waits - with agent_org.wake, no model - until the role has a new message,
-# then runs it again (until the role is stopped). Each run continues the same conversation
+# in through its MCP client plugin, added for each role by a patch file. Its start script waits -
+# with agent_org.wake, no model - until the role has a new message (or, at the start, unfinished
+# tasks), then runs it, and waits again (until the role is stopped). Each run continues the same conversation
 # (--session-id) and writes its steps as JSON events, which agent_org.runview shows as they
 # happen: plain headless mode prints only the final answer. The `dsh` command (0.2 or later) runs
 # it; without one, the desktop app's own copy (an older `dsh` cannot read the app's credentials).
@@ -514,7 +525,7 @@ def deepseek_patch(hub: Hub, team_file: Path, role: str) -> str:
 
 
 def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
-                    resume: str | None = None, new_id: str | None = None) -> Launch:
+                    resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     found = deepseek_command()
     if found is None:
         raise HubError("DeepSeek Harness is not installed (install the desktop app, or the dsh command)")
@@ -539,22 +550,21 @@ def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
                                       deepseek_version(command, base), shown_model, shown_folder])
     sid = ps(str(session_file))
 
-    def run(prompt: str) -> str:  # one run, continuing its conversation if it has one, shown as it happens
-        return "\n".join([
-            f"$sid = if (Test-Path -LiteralPath {sid}) {{ (Get-Content -LiteralPath {sid} -Raw).Trim() }} else {{ '' }}",
-            "$resume = if ($sid) { @('--session-id', $sid) } else { @() }",
-            f"& {dsh} @resume {ps(prompt)} | & {viewer}",
-        ])
-
     marker = ps(str(out / STOP_MARKER))
+    # Nothing runs at the start: the waiter returns when there is work (at once for unfinished tasks).
+    # A run continues its conversation if it has one; the first run of a new one is told its role.
     script = "\n".join([
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
         f"& {banner}",
-        run(resume_kickoff(role) if resume else deepseek_kickoff(role)),
-        f"while (-not (Test-Path -LiteralPath {marker})) {{",  # after each run: wait (no model), run again
-        f"    & {waiter}",
+        "$first = @('--first')",
+        f"while (-not (Test-Path -LiteralPath {marker})) {{",
+        f"    & {waiter} @first",
         "    if ($LASTEXITCODE -ne 0) { break }",
-        *("    " + line for line in run(deepseek_wake(role)).splitlines()),
+        "    $first = @()",
+        f"    $sid = if (Test-Path -LiteralPath {sid}) {{ (Get-Content -LiteralPath {sid} -Raw).Trim() }} else {{ '' }}",
+        "    $resume = if ($sid) { @('--session-id', $sid) } else { @() }",
+        f"    $prompt = if ($sid) {{ {ps(deepseek_wake(role))} }} else {{ {ps(deepseek_kickoff(role))} }}",
+        f"    & {dsh} @resume $prompt | & {viewer}",
         "}",
     ])
     return Launch(role, "deepseek", command, [], env=env, script=script)
@@ -633,10 +643,11 @@ def tab_role(tab: list[str]) -> str:
     return Path(tab[-1]).parent.name
 
 
-def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[str]:
+def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False, quiet: bool = False) -> list[str]:
     """Write one role's start script and return the tab command that opens it.
 
-    The role resumes its last conversation when it can (see plan_session).
+    The role resumes its last conversation when it can (see plan_session). `quiet`: it starts with
+    no first prompt, for the agent-org window, which wakes it when work arrives (agent_org.waker).
     """
     team = hub.team
     spec = team.roles[role]
@@ -646,8 +657,10 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
     out.mkdir(parents=True, exist_ok=True)
     cwd = hub.prepare_root(role)  # branch mode: its own worktree
     resume, new_id = plan_session(hub, role, fresh)
-    launch = BUILDERS[spec.harness](hub, team_file, role, out, resume, new_id)
+    launch = BUILDERS[spec.harness](hub, team_file, role, out, resume, new_id, quiet=quiet)
     launch.cwd = cwd
+    if quiet:  # its Stop hook lets it rest when no message comes: the window wakes it, at no cost meanwhile
+        launch.env["AGENT_ORG_STOP_IDLE"] = "1"
     if not resume:
         hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
@@ -657,8 +670,8 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False) -> list[
     return tab_command(title, TAB_COLORS[spec.harness], cwd, script)
 
 
-def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
-            force: bool = False, fresh: bool = False, limit: int = 0) -> tuple[list[list[str]], list[str]]:
+def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool, force: bool = False,
+            fresh: bool = False, limit: int = 0, quiet: bool = False) -> tuple[list[list[str]], list[str]]:
     """Write the start scripts and return (tab commands to open, reasons for roles skipped).
 
     A role that is already running is skipped unless `force`: a second session of the
@@ -682,7 +695,7 @@ def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool,
             skipped.append(f"{role}: {limit} agents are running already (the team's limit)")
             continue
         try:
-            tabs.append(role_tab(hub, team_file, role, fresh))
+            tabs.append(role_tab(hub, team_file, role, fresh, quiet))
         except HubError as e:
             skipped.append(f"{role}: {e}")
     return tabs, skipped
@@ -733,14 +746,14 @@ def stop_role(hub: Hub, role: str) -> int:
     return stopped
 
 
-def tab_opener(team_file: Path, opener: Callable[[list[str]], None] | None = None) -> Opener:
+def tab_opener(team_file: Path, opener: Callable[[list[str]], None] | None = None, quiet: bool = False) -> Opener:
     """What the hub calls to show a newly summoned consultant: in its own tab, or with
-    `opener` (the agent-org window opens it in a terminal of its own)."""
+    `opener` (the agent-org window opens it in a terminal of its own, `quiet`)."""
 
     def open_consultant(role: Role) -> None:
         hub = Hub.open(team_file)  # a fresh connection sees the consultant just registered
         try:
-            tab = role_tab(hub, team_file, role.name)
+            tab = role_tab(hub, team_file, role.name, quiet=quiet)
         finally:
             hub.close()
         (opener or open_tab)(tab)

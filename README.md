@@ -111,9 +111,10 @@ once (in its desktop app) and install its command line, version 0.2 or later:
 through its Windows install entry; `AGENT_ORG_DEEPSEEK_APP` points to another `DeepSeek Harness.exe`).
 
 DeepSeek's terminal mode works one task and exits, and has no hooks, so a DeepSeek agent works
-in runs: its start script runs it, then waits - without a model, at no cost - until it has a new
-message (a task arrives as one), and runs it again. Each run continues the same conversation
-(*Start fresh* begins a new one).
+in runs: its start script waits - without a model, at no cost - until it has a new message (a
+task arrives as one; at the start, unfinished tasks count too), runs it, and waits again. Each run
+continues the same conversation (*Start fresh* begins a new one); only the first run of a new one
+is told to read its role.
 It gets agent-org's tools through DeepSeek's MCP client plugin, added for that role by a patch
 file (your own DeepSeek settings are not changed). *Stop* ends the run or the wait, and it stays
 stopped until you start it again. Its terminal mode prints only the final answer, so agent-org
@@ -170,6 +171,16 @@ How the rules are kept:
   what the law says it still owes - open tasks, results to review, blocked tasks it
   gave, unanswered questions, files it holds - then waits and wakes it the moment a
   message arrives. You never have to nudge an idle agent.
+- In the agent-org window an agent **starts with no first message**: its role, the law
+  and where it left off are in its system prompt (Claude, Codex, Grok), so starting or
+  restarting the team runs no model and re-reads nothing. When work arrives and no hook
+  is waiting for it, agent-org types one line into the agent's terminal ("you have new
+  messages") - only once the terminal is quiet, never while the agent is asking you
+  something there, and not right after you typed in it. An agent restarted with
+  unfinished tasks gets one line to carry on. Antigravity has no system prompt of its
+  own, so the first line in a new conversation also tells it to read its role; DeepSeek
+  waits without a model and runs when work arrives. After half an hour without mail an
+  agent simply rests at its prompt, at no cost, until the next message.
 - After every step it takes, a busy agent is told about new messages; urgent ones
   interrupt it immediately. Its activity also renews its file leases.
 - Before every file edit, the hub checks the lease, so two agents never write the same
@@ -191,8 +202,9 @@ Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
 ## Memory: agents remember across restarts
 
 - **Launch team** (or *Start* on a card) resumes each agent's last conversation, so
-  it remembers everything it was doing. It is told the team was restarted and picks
-  up its open tasks and messages.
+  it remembers everything it was doing. In the window it is told nothing unless it has
+  unfinished tasks or new messages (then one line); in terminal tabs it is told the team
+  was restarted and picks up its open tasks and messages.
 - If a conversation can no longer be resumed, the new session still starts from what
   the hub kept: the agent's own notes, its open tasks, the files it holds and its
   recent messages.
