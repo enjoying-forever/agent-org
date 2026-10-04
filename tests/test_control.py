@@ -92,3 +92,18 @@ def test_antigravity_sign_in_problem_is_explained(monkeypatch):
     assert checks["Antigravity"].ok and not checks["Antigravity sign-in"].ok
     assert "finish the sign-in" in checks["Antigravity sign-in"].fix
     assert doctor.check_antigravity(set())[0].needed is False  # not used: no sign-in test at all
+
+
+def test_the_antigravity_sign_in_test_runs_no_model(monkeypatch):
+    ran = []
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "agy")
+    monkeypatch.setattr(doctor, "_agy_signin", (0.0, None))
+
+    def run(command, timeout=40):
+        ran.append(command[1:])
+        return (0, "agy 1.2.7") if "--version" in command else (0, "Fetching...\ngemini-3.8-flash-high\tGemini 3.8 Flash")
+
+    monkeypatch.setattr(doctor, "run", run)
+    checks = {c.name: c for c in doctor.check_antigravity({"antigravity"})}
+    assert checks["Antigravity sign-in"].ok
+    assert ["models"] in ran and not any("-p" in c for c in ran)  # it lists models; it never prompts one

@@ -69,7 +69,8 @@ agent carries on where it stopped.
 - **In a terminal:** Ctrl+C copies when text is selected (otherwise it interrupts the agent),
   Ctrl+V pastes, right-click copies or pastes, and links open in your browser. A pane's program
   badge lights up while it writes. Ctrl+Alt+1-9, Ctrl+Alt+arrows and Ctrl+Alt+Enter move between
-  panes and go full screen (*More* > *Keyboard shortcuts* lists them all).
+  panes and go full screen; Ctrl+wheel or Ctrl+Alt+= / - / 0 makes the terminals' text bigger,
+  smaller or normal (*More* > *Keyboard shortcuts* lists them all).
 - **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.
@@ -180,8 +181,9 @@ How the rules are kept:
   something there, and not right after you typed in it. An agent restarted with
   unfinished tasks gets one line to carry on. Antigravity has no system prompt of its
   own, so the first line in a new conversation also tells it to read its role; DeepSeek
-  waits without a model and runs when work arrives. After half an hour without mail an
-  agent simply rests at its prompt, at no cost, until the next message.
+  waits without a model and runs when work arrives. After a turn an agent waits 45 seconds
+  for a quick reply, then rests at its prompt - at no cost, and free for you to type to - until
+  the next message.
 - After every step it takes, a busy agent is told about new messages; urgent ones
   interrupt it immediately. Its activity also renews its file leases.
 - Before every file edit, the hub checks the lease, so two agents never write the same

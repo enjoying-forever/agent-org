@@ -378,6 +378,18 @@ class Tools:
         return text, is_error
 
 
+CARD_IN_SYSTEM_PROMPT = ("claude", "codex", "grok")  # launch gives these the role card as system prompt
+SHORT_INSTRUCTIONS = ("These are your agent-org team tools. Your role card - who you are, your team and the "
+                      "message law - is in your system prompt; call my_role if you need it again.")
+
+
+def server_instructions(me) -> str:
+    """What the server tells a program at the start (Claude Code adds it to the system prompt). A
+    program that has the role card as its system prompt gets a pointer, not the card a second time."""
+    role = me.hub.team.roles.get(me.name)
+    return SHORT_INSTRUCTIONS if role is not None and role.harness in CARD_IN_SYSTEM_PROMPT else role_card(me)
+
+
 class Server:
     """JSON-RPC over stdio: one JSON message per line in, one per line out."""
 
@@ -427,7 +439,7 @@ class Server:
                 "protocolVersion": requested if isinstance(requested, str) else FALLBACK_PROTOCOL,
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "agent-org", "version": "0.2.0"},
-                "instructions": role_card(self.me),
+                "instructions": server_instructions(self.me),
             })
         elif method == "ping":
             self._reply(msg_id, {})

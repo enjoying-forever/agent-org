@@ -361,13 +361,15 @@ const SHORTCUTS = [
   ['Ctrl+Alt+Enter', 'Full screen for this pane, or back'],
   ['Ctrl+Alt+B', 'Show or hide the team list'],
   ['Ctrl+Alt+M', 'Show or hide the messages'],
+  ['Ctrl+Alt+= / - / 0', 'Bigger, smaller or normal text in the terminals (or Ctrl+wheel over one)'],
   ['Ctrl+C / Ctrl+V', 'In a terminal: copy the selection (without one, Ctrl+C interrupts) / paste'],
   ['Right-click', 'In a terminal: copy the selection, or paste'],
 ];
 
 function isShortcut(e) {
   return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey
-    && (/^Digit[1-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyM'].includes(e.code));
+    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyM', 'Equal', 'Minus',
+      'NumpadAdd', 'NumpadSubtract'].includes(e.code));
 }
 
 function panesOnScreen() {
@@ -388,6 +390,10 @@ document.addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
   if (e.code === 'KeyM') { L.side = !L.side; applyChrome(); saveLayout(); return; }
+  if (['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0'].includes(e.code)) {
+    zoomTerms(e.code === 'Digit0' ? 0 : ['Equal', 'NumpadAdd'].includes(e.code) ? 1 : -1);
+    return;
+  }
   showView('team');
   const names = L.max ? [...PANES.keys()].filter((n) => !L.hidden.includes(n) || n === L.max) : panesOnScreen();
   const at = names.indexOf(S.focus);

@@ -200,7 +200,17 @@ class App:
     def terminals(self) -> terminals.TerminalHost:
         """The terminals of the open team's agents."""
         self.hub  # noqa: B018 - needs an open team
-        return self._hosts.setdefault(self.team_file, terminals.TerminalHost())
+        return self._host(self.team_file)
+
+    def _host(self, team_file: Path) -> terminals.TerminalHost:
+        """The terminals of one team's agents; their pane sizes are kept next to its hub."""
+        if team_file not in self._hosts:
+            try:
+                sizes: Path | None = Team.load(team_file).database.parent / "terminal-sizes.json"
+            except (TeamError, OSError, ValueError):
+                sizes = None
+            self._hosts[team_file] = terminals.TerminalHost(sizes)
+        return self._hosts[team_file]
 
     def _open_tab(self, tab: list[str]) -> None:
         """Start an agent: in a terminal in the window, or in a Windows Terminal tab."""
@@ -229,7 +239,7 @@ class App:
             if not own:
                 hub.close()
         title, color, cwd, argv = launch.tab_parts(tab)
-        self._hosts.setdefault(team_file, terminals.TerminalHost()).open(role, argv, cwd, title, color)
+        self._host(team_file).open(role, argv, cwd, title, color)
         return {"started": role}
 
     def term_read(self, wants: str) -> dict[str, Any]:

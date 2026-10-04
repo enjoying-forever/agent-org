@@ -78,12 +78,18 @@ def client(hub):
 
 
 def test_initialize_echoes_protocol_and_gives_the_role_card(client):
-    reply = client("worker-a").call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+    reply = client("worker-b").call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
     result = reply["result"]
     assert result["protocolVersion"] == "2025-06-18"
     assert result["capabilities"] == {"tools": {}}
-    assert "You are 'worker-a'" in result["instructions"]
+    assert "You are 'worker-b'" in result["instructions"]  # Antigravity: no system prompt of its own
     assert "Your superior: tech-lead" in result["instructions"]
+
+
+def test_a_program_with_the_card_as_system_prompt_is_not_given_it_twice(client):
+    # Codex (and Claude, Grok) get the card from launch; Claude Code would add the server's text too
+    result = client("worker-a").call("initialize", {"protocolVersion": "2025-06-18"})["result"]
+    assert "You are 'worker-a'" not in result["instructions"] and "my_role" in result["instructions"]
 
 
 BASIC_TOOLS = {"my_role", "team_status", "send_message", "ask_help", "read_inbox", "wait_for_messages",
@@ -300,7 +306,7 @@ def test_role_can_come_from_the_environment(tmp_path):
     request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
     proc = subprocess.run([sys.executable, "-m", "agent_org.mcp_server"], cwd=ROOT, env=env,
                           input=json.dumps(request) + "\n", capture_output=True, text=True, timeout=20)
-    assert "You are 'researcher'" in json.loads(proc.stdout.splitlines()[0])["result"]["instructions"]
+    assert "role card" in json.loads(proc.stdout.splitlines()[0])["result"]["instructions"]  # Grok: a pointer
     # outside an agent-org tab (no role): a quiet server with no tools, not a failure
     env.pop("AGENT_ORG_ROLE")
     listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}

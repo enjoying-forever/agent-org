@@ -71,6 +71,25 @@ def test_a_terminal_streams_output_takes_keys_and_remembers_its_size(tmp_path):
 
 
 @needs_pty
+def test_pane_sizes_outlive_a_restart_of_agent_org(tmp_path):
+    sizes = tmp_path / "terminal-sizes.json"
+    host = terminals.TerminalHost(sizes)
+    try:
+        host.open("a", [*SHELL, "Write-Host hi"], tmp_path)
+        host.resize("a", 88, 21)
+    finally:
+        host.close_all()
+    again = terminals.TerminalHost(sizes)  # agent-org started again: the agent starts as big as its pane
+    try:
+        term = again.open("a", [*SHELL, "Write-Host hi"], tmp_path)
+        assert (term.cols, term.rows) == (88, 21)
+    finally:
+        again.close_all()
+    sizes.write_text("not json", encoding="utf-8")
+    assert terminals.TerminalHost(sizes)._sizes == {}  # a broken file is only forgotten
+
+
+@needs_pty
 def test_the_window_runs_agents_in_its_terminals(server, tmp_path):  # noqa: F811
     app = server.app
     app.in_window = True  # tests run with tabs; this one opens a harmless stand-in for the agent

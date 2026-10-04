@@ -625,7 +625,7 @@ function openTerm(p) {
   const host = h('div', { class: 'xterm-host' });
   p.body.replaceChildren(host);
   const term = new Terminal({
-    fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: 12.5, lineHeight: 1.15,
+    fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: termFont(), lineHeight: 1.15,
     cursorBlink: true, scrollback: 5000, theme: termTheme(), allowProposedApi: true,
   });
   const fit = new FitAddon.FitAddon();
@@ -639,6 +639,12 @@ function openTerm(p) {
   }
   term.attachCustomKeyEventHandler((e) => termKey(p, e));
   host.addEventListener('contextmenu', (e) => { e.preventDefault(); rightClick(p); });
+  host.addEventListener('wheel', (e) => { // Ctrl+wheel: bigger or smaller text, in every terminal
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    zoomTerms(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false, capture: true });
   term.open(host);
   Object.assign(p, { term, fit, termId: 0, next: 0, pending: '', sending: false, size: '' });
   // While old output is replayed into a new screen, xterm answers the questions programs once asked
@@ -750,6 +756,27 @@ function closeTerm(p) {
   p.term.dispose();
   Object.assign(p, { term: null, fit: null, mode: '' });
   p.body.replaceChildren();
+}
+
+// ---------- text size: Ctrl+wheel or Ctrl+Alt+= / - / 0, the same in every terminal, remembered ----------
+
+const FONT = { normal: 12.5, min: 9, max: 22, step: 0.5, key: 'agent-org-term-font' };
+
+function termFont() {
+  let v = FONT.normal;
+  try { v = Number(localStorage.getItem(FONT.key)) || FONT.normal; } catch { /* not remembered */ }
+  return Math.min(FONT.max, Math.max(FONT.min, v));
+}
+
+/** One step bigger (+1) or smaller (-1); 0: back to the normal size. */
+function zoomTerms(dir) {
+  const size = dir === 0 ? FONT.normal : Math.min(FONT.max, Math.max(FONT.min, termFont() + dir * FONT.step));
+  try { localStorage.setItem(FONT.key, String(size)); } catch { /* this session only */ }
+  for (const p of PANES.values()) {
+    if (!p.term) continue;
+    p.term.options.fontSize = size;
+    fitTerm(p);
+  }
 }
 
 function retheme() {

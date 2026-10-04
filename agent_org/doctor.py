@@ -92,7 +92,8 @@ _agy_signin: tuple[float, Check | None] = (0.0, None)
 def check_antigravity(harnesses: set[str]) -> list[Check]:
     """Antigravity's CLI: installed, and - if the team uses it - signed in and verified.
 
-    The sign-in test asks for a one-word reply, so it runs at most every ten minutes.
+    The sign-in test lists the account's models (no model runs, nothing is used up); it runs at most
+    every ten minutes.
     """
     global _agy_signin
     c = check_program("Antigravity", "agy", "Install the Antigravity CLI (agy) from antigravity.google")
@@ -100,14 +101,14 @@ def check_antigravity(harnesses: set[str]) -> list[Check]:
     checks = [c]
     if c.ok and c.needed:
         if time.time() - _agy_signin[0] > 600:
-            code, out = run([shutil.which("agy") or "agy", "-p", "Reply with the single word OK.",
-                             "--print-timeout", "60s"], timeout=90)
+            code, out = run([shutil.which("agy") or "agy", "models"], timeout=60)
             low = out.lower()
-            if "verify your account" in low or "sign in" in low or "login" in low and code != 0:
+            listed = code == 0 and any("\t" in line for line in out.splitlines())
+            if not listed and ("verify your account" in low or "sign in" in low or "login" in low):
                 signin = Check("Antigravity sign-in", False, "Antigravity needs you to sign in or verify your "
                                "Google account", "Open a terminal, run agy, and finish the sign-in in your browser.")
             else:
-                signin = Check("Antigravity sign-in", True, "signed in") if code == 0 else None
+                signin = Check("Antigravity sign-in", True, "signed in") if listed else None
             _agy_signin = (time.time(), signin)
         if _agy_signin[1] is not None:
             checks.append(_agy_signin[1])

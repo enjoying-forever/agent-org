@@ -46,6 +46,10 @@ function hireByDrop(roleId, superior) {
 
 function moveByDrop(name, superior) {
   if (name === superior) return;
+  if (subtreeOf(name).some((x) => x.name === superior)) {
+    toast(`${name} cannot report to ${superior}: ${superior} is below ${name}. Move ${superior} first.`, true);
+    return;
+  }
   act(api('/api/teammate', { name, changes: { superior } }), () => `${name} now reports to ${superior}.`)
     .then((r) => { if (r && typeof E !== 'undefined') E.draft = null; });
 }
@@ -107,11 +111,12 @@ async function openCard(name, anchor) {
     placeCard(card, anchor);
     return;
   }
+  const below = new Set(subtreeOf(name).map((x) => x.name)); // reporting to one of them would be a loop
   const f = {
     harness: h('select', {}, meta.harnesses.map((x) => h('option', { value: x, selected: x === spec.harness }, x))),
     superior: h('select', {},
       h('option', { value: S.state.owner, selected: spec.superior === S.state.owner }, `${S.state.owner} (you)`),
-      S.state.roles.filter((x) => x.name !== name && !x.tier).map((x) => h('option', { value: x.name, selected: spec.superior === x.name }, x.name))),
+      S.state.roles.filter((x) => x.name !== name && !x.tier && !below.has(x.name)).map((x) => h('option', { value: x.name, selected: spec.superior === x.name }, x.name))),
     duties: h('textarea', { rows: 2, value: spec.duties || '' }),
     instructions: h('textarea', { rows: 4, value: spec.instructions || '', placeholder: 'How to work, what to check (optional)' }),
     write_scope: h('input', { class: 'mono', value: (spec.write_scope || []).join(', '), placeholder: 'e.g. src/*, tests/*   (empty: edits nothing)' }),

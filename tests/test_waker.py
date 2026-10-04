@@ -75,6 +75,7 @@ def test_a_quiet_start_sends_no_first_message(hub, team_file):
         script = (team_file.parent / ".agent-org" / "launch" / role / "start.ps1").read_text(encoding="utf-8")
         assert "You are the ''" not in script and "the team was restarted" not in script, role
         assert "$env:AGENT_ORG_STOP_IDLE = '1'" in script  # its Stop hook lets it rest
+        assert f"$env:AGENT_ORG_STOP_WAIT = '{launch.QUIET_STOP_WAIT}'" in script  # soon: you can type to it
         assert tab[-1].endswith("start.ps1")
     leader = (team_file.parent / ".agent-org" / "launch" / "leader" / "start.ps1").read_text(encoding="utf-8")
     assert leader.rstrip().endswith("'--name' 'leader'")  # Claude still gets its role card as system prompt

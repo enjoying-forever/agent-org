@@ -12,6 +12,7 @@ Agents started this way live as long as agent-org runs: closing the agent-org wi
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import re
 import shutil
@@ -215,11 +216,19 @@ class Terminal:
 class TerminalHost:
     """The terminals of the open team, by role name."""
 
-    def __init__(self) -> None:
+    def __init__(self, sizes_file: Path | None = None) -> None:
         self._terms: dict[str, Terminal] = {}
         self._lock = threading.Lock()
         self._changed = threading.Condition()
-        self._sizes: dict[str, tuple[int, int]] = {}  # the size each pane last had: a restart starts at it
+        # The size each pane last had: an agent starts at it, even after agent-org restarted (a program
+        # started at another size and then resized can leave pieces of its old screen behind).
+        self._sizes_file = sizes_file
+        self._sizes: dict[str, tuple[int, int]] = {}
+        try:
+            saved = json.loads(sizes_file.read_text(encoding="utf-8")) if sizes_file else {}
+            self._sizes = {str(k): (int(v[0]), int(v[1])) for k, v in saved.items()}
+        except (OSError, ValueError, TypeError, IndexError, AttributeError):
+            pass
 
     def _notify(self) -> None:
         with self._changed:
@@ -240,7 +249,18 @@ class TerminalHost:
         term = self.get(name)
         if term is not None:
             term.resize(cols, rows)
-            self._sizes[name] = (term.cols, term.rows)
+            if self._sizes.get(name) != (term.cols, term.rows):
+                self._sizes[name] = (term.cols, term.rows)
+                self._save_sizes()
+
+    def _save_sizes(self) -> None:
+        if self._sizes_file is None:
+            return
+        try:
+            self._sizes_file.parent.mkdir(parents=True, exist_ok=True)
+            self._sizes_file.write_text(json.dumps(self._sizes), encoding="utf-8")
+        except OSError:
+            pass  # not remembered: the next start is resized once its pane reports
 
     def get(self, name: str) -> Terminal | None:
         with self._lock:

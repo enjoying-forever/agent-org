@@ -402,6 +402,7 @@ def antigravity_launch(hub: Hub, team_file: Path, role: str, out: Path,
 DSH_EFFORTS = ("off", "low", "high", "max")
 DSH_SESSION = "dsh.session"  # in a role's launch folder: the conversation its runs continue
 STOP_MARKER = "stopped"  # in a role's launch folder: its start script does not run it again
+QUIET_STOP_WAIT = 45  # seconds a Stop hook waits for mail in the agent-org window (the window wakes it later)
 
 
 def deepseek_kickoff(role: str) -> str:
@@ -673,6 +674,9 @@ def role_tab(hub: Hub, team_file: Path, role: str, fresh: bool = False, quiet: b
     launch.cwd = cwd
     if quiet:  # its Stop hook lets it rest when no message comes: the window wakes it, at no cost meanwhile
         launch.env["AGENT_ORG_STOP_IDLE"] = "1"
+        # A short wait catches a quick reply; then it rests at its prompt, where you can type to it (a
+        # waiting hook holds your typing back, and its timer makes an idle agent look busy).
+        launch.env["AGENT_ORG_STOP_WAIT"] = str(QUIET_STOP_WAIT)
     if not resume:
         hub.store.start_session(role, spec.harness, new_id)
     script = out / "start.ps1"
