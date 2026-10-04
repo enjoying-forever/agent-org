@@ -707,10 +707,12 @@ function markOutput(p) {
 }
 
 // What a program waiting for its user shows: a permission question, the trust question at the
-// first start, a yes/no. Read from the screen as it is now, once the terminal has gone quiet.
+// first start, a yes/no - with its choices, so a question the agent only wrote in its answer does
+// not count. Read from the screen as it is now, once the terminal has gone quiet (as agent_org.waker).
 const ASKING = new RegExp(['do you want to', 'would you like to', 'do you trust',
-  'trust (?:this|the) (?:folder|directory|files)', 'allow (?:this|command|once|always)', '\\[y/n\\]', '\\(y/n\\)',
-  'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');
+  'trust (?:this|the) (?:folder|directory|files)', 'trust all', 'review (?:the )?hooks', 'allow (?:this|command|once|always)',
+  '\\[y/n\\]', '\\(y/n\\)', 'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');
+const CHOICES = /(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y\/n\]|\(y\/n\)|\(esc\)|enter to (?:confirm|select|continue)/im;
 const QUIET_MS = 2500;
 
 function screenText(term) {
@@ -726,7 +728,8 @@ function screenText(term) {
 function checkAsking(p) {
   clearTimeout(p.askTimer);
   p.askTimer = setTimeout(() => {
-    const asking = Boolean(p.term) && ASKING.test(screenText(p.term));
+    const screen = p.term ? screenText(p.term) : '';
+    const asking = ASKING.test(screen) && CHOICES.test(screen);
     if (asking === Boolean(p.asking)) return;
     p.asking = asking;
     p.el.classList.toggle('asking', asking);

@@ -38,7 +38,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import doctor, gitops, launch, presets, templates, terminals, usage, waker, watchdog
+from . import doctor, gitops, launch, presets, templates, terminals, usage, wake, waker, watchdog
 from .hub import BRANCH_RULE, LAW, Hub, HubError, describe_stuck
 from .store import Lock, Message, Task
 from .team import HARNESSES, Team, TeamError
@@ -271,6 +271,7 @@ class App:
             if hub is None:
                 continue
             try:
+                hub.store.prune(wake.alive)
                 problems = watchdog.patrol(hub)
                 if hub.base_team.settings.autostart:
                     self._autostart(hub, problems)
@@ -503,6 +504,7 @@ class App:
         statuses = store.statuses()
         unread = store.unread_counts()
         locks = store.locks()
+        store.prune(wake.alive)  # a process killed with its terminal is not a second session
         online = store.online()
         open_tasks = store.tasks(open_only=True)
         stuck = self.hub.stuck()

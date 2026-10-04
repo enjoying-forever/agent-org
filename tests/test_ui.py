@@ -130,8 +130,10 @@ def test_release_a_lock(server):
 
 
 def test_state_shows_who_is_running(server):
-    server.app.hub.store.check_in(11, "tech-lead")
-    server.app.hub.store.check_in(12, "tech-lead")
+    import os
+    server.app.hub.store.check_in(os.getpid(), "tech-lead")  # two live processes
+    server.app.hub.store.check_in(os.getppid(), "tech-lead")
+    server.app.hub.store.check_in(99999999, "researcher")  # gone without checking out (killed with its terminal)
     online = {r["name"]: r["online"] for r in server.ok("/api/state")["roles"]}
     assert online == {"leader": 0, "tech-lead": 2, "researcher": 0, "worker-a": 0, "worker-b": 0}
 

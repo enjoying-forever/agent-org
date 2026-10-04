@@ -689,6 +689,15 @@ class Store:
     def check_out(self, pid: int) -> None:
         self._db.execute("DELETE FROM presence WHERE pid = ?", (pid,))
 
+    def prune(self, alive: Callable[[int], bool]) -> None:
+        """Forget check-ins of processes that are gone: one killed with its terminal never checks out,
+        and would count as a second session of its role for half a minute."""
+        with self._lock:
+            pids = [r[0] for r in self._db.execute("SELECT pid FROM presence").fetchall()]
+        for pid in pids:
+            if not alive(pid):
+                self.check_out(pid)
+
     @_locked
     def online(self, within: float = 30) -> dict[str, int]:
         """Roles with a live session, and how many sessions each has."""
