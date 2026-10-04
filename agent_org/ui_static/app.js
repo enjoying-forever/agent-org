@@ -721,6 +721,8 @@ const ASKING = new RegExp(['do you want to', 'would you like to', 'do you trust'
   'trust (?:this|the) (?:folder|directory|files)', 'trust all', 'review (?:the )?hooks', 'allow (?:this|command|once|always)',
   '\\[y/n\\]', '\\(y/n\\)', 'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');
 const CHOICES = /(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y\/n\]|\(y\/n\)|\(esc\)|enter to (?:confirm|select|continue)/im;
+// a menu with a highlighted choice (an update, a folder to trust) waits for you whatever it asks
+const MENU = /[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc/i;
 const QUIET_MS = 2500;
 
 function screenText(term) {
@@ -737,7 +739,7 @@ function checkAsking(p) {
   clearTimeout(p.askTimer);
   p.askTimer = setTimeout(() => {
     const screen = p.term ? screenText(p.term) : '';
-    const asking = ASKING.test(screen) && CHOICES.test(screen);
+    const asking = MENU.test(screen) || (ASKING.test(screen) && CHOICES.test(screen));
     if (asking === Boolean(p.asking)) return;
     p.asking = asking;
     p.el.classList.toggle('asking', asking);

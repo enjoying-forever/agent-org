@@ -121,6 +121,9 @@ def test_mail_nobody_takes_wakes_an_idle_agent(hub):
     {"typed": 5.0},  # you typed in it a moment ago
     {"started": 2.0},  # just started: still drawing its screen
     {"output": "Do you want to make this edit to app.py?\n❯ 1. Yes\n  2. No (esc)\n"},  # asking you
+    # Codex's own menus, as its screen arrives (cursor moves eat letters): Enter would pick for you
+    {"output": "rust this folder? Codex can read, edit,andrunfileshere.› 1. Trust and continue 2.Quitenter continue · esc quit"},
+    {"output": "Updat available · 0.158.0 → 0.160.0› 1. Update now (runs `npm install -g @openai/codex`) 2.Skip"},
 ])
 def test_an_agent_that_is_busy_or_asking_is_left_alone(hub, term_kw):
     hub.session("leader").send("researcher", "look into X")

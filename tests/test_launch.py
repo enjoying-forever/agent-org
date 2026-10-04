@@ -93,6 +93,7 @@ def test_codex_script_passes_valid_toml(team_file, tmp_path):
     assert parsed["model_reasoning_effort"] == "low"
     assert "You are 'worker-a'" in parsed["developer_instructions"]
     assert built.args[-1] == launch.kickoff("worker-a")
+    assert "check_for_update_on_startup=false" in built.args  # no update menu waiting for a key at start
 
 
 def test_grok_registers_the_project_server_then_starts(team_file):

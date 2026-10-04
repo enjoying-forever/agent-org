@@ -41,6 +41,9 @@ ASKING = re.compile("|".join([
 # ... with its choices: a question the agent only wrote in its answer must not keep it from waking.
 CHOICES = re.compile(r"(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y/n\]|\(y/n\)|\(esc\)|enter\s+to\s+(?:confirm|select|continue)",
                      re.I | re.M)
+# A menu with one choice highlighted (Claude's ❯, Codex's ›) waits for a key, whatever it asks - an
+# update, a folder to trust: Enter would pick for you.
+MENU = re.compile(r"[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc", re.I)
 
 
 def unfinished(me: RoleSession) -> list[str]:
@@ -68,7 +71,7 @@ def wake_line(harness: str, role: str, tasks: list[str] | None = None) -> str:
 def asking(term: Terminal) -> bool:
     data = term.chunk(max(0, term.end - TAIL))["data"]
     text = ANSI.sub("", MOVES.sub(" ", str(data)))
-    return bool(ASKING.search(text) and CHOICES.search(text))
+    return bool(MENU.search(text) or (ASKING.search(text) and CHOICES.search(text)))
 
 
 class Waker:

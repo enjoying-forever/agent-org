@@ -254,6 +254,9 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
         "-c", f"{key}.tool_timeout_sec={WAIT_LIMIT}",
         "-c", f'{key}.default_tools_approval_mode="approve"',
         "-c", f"developer_instructions={toml(role_card(hub.session(role)))}",
+        # several agents share one install: an update offered at start would wait for a key (and
+        # replacing the program while others run it breaks them)
+        "-c", "check_for_update_on_startup=false",
     ]
     # Codex asks you once to review and trust new hooks; the commands are the same for
     # every role, so one "Trust all" covers them all.
