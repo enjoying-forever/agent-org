@@ -95,7 +95,8 @@ agent carries on where it stopped.
 agent-org opens in a window of its own (Windows' WebView2, through `pywebview`), and runs
 each agent in a pseudo-terminal it owns (`pywinpty`), shown with xterm.js. The agents get a
 fresh copy of your user environment, as a new terminal would, not the environment agent-org
-itself was started from.
+itself was started from. Your PowerShell profile is not run (each agent starts faster, and
+nothing in it changes the agent's settings); the agent gets agent-org's proxy, or Windows' own.
 
 - `python -m agent_org.ui --browser` opens the same page in your browser instead; press
   Enter in the black window for another sign-in link.

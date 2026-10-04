@@ -55,6 +55,19 @@ def test_claude_role_files(team_file):
                      r"'You are the ''leader'' agent", script)
 
 
+def test_an_agent_starts_without_your_powershell_profile_but_with_the_proxy(team_file, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+    base = run_dry(team_file, "leader")
+    script = (base / "leader" / "start.ps1").read_text(encoding="utf-8")
+    assert "$env:HTTPS_PROXY = 'http://127.0.0.1:7890'" in script  # what a profile used to give it
+    hub = Hub.open(team_file)
+    try:
+        tab = launch.role_tab(hub, team_file.resolve(), "leader")
+    finally:
+        hub.close()
+    assert "-NoProfile" in tab  # faster, and no profile output or settings in the agent's terminal
+
+
 def test_a_claude_model_written_with_a_dot_still_starts():
     assert launch.claude_model("claude-sonnet-5.5") == "claude-sonnet-5-5"
     assert launch.claude_model("claude-opus-5-5") == "claude-opus-5-5"

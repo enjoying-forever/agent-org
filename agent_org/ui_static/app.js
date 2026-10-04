@@ -339,7 +339,7 @@ $('#law-btn').addEventListener('click', async () => {
 
 function renderGuide() {
   const st = S.state;
-  const running = st.roles.some((r) => r.online);
+  const running = st.roles.some((r) => r.online || r.resumes); // launched now, or before (a conversation to resume)
   const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
   const steps = [
     { done: true, text: 'Check the team in "Edit team": who reports to whom, and which model each role uses.' },
@@ -760,7 +760,9 @@ const MIN_COLS = 10; // the server allows the same: both sides must agree on the
 const MIN_ROWS = 4;
 
 function fitTerm(p) {
-  if (!p.term || !p.el.isConnected || p.el.hidden || !p.body.clientWidth) return;
+  // Not while the pane is not laid out (another view shows, or the grid is being built): a size
+  // measured then is a sliver, and what the agent prints at that width stays wrapped in it.
+  if (!p.term || !p.el.isConnected || p.el.hidden || p.body.clientWidth < 100 || p.body.clientHeight < 60) return;
   const want = p.fit.proposeDimensions();
   if (!want || !want.cols || !want.rows) return;
   const cols = Math.max(MIN_COLS, want.cols);

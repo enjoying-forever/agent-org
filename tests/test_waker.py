@@ -142,7 +142,24 @@ def test_fresh_mail_waits_for_a_stop_hook_and_a_woken_agent_is_not_pushed_again(
     assert w.tick(hub, FakeHost(researcher=term), now) == []
     assert w.tick(hub, FakeHost(researcher=term), now + 10) == ["researcher"]
     assert w.tick(hub, FakeHost(researcher=term), now + 20) == []  # given time to act on it
-    assert w.tick(hub, FakeHost(researcher=term), now + 10 + waker.AGAIN) == ["researcher"]  # still unread
+    # still unread: it is tried again, each time after twice as long (it may be unable to act on it)
+    assert w.tick(hub, FakeHost(researcher=term), now + 10 + waker.AGAIN) == []
+    at = now + 10 + 2 * waker.AGAIN
+    assert w.tick(hub, FakeHost(researcher=term), at) == ["researcher"]
+    assert w.tick(hub, FakeHost(researcher=term), at + 2 * waker.AGAIN) == []
+    assert w.tick(hub, FakeHost(researcher=term), at + 4 * waker.AGAIN) == ["researcher"]
+    hub.session("researcher").read_inbox()  # it read that mail; new mail is woken for at the usual pace
+    hub.session("leader").send("researcher", "and Y")
+    later_at = at + 4 * waker.AGAIN + waker.AGAIN + waker.UNREAD_FOR
+    assert w.tick(hub, FakeHost(researcher=term), max(later_at, time.time() + 10)) == ["researcher"]
+
+
+def test_a_stuck_agent_is_not_woken(hub):
+    hub.session("leader").send("researcher", "look into X")
+    hub.set_stuck({"researcher": {"kind": "limit", "text": "out of usage", "at": time.time()}})
+    now = later()
+    term = FakeTerm(now)
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
 
 
 def test_an_idle_agent_without_mail_is_left_alone(hub):

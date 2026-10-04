@@ -602,7 +602,10 @@ def ps(text: str) -> str:
 
 
 def role_script(launch: Launch, team: Team, team_file: Path) -> str:
-    env = {"AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": launch.role, **launch.env}
+    from .terminals import network_env  # noqa: PLC0415
+
+    # its way to the internet (agent-org's proxy, or Windows' own), as no profile sets one (tab_command)
+    env = {"AGENT_ORG_TEAM": str(team_file), "AGENT_ORG_ROLE": launch.role, **network_env({}), **launch.env}
     run = launch.script or f"& {ps(launch.command)} " + " ".join(ps(a) for a in launch.args)
     return "\n".join([
         f"# agent-org: role '{launch.role}' on {launch.harness}. Written by agent_org.launch; rerunning it overwrites this.",
@@ -633,9 +636,11 @@ def owner_script(team: Team, team_file: Path) -> str:
 
 
 def tab_command(title: str, color: str, cwd: Path, script: Path) -> list[str]:
+    # -NoProfile: the start script sets all an agent needs (its proxy comes from agent-org); your
+    # PowerShell profile would slow each start and could change its network settings.
     return ["wt", "-w", WINDOW, "new-tab", "--title", title, "--suppressApplicationTitle",
             "--tabColor", color, "-d", str(cwd),
-            "pwsh", "-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+            "pwsh", "-NoLogo", "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(script)]
 
 
 def tab_parts(tab: list[str]) -> tuple[str, str, Path, list[str]]:

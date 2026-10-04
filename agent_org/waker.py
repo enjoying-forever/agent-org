@@ -24,7 +24,8 @@ EVERY = 2.0  # seconds between looks
 QUIET = 3.0  # seconds without output: the agent is at its prompt (an idle Claude redraws every ~13 s)
 READY = 6.0  # seconds after a start before its first line: the program is still drawing its screen
 UNREAD_FOR = 4.0  # a waiting Stop hook takes mail within a second: older mail has nobody taking it
-AGAIN = 90.0  # seconds before the same terminal gets another line
+AGAIN = 90.0  # seconds before the same terminal gets another line (doubling while the same mail waits)
+MOST = 1800.0  # the longest it waits before trying once more
 TYPED = 30.0  # seconds after you typed in a terminal before it gets a line (you may be mid-sentence)
 TAIL = 1500  # characters of recent output searched for a question: about the last screen update
 
@@ -75,6 +76,7 @@ class Waker:
 
     def __init__(self) -> None:
         self._typed_at: dict[int, float] = {}  # terminal id -> when it last got a line
+        self._tries: dict[int, tuple[float | None, int]] = {}  # terminal id -> (mail it was woken for, times)
         self._started: set[int] = set()  # terminals already checked for unfinished work
 
     def tick(self, hub: Hub, host: TerminalHost, now: float | None = None) -> list[str]:
@@ -82,18 +84,22 @@ class Waker:
         now = time.time() if now is None else now
         team = hub.team
         unread_since = hub.store.unread_since()
+        stuck = hub.stuck()  # out of usage, or broken: a line would change nothing (it is restarted later)
         woken = []
         for name, term in host.items():
             spec = team.roles.get(name)
-            if spec is None or spec.harness == "deepseek" or not term.alive:
+            if spec is None or spec.harness == "deepseek" or not term.alive or name in stuck:
                 continue
             if now - term.started < READY or now - term.last_output < QUIET or now - term.last_input < TYPED:
                 continue
-            if now - self._typed_at.get(term.id, 0.0) < AGAIN:
+            since = unread_since.get(name)
+            woken_for, times = self._tries.get(term.id, (None, 0))
+            if since != woken_for:
+                times = 0  # other mail than last time: it did read what it was woken for
+            if now - self._typed_at.get(term.id, 0.0) < min(AGAIN * 2 ** times, MOST):
                 continue
             first_look = term.id not in self._started
             self._started.add(term.id)
-            since = unread_since.get(name)
             if since is not None and now - since >= UNREAD_FOR:
                 line = wake_line(spec.harness, name)
             elif first_look and (tasks := unfinished(hub.session(name))):
@@ -104,6 +110,7 @@ class Waker:
                 self._started.discard(term.id)  # look again once it is answered
                 continue
             self._typed_at[term.id] = now
+            self._tries[term.id] = (since, times + 1)
             type_line(term, line)
             hub.event("agent", name, "woken: " + ("unfinished work after a restart" if "restarted" in line
                                                   else "new messages"))
