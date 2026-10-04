@@ -78,9 +78,10 @@ agent carries on where it stopped.
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
   "done" means, what it waits for, which files it changed (with the diff), whether the
   checks passed, and to accept or send back a result.
-- **Needs attention:** at the top of the Team page, what needs you: agents that stopped
-  with work left, stalled tasks, questions for you, results to review, message loops -
-  each with a button to fix it.
+- **What needs you** shows where it is, not in a list of its own: a stuck agent or a second
+  session on its pane's title, an agent asking something as an amber outline, questions for
+  you and results to review as messages, a stopped agent with work on its card (with *Start*).
+  While the window is in the background, a desktop notification says when an agent gets stuck.
 - **Activity:** a timeline of everything that happened (tasks given, started, done,
   accepted; files taken and released; reminders and escalations).
 - **Files:** who is writing which file right now, and for which task.
@@ -190,7 +191,7 @@ How the rules are kept:
   file.
 - While the page is open, a **watchdog** patrols every half minute: it releases leases
   that ran out, nudges a stalled task and then tells whoever gave it, passes unanswered
-  questions up, and lists what needs you.
+  questions up, and marks what needs you on the agents' panes.
 
 Where the ideas come from: the task lifecycle follows the
 [A2A protocol](https://a2a-protocol.org/latest/topics/life-of-a-task/); "done when" and
@@ -219,7 +220,7 @@ Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
 
 When a subordinate asks for help, its superior can summon a **consultant**: a
 temporary helper, placed under the agent that asked, running a stronger (or cheaper)
-model from a tier you configure. It opens in its own tab, edits only the files it is
+model from a tier you configure. It opens in its own terminal, edits only the files it is
 handed, and is dismissed when the problem is solved; its files go back to the agent
 it helped. Tiers are set in *Edit team* (for example *opus-medium*, *luna-high*,
 *opus-xhigh*), each with what it is good for and how many may run at once.
@@ -279,7 +280,7 @@ Your roles are kept in `~/.agent-org/roles/`.
 The leader, and any agent with people below it, can:
 
 - **hire_agent**: add an agent under itself (or under someone below it) - its program,
-  model, duties and files. It opens in its own tab and starts at once.
+  model, duties and files. It opens in its own terminal and starts at once.
 - **change_agent**: change an agent below it - duties, files, model or whom it reports to.
   A new model applies from the agent's next start.
 - **let_go_agent**: remove an agent below it whose work is over (its unfinished tasks must

@@ -142,6 +142,7 @@ class Terminal:
         self.started = time.time()
         self.last_output = self.started
         self.last_input = 0.0  # when the owner last typed text here (see typed)
+        self.unsent = False  # the owner typed text and has not sent it (Enter) or cleared it (Ctrl+C)
         self._buf = ""
         self._start = 0  # where _buf begins in the whole output
         self._cond = threading.Condition()
@@ -195,8 +196,12 @@ class Terminal:
     def typed(self, data: str) -> None:
         """Input from the owner's keyboard. Text (not the page's own replies to the program's
         queries, arrow keys or Ctrl keys) counts as typing: agent-org then leaves the prompt alone."""
-        if any(c >= " " for c in _ESCAPES.sub("", data)):
-            self.last_input = time.time()
+        for c in _ESCAPES.sub("", data):
+            if c in "\r\x03":  # Enter sends what you typed, Ctrl+C clears it
+                self.unsent = False
+            elif c >= " ":
+                self.last_input = time.time()
+                self.unsent = True  # text in its input line that you have not sent yet
         self.write(data)
 
     def resize(self, cols: int, rows: int) -> None:

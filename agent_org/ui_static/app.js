@@ -167,8 +167,8 @@ async function poll() {
 
 function setConn(ok, why) {
   const c = $('#conn');
-  c.textContent = ok ? 'live' : 'offline, retrying';
-  c.title = ok ? '' : why || '';
+  c.textContent = ok ? '' : 'offline, retrying'; // connected: only the dot says so
+  c.title = ok ? 'Connected: live updates' : why || '';
   c.classList.toggle('down', !ok);
 }
 

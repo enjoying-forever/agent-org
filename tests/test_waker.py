@@ -229,7 +229,21 @@ def test_only_typed_text_counts_as_the_owner_typing():
         term.typed(reply)
     assert term.last_input == 0.0
     term.typed("fix the bug")
-    assert term.last_input > 0
+    assert term.last_input > 0 and term.unsent
+    term.typed("\r")
+    assert not term.unsent  # sent
+    term.typed("half a thought")
+    term.typed("\x03")
+    assert not term.unsent  # cleared
+
+
+def test_text_you_typed_and_did_not_send_is_not_sent_along(hub):
+    hub.session("leader").send("researcher", "look into X")
+    now = later()
+    term = FakeTerm(now, typed=60)  # you typed a minute ago ...
+    term.unsent = True  # ... and left it in the input line
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == []
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now + waker.UNSENT) == ["researcher"]  # not forever
 
 
 def test_deepseek_starts_at_once_only_with_unfinished_tasks(hub, team_file, tmp_path):

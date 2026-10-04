@@ -27,6 +27,7 @@ UNREAD_FOR = 4.0  # a waiting Stop hook takes mail within a second: older mail h
 AGAIN = 90.0  # seconds before the same terminal gets another line (doubling while the same mail waits)
 MOST = 1800.0  # the longest it waits before trying once more
 TYPED = 30.0  # seconds after you typed in a terminal before it gets a line (you may be mid-sentence)
+UNSENT = 600.0  # seconds it waits while you have typed text there and not sent it (a line would send yours too)
 TAIL = 1500  # characters of recent output searched for a question: about the last screen update
 
 MOVES = re.compile(r"\x1b\[[0-9;]*[CHf]")  # cursor moves: some programs skip blank cells with them
@@ -95,6 +96,8 @@ class Waker:
             if spec is None or spec.harness == "deepseek" or not term.alive or name in stuck or not online.get(name):
                 continue
             if now - term.started < READY or now - term.last_output < QUIET or now - term.last_input < TYPED:
+                continue
+            if getattr(term, "unsent", False) and now - term.last_input < UNSENT:
                 continue
             since = unread_since.get(name)
             woken_for, times = self._tries.get(term.id, (None, 0))
