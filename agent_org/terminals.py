@@ -187,7 +187,8 @@ class Terminal:
             reset = not self._start <= offset <= self.end
             frm = self._start if reset else offset
             return {"id": self.id, "data": self._buf[frm - self._start:], "next": self.end,
-                    "reset": reset, "alive": self.alive, "age": round(time.time() - self.started, 1)}
+                    "reset": reset, "alive": self.alive, "age": round(time.time() - self.started, 1),
+                    "cols": self.cols, "rows": self.rows}  # the size the program draws for
 
     def write(self, data: str) -> None:
         if self.alive:

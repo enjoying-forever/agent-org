@@ -860,6 +860,9 @@ async function termLoop() {
         p.termId = t.id;
         replay = t.age > 5; // a terminal just started still waits for real answers
       }
+      // Until this pane has a size of its own (the window was hidden when it opened), draw at the size the
+      // program draws for: at any other width its lines break in the wrong places.
+      if (!p.size && t.cols && (t.cols !== p.term.cols || t.rows !== p.term.rows)) p.term.resize(t.cols, t.rows);
       if (t.data && replay) {
         p.replaying = true;
         p.term.write(t.data, () => { p.replaying = false; checkAsking(p); });
