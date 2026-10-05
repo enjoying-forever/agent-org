@@ -338,3 +338,27 @@ def test_closing_the_last_task_releases_the_agents_files(hub):
     assert [lock.path for lock in hub.store.locks("worker-a")] == ["src/parser.py"]  # still busy: keeps them
     worker.finish_task(second.id, "written")
     assert hub.store.locks("worker-a") == [] and worker.released == ["src/parser.py"]  # nothing left to hold for
+
+
+def test_where_you_left_off_carries_only_what_is_still_useful(hub):
+    from agent_org.cards import QUIET_RECENT, role_card
+    lead = hub.session("tech-lead")
+    for i in range(6):
+        lead.send("worker-a", f"note {i}")
+    worker = hub.session("worker-a")
+    card = role_card(worker)
+    assert "note 5" in card and "note 1" not in card and card.count("tech-lead -> worker-a") == QUIET_RECENT
+    assert "Your last" not in role_card(worker, resumed=True)  # a continued conversation has them already
+    task = lead.assign_task("worker-a", "Build the parser")
+    card = role_card(worker)
+    assert f"Task #{task.id}" in card and "note 5" not in card  # with open work: the messages about it
+
+
+def test_the_hub_keeps_an_agents_status_without_calls(hub):
+    worker = hub.session("worker-a")
+    task = hub.session("tech-lead").assign_task("worker-a", "Build the parser")
+    worker.read_inbox()
+    assert (hub.store.get_status("worker-a").state, hub.store.get_status("worker-a").task) == (
+        "working", f"#{task.id} Build the parser")
+    worker.finish_task(task.id, "built")
+    assert hub.store.get_status("worker-a").state == "idle"

@@ -100,7 +100,8 @@ class Tools:
                   "Wait until a message arrives for you, then return it. Call this whenever you are idle.",
                   {"timeout_seconds": {"type": "integer", "description": f"default {DEFAULT_WAIT}"}}, [],
                   self._wait)
-        self._add("set_status", "Tell your superiors what you are doing.",
+        self._add("set_status", "Say what you are doing, if it is more than your task (the hub sets that by "
+                  "itself when you read a task and when you finish it).",
                   {"state": {"type": "string", "enum": ["idle", "working", "waiting", "blocked", "done"]},
                    "task": text}, ["state"],
                   lambda a: self._status(a))

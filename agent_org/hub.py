@@ -518,6 +518,7 @@ class RoleSession:
                 task = self.store.get_task(m.task_id)
                 if task is not None and task.assignee == self.name and task.state == "open":
                     self.store.update_task(task.id, state="working", started_at=time.time())
+                    self.store.set_status(self.name, "working", f"#{task.id} {task.title}")  # no call for it
                     self.hub.event("task", self.name, f"started #{task.id}: {task.title}", task.id)
                     self.hub.sync_role(self.name)  # a new task starts from the latest main
         return messages
@@ -644,6 +645,9 @@ class RoleSession:
         elif outcome in ("failed", "rejected"):
             self.hub.stall_dependents(task)
         self.released = self._release_when_idle() if outcome != "blocked" else []
+        if not any(t.state in ("open", "working") for t in self.my_tasks()):  # its status, without a call
+            self.store.set_status(self.name, "blocked" if outcome == "blocked" else "idle",
+                                  f"#{task.id} {task.title}" if outcome == "blocked" else "")
         return task
 
     def _release_when_idle(self) -> list[str]:

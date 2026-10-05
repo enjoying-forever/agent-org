@@ -8,14 +8,16 @@ from .hub import RoleSession, law_text
 from .verify import describe
 
 SERVER_NAME = "org"
-RECENT = 12  # messages recalled in "where you left off"
+RECENT = 12  # messages recalled in "where you left off" (about open work)
+QUIET_RECENT = 3  # ... when nothing is open
 
 
-def role_card(me: RoleSession) -> str:
+def role_card(me: RoleSession, resumed: bool = False) -> str:
+    """`resumed`: for a conversation that is continued, which has its own messages already."""
     team = me.team
     role = team.roles.get(me.name)
     if role is not None and role.is_consultant:
-        return _consultant_card(me)
+        return _consultant_card(me, resumed)
 
     superior = me.superior
     lines = [f"You are '{me.name}' in an agent team run by {team.owner} (the owner)."]
@@ -72,7 +74,6 @@ def role_card(me: RoleSession) -> str:
         ] if team.settings.team_changes and (subs or superior == team.owner) else []),
         "- Messages from 'hub' are the system's own reminders: a quiet task, a "
         "question passed up to you. Act on them.",
-        "- Keep your status current with set_status, so everyone can see what you are doing.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "
         "automatically, and you are reminded of open tasks and unanswered questions.",
         "- Save what you know with save_notes from time to time: if your session is ever replaced, "
@@ -94,17 +95,24 @@ def role_card(me: RoleSession) -> str:
         for tier in team.tiers.values():
             use = f": {tier.use_for}" if tier.use_for else ""
             lines.append(f"  - {tier.describe()}{use}")
-    lines += where_you_left_off(me)
+    lines += where_you_left_off(me, resumed)
     return "\n".join(lines)
 
 
-def where_you_left_off(me: RoleSession) -> list[str]:
-    """What the hub remembers about this role, so even a brand-new session can carry on."""
+def where_you_left_off(me: RoleSession, resumed: bool = False) -> list[str]:
+    """What the hub remembers about this role, so even a brand-new session can carry on.
+
+    Its recent messages only for a new conversation (a continued one has them already), and only
+    those about its open work - or the last few, when nothing is open: the history of finished
+    work is sent with every request and helps nobody.
+    """
     lines: list[str] = []
     notes = me.store.get_notes(me.name)
     mine, given = me.my_tasks(), me.given_tasks()
     held = [lock.path for lock in me.store.locks(me.name)]
-    recent = me.store.messages_involving(me.name, RECENT)
+    recent = [] if resumed else me.store.messages_involving(me.name, RECENT)
+    open_ids = {t.id for t in mine + given}
+    recent = [m for m in recent if m.task_id in open_ids] if open_ids else recent[-QUIET_RECENT:]
     if not (notes or mine or given or held or recent):
         return lines
     lines += ["", "WHERE YOU LEFT OFF (kept by the hub between sessions):"]
@@ -128,7 +136,7 @@ def where_you_left_off(me: RoleSession) -> list[str]:
     return lines
 
 
-def _consultant_card(me: RoleSession) -> str:
+def _consultant_card(me: RoleSession, resumed: bool = False) -> str:
     c = me.store.get_consultant(me.name)
     assert c is not None
     helped = c.helped
@@ -151,4 +159,4 @@ def _consultant_card(me: RoleSession) -> str:
         "- Every message wakes its receiver: send only what they need, no 'thanks' or 'ok'.",
         "- When you have nothing left to do, end your turn: new messages are delivered to you "
         "automatically.",
-    ] + where_you_left_off(me))
+    ] + where_you_left_off(me, resumed))

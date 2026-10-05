@@ -219,7 +219,7 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
                   resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
     card = out / "role.md"
-    card.write_text(role_card(hub.session(role)) + "\n", encoding="utf-8")
+    card.write_text(role_card(hub.session(role), resumed=bool(resume)) + "\n", encoding="utf-8")
     command, args, env = mcp_server(team_file, role)
     config = out / "mcp.json"
     config.write_text(json.dumps(
@@ -290,7 +290,7 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
         "-c", f"{key}.env={toml(env)}",
         "-c", f"{key}.tool_timeout_sec={WAIT_LIMIT}",
         "-c", f'{key}.default_tools_approval_mode="approve"',
-        "-c", f"developer_instructions={toml(role_card(hub.session(role)))}",
+        "-c", f"developer_instructions={toml(role_card(hub.session(role), resumed=bool(resume)))}",
         # several agents share one install: an update offered at start would wait for a key (and
         # replacing the program while others run it breaks them)
         "-c", "check_for_update_on_startup=false",
@@ -323,7 +323,7 @@ def grok_launch(hub: Hub, team_file: Path, role: str, out: Path,
     command, args, env = mcp_server()
     register = ["grok", "mcp", "add", "--scope", "project", SERVER_NAME, command,
                 *(f"--env={k}={v}" for k, v in env.items()), "--", *args]
-    cli = ["--rules", role_card(hub.session(role)), "--allow", f"MCPTool({SERVER_NAME}__*)"]
+    cli = ["--rules", role_card(hub.session(role), resumed=bool(resume)), "--allow", f"MCPTool({SERVER_NAME}__*)"]
     if spec.model:
         cli += ["-m", spec.model]
     if spec.effort:
