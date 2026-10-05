@@ -85,8 +85,12 @@ agent carries on where it stopped.
 - **Activity:** a timeline of everything that happened (tasks given, started, done,
   accepted; files taken and released; reminders and escalations).
 - **Files:** who is writing which file right now, and for which task.
-- **Usage:** how many tokens each agent's conversation used (and, for Codex, how much
-  of your subscription limit), on its card and in its details.
+- **Usage:** each agent's tokens so far, over every conversation it has had (a fresh start
+  keeps the count), in its pane's title - hover it for new, cached and output tokens and
+  the model - and the team's total at the bottom of the team list. Read from each program's
+  own records: Claude Code's and Codex's session files, Antigravity's conversation
+  database, DeepSeek's run events; Grok keeps no token counts (messages only). For Codex
+  the title also shows how much of your subscription limit is used.
 - **Edit team:** add and remove roles, choose the leader and each role's superior, the
   program and model each role uses, what files it may write, the consultant tiers,
   the checks, and whether agents start by themselves.

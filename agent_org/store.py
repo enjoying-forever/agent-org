@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at  REAL NOT NULL
 );
 
+-- every conversation a role has had (sessions keeps only the current one): its usage adds up over them
+CREATE TABLE IF NOT EXISTS conversations (
+    role        TEXT NOT NULL,
+    harness     TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    PRIMARY KEY (role, harness, session_id)
+);
+INSERT OR IGNORE INTO conversations (role, harness, session_id)
+    SELECT role, harness, session_id FROM sessions WHERE session_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS notes (
     role       TEXT PRIMARY KEY,
     text       TEXT NOT NULL,
@@ -730,6 +740,8 @@ class Store:
             " launched_at = excluded.launched_at, updated_at = excluded.updated_at",
             (role, harness, session_id, now, now),
         )
+        if session_id:
+            self._remember_conversation(role, harness, session_id)
 
     @_locked
     def record_session_id(self, role: str, harness: str, session_id: str) -> None:
@@ -742,6 +754,17 @@ class Store:
             " WHERE sessions.session_id IS NOT excluded.session_id OR sessions.harness IS NOT excluded.harness",
             (role, harness, session_id, now, now),
         )
+        self._remember_conversation(role, harness, session_id)
+
+    def _remember_conversation(self, role: str, harness: str, session_id: str) -> None:
+        self._db.execute("INSERT OR IGNORE INTO conversations (role, harness, session_id) VALUES (?, ?, ?)",
+                         (role, harness, session_id))
+
+    @_locked
+    def conversations(self, role: str) -> list[tuple[str, str]]:
+        """(harness, conversation id) of every conversation `role` has had."""
+        rows = self._db.execute("SELECT harness, session_id FROM conversations WHERE role = ?", (role,)).fetchall()
+        return [(r[0], r[1]) for r in rows]
 
     @_locked
     def get_session(self, role: str) -> Session | None:

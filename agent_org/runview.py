@@ -72,6 +72,7 @@ class View:
         self.session: str | None = None
         self.mid_line = False  # text is being streamed: the next line must start on a new one
         self.last_text = ""
+        self.used: dict[str, int] = {}  # this run's token counts (DeepSeek reports them per step)
 
     def line(self, text: str = "") -> None:
         if self.mid_line:
@@ -113,7 +114,14 @@ class View:
             self.last_text = text or self.last_text
         elif kind == "error":
             self.line(f"{RED}✗ {short(e.get('message') or e.get('error') or e, 300)}{RESET}")
-        elif kind != "status":
+        elif kind == "status":
+            used = e.get("usage")
+            if e.get("phase") == "step_end" and isinstance(used, dict):
+                for key, value in (("in", int(used.get("inputTokens") or 0) + int(used.get("cacheWriteTokens") or 0)),
+                                   ("cached", int(used.get("cacheReadTokens") or 0)),
+                                   ("out", int(used.get("outputTokens") or 0)), ("steps", 1)):
+                    self.used[key] = self.used.get(key, 0) + value
+        else:
             self.line(f"{DIM}· {short(e, 200)}{RESET}")
 
     # Antigravity: {"event": init | step_update | result, ...}
@@ -158,9 +166,33 @@ def banner(out, program: str, version: str, model: str, folder: str) -> None:
     out.write("\n")
 
 
+_counted: dict[str, dict[str, int]] = {}  # what this run already added, by session
+
+
+def keep_usage(path: Path, session: str, used: dict[str, int]) -> None:
+    """Add this run's counts so far to the session's totals in `path` (written after every step, so
+    a run that is stopped keeps what it used)."""
+    try:
+        kept = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, ValueError):
+        kept = {}
+    kept = kept if isinstance(kept, dict) else {}
+    totals = kept.get(session) if isinstance(kept.get(session), dict) else {}
+    before = _counted.get(session, {})
+    for key, value in used.items():
+        totals[key] = int(totals.get(key) or 0) + value - before.get(key, 0)
+    _counted[session] = dict(used)
+    kept[session] = totals
+    try:
+        path.write_text(json.dumps(kept), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="show an agent program's JSON events as they happen")
     parser.add_argument("--session-file", help="keep the run's session id here, for the next run to continue")
+    parser.add_argument("--usage-file", help="add the run's token counts to this file, by session (agent_org.usage)")
     parser.add_argument("--banner", nargs=4, metavar=("PROGRAM", "VERSION", "MODEL", "FOLDER"),
                         help="print the start banner and exit")
     args = parser.parse_args(argv)
@@ -181,11 +213,13 @@ def main(argv: list[str] | None = None) -> int:
             view.line(line)  # not an event (a warning, say): show it as it is
             continue
         if isinstance(event, dict):
-            before = view.session
+            before, steps = view.session, view.used.get("steps", 0)
             view.show(event)
             out.flush()
             if args.session_file and view.session and view.session != before:
                 Path(args.session_file).write_text(view.session, encoding="utf-8")
+            if args.usage_file and view.session and view.used.get("steps", 0) != steps:
+                keep_usage(Path(args.usage_file), view.session, view.used)
     if view.mid_line:
         out.write("\n")
     out.flush()

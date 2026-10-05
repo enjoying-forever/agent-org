@@ -577,11 +577,19 @@ class App:
         }
 
     def _usage(self, role: str, harness: str) -> dict[str, object] | None:
-        record = self.hub.store.get_session(role)
-        if record is None or record.harness != harness:
+        """Everything the role has used: every conversation it has had (a fresh start keeps the count),
+        in whichever program it ran then, and its DeepSeek runs."""
+        parts = [found for h, sid in self.hub.store.conversations(role) if h != "deepseek"
+                 for found in [usage.usage(h, sid)] if found is not None]
+        dsh = self.hub.team.database.parent / "launch" / role / usage.DSH_USAGE
+        if dsh.is_file():
+            parts.append(usage.deepseek(dsh))
+        if not parts:
             return None
-        found = usage.usage(harness, record.session_id)
-        return found.to_dict() if found else None
+        record = self.hub.store.get_session(role)
+        current = usage.usage(harness, record.session_id) if record and record.harness == harness else None
+        return {**usage.total(parts).to_dict(), "conversations": len(parts),
+                "limits": current.limits if current else []}
 
     def events(self, after: int) -> dict[str, Any]:
         return {"events": [{"id": e.id, "at": e.at, "kind": e.kind, "role": e.role, "text": e.text,

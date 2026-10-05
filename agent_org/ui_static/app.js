@@ -444,7 +444,10 @@ function renderChart() {
   const owner = h('li', {}, ownerRow);
   $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
   const running = st.roles.filter((r) => r.online).length;
-  $('#rail-summary').textContent = `${running} of ${st.roles.length} running`;
+  const spent = st.roles.reduce((sum, r) => sum + totalTokens(r.usage), 0);
+  $('#rail-summary').textContent = `${running} of ${st.roles.length} running${spent ? ` · ${fmtNum(spent)} tokens` : ''}`;
+  $('#rail-summary').title = st.roles.filter((r) => totalTokens(r.usage))
+    .map((r) => `${r.name}: ${fmtNum(totalTokens(r.usage))} tokens`).join('\n');
 }
 
 function focusPane(name) {
@@ -522,6 +525,7 @@ function updatePane(p, r) {
     s && `${s.state}${s.task ? `: ${s.task}` : ''}`,
     r.tier ? `${r.tier} consultant for #${r.help_id}` : `reports to ${r.superior}`,
     r.usage && usageText(r.usage),
+    r.usage?.limits?.length && r.usage.limits.join('; '),
     r.open_tasks && plural(r.open_tasks, 'open task'),
     r.locks.length && `writing ${r.locks.join(', ')}`,
     'Drag the title onto another pane to swap them; double-click for full screen',
@@ -529,6 +533,7 @@ function updatePane(p, r) {
   fill(p.head,
     runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }),
+    r.usage && h('span', { class: 'tok', title: usageText(r.usage) }, shortUsage(r.usage)),
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
     r.online > 1 && h('span', { class: 'flag bad' }, `${r.online} sessions`),
     r.stuck && h('span', { class: 'flag bad', title: r.stuck.text }, r.stuck.describe),
@@ -910,13 +915,18 @@ function fmtNum(n) {
   return String(n);
 }
 
+// An agent's usage over every conversation it has had: tokens in (new), read from the cache (which
+// counts for less on most subscriptions) and out.
+const totalTokens = (u) => (u ? u.tokens_in + u.tokens_cached + u.tokens_out : 0);
+
 function usageText(u) {
-  if (!u.tokens_in && !u.tokens_out) return `${plural(u.messages, 'message')}${u.model ? ` on ${u.model}` : ''}`;
-  return `${fmtNum(u.tokens_in)} in, ${fmtNum(u.tokens_cached)} cached, ${fmtNum(u.tokens_out)} out`
-    + ` over ${plural(u.messages, 'reply')}${u.model ? ` on ${u.model}` : ''}`;
+  if (!totalTokens(u)) return `${plural(u.messages, 'message')}${u.model ? ` on ${u.model}` : ''}`;
+  const convs = u.conversations > 1 ? ` in ${u.conversations} conversations` : '';
+  return `Used ${fmtNum(totalTokens(u))} tokens${convs}: ${fmtNum(u.tokens_in)} new in, ${fmtNum(u.tokens_cached)} `
+    + `cached in, ${fmtNum(u.tokens_out)} out, over ${plural(u.messages, 'model call')}${u.model ? ` (${u.model})` : ''}`;
 }
 
-const shortUsage = (u) => (u.tokens_in || u.tokens_out ? `${fmtNum(u.tokens_in + u.tokens_out)} tok` : `${u.messages} msg`);
+const shortUsage = (u) => (totalTokens(u) ? `${fmtNum(totalTokens(u))} tok` : `${u.messages} msg`);
 
 function runningEl(r) {
   if (!r.online) return h('span', { class: 'run off', title: 'No session of this role is running' }, 'not running');

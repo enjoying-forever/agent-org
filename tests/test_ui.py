@@ -517,3 +517,16 @@ def test_one_teammate_changed_moved_and_removed(server):
     out = server.ok("/api/teammate-remove", {"name": "tech-lead"})
     assert out == {"removed": "tech-lead", "moved_to": "leader"}
     assert "tech-lead" not in roles() and roles()["worker-b"]["superior"] == "leader"
+
+
+
+def test_state_shows_each_agents_usage_over_all_its_conversations(server, monkeypatch):
+    from agent_org import usage as usage_mod
+    store = server.app.hub.store
+    store.start_session("leader", "claude", "11111111-1111-4111-8111-111111111111")
+    store.start_session("leader", "claude", "22222222-2222-4222-8222-222222222222")  # a fresh start
+    assert len(store.conversations("leader")) == 2  # the first one is not forgotten
+    counts = {"11111111-1111-4111-8111-111111111111": 100, "22222222-2222-4222-8222-222222222222": 50}
+    monkeypatch.setattr(usage_mod, "usage", lambda h, sid: usage_mod.Usage(tokens_in=counts[sid], messages=1))
+    role = next(r for r in server.ok("/api/state")["roles"] if r["name"] == "leader")
+    assert (role["usage"]["tokens_in"], role["usage"]["conversations"]) == (150, 2)

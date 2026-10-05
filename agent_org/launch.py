@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import sessions
 from .cards import SERVER_NAME, role_card
+from .usage import DSH_USAGE
 from .hooks import STOP_WAIT
 from .hub import Hub, HubError, Opener
 from .team import Role, Team
@@ -588,7 +589,8 @@ def deepseek_launch(hub: Hub, team_file: Path, role: str, out: Path,
     if os.environ.get("ALL_PROXY", os.environ.get("all_proxy", "")).lower().startswith("socks"):
         env["ALL_PROXY"] = ""  # dsh cannot use a SOCKS proxy and says so on every run; it uses HTTPS_PROXY
     dsh = " ".join(ps(a) for a in [command, *base, "--profile", "headless", "--patch", str(patch_file), "--json"])
-    viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview", "--session-file", str(session_file)])
+    viewer = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.runview", "--session-file", str(session_file),
+                                      "--usage-file", str(out / DSH_USAGE)])
     waiter = " ".join(ps(a) for a in [sys.executable, "-m", "agent_org.wake", "--team", str(team_file),
                                       "--role", role, "--stop", str(out / STOP_MARKER), "--input"])
     spec = hub.team.roles[role]

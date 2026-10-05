@@ -4,6 +4,11 @@
 - Codex: the running total, and - when the provider reports them - how much of each
   subscription limit window is used.
 - Grok: no token counts on disk; the number of messages and the model instead.
+- Antigravity: each model call's counts, in its conversation's database (protobuf records).
+- DeepSeek Harness: each step's counts from its JSON events, which agent_org.runview keeps
+  in the role's launch folder (its own session files are compressed).
+
+`total` adds up every conversation a role has had, so an agent's cost survives a fresh start.
 
 `stuck` tells whether a conversation's last turn ended on an API error - most often the
 subscription's usage limit, with the time it resets - so the team can move the work
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import time
 import zoneinfo
 from dataclasses import asdict, dataclass, field
@@ -39,14 +45,29 @@ class Usage:
 _cache: dict[Path, tuple[float, int, Usage]] = {}
 
 
+_paths: dict[tuple[str, str, str], Path] = {}  # where a conversation's file was found (the search is slow)
+
+
 def session_file(harness: str, session_id: str | None) -> Path | None:
     if not session_id or not sessions.UUID_RE.match(session_id):
         return None
+    key = (str(sessions.home()), harness, session_id)
+    known = _paths.get(key)
+    if known is not None and known.exists():
+        return known
+    found = _find(harness, session_id)
+    if found is not None:
+        _paths[key] = found
+    return found
+
+
+def _find(harness: str, session_id: str) -> Path | None:
     home = sessions.home()
     patterns = {
         "claude": (home / ".claude" / "projects", f"*/{session_id}.jsonl"),
         "codex": (home / ".codex" / "sessions", f"*/*/*/rollout-*-{session_id}.jsonl"),
         "grok": (home / ".grok" / "sessions", f"*/{session_id}/summary.json"),
+        "antigravity": (home / ".gemini" / "antigravity-cli" / "conversations", f"{session_id}.db"),
     }
     if harness not in patterns:
         return None
@@ -66,10 +87,10 @@ def usage(harness: str, session_id: str | None) -> Usage | None:
     cached = _cache.get(path)
     if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
         return cached[2]
-    reader = {"claude": _claude, "codex": _codex, "grok": _grok}[harness]
+    reader = {"claude": _claude, "codex": _codex, "grok": _grok, "antigravity": _antigravity}[harness]
     try:
         result = reader(path)
-    except (OSError, ValueError):
+    except (OSError, ValueError, sqlite3.Error):
         return None
     _cache[path] = (stat.st_mtime, stat.st_size, result)
     return result
@@ -135,6 +156,101 @@ def _codex(path: Path) -> Usage:
 def _grok(path: Path) -> Usage:
     summary = json.loads(path.read_text(encoding="utf-8"))
     return Usage(messages=int(summary.get("num_chat_messages") or 0), model=summary.get("current_model_id") or "")
+
+
+def _antigravity(path: Path) -> Usage:
+    """One gen_metadata row per model call. In its record, field 1 holds field 4 (that call's usage:
+    2 input, 3 output with thinking, 5 cache reads) and field 19 (the model). Matched against the
+    usage `agy -p --output-format stream-json` reports for the same call."""
+    u = Usage()
+    db = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5)
+    try:
+        rows = db.execute("SELECT data FROM gen_metadata ORDER BY idx").fetchall()
+    finally:
+        db.close()
+    for (data,) in rows:
+        call = _field(_proto(data or b""), 1)
+        fields = _proto(call) if isinstance(call, bytes) else []
+        counts = _field(fields, 4)
+        counts = _proto(counts) if isinstance(counts, bytes) else []
+        u.tokens_in += int(_field(counts, 2) or 0)
+        u.tokens_out += int(_field(counts, 3) or 0)
+        u.tokens_cached += int(_field(counts, 5) or 0)
+        model = _field(fields, 19)
+        if isinstance(model, bytes):
+            u.model = model.decode("utf-8", "replace")
+        u.messages += 1
+    return u
+
+
+def _proto(data: bytes) -> list[tuple[int, object]]:
+    """The top-level fields of a protobuf message: (number, int or bytes). [] if it is not one."""
+    out, i = [], 0
+
+    def varint() -> int:
+        nonlocal i
+        n = shift = 0
+        while True:
+            c = data[i]
+            i += 1
+            n |= (c & 0x7F) << shift
+            shift += 7
+            if c < 0x80:
+                return n
+
+    try:
+        while i < len(data):
+            key = varint()
+            number, wire = key >> 3, key & 7
+            if wire == 0:
+                out.append((number, varint()))
+            elif wire == 2:
+                n = varint()
+                out.append((number, data[i:i + n]))
+                i += n
+            elif wire in (1, 5):
+                i += 8 if wire == 1 else 4
+            else:
+                return []
+    except IndexError:
+        return []
+    return out
+
+
+def _field(fields: list[tuple[int, object]], number: int) -> object:
+    return next((v for n, v in fields if n == number), None)
+
+
+DSH_USAGE = "dsh.usage.json"  # in a DeepSeek role's launch folder: {session id: counts}, kept by runview
+
+
+def deepseek(path: Path) -> Usage:
+    """A DeepSeek role's usage, every conversation in its launch folder's usage file."""
+    u = Usage()
+    try:
+        kept = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return u
+    for counts in (kept.values() if isinstance(kept, dict) else []):
+        if isinstance(counts, dict):
+            u.tokens_in += int(counts.get("in") or 0)
+            u.tokens_cached += int(counts.get("cached") or 0)
+            u.tokens_out += int(counts.get("out") or 0)
+            u.messages += int(counts.get("steps") or 0)
+    return u
+
+
+def total(parts: list[Usage]) -> Usage:
+    """Several conversations' usage as one (the model and limits of the last that has them)."""
+    u = Usage()
+    for part in parts:
+        u.tokens_in += part.tokens_in
+        u.tokens_cached += part.tokens_cached
+        u.tokens_out += part.tokens_out
+        u.messages += part.messages
+        u.model = part.model or u.model
+        u.limits = part.limits or u.limits
+    return u
 
 
 # why an agent stopped working
