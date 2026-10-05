@@ -157,7 +157,8 @@ what they still owe.
    messages; long material goes in a file.
 9. **One writer per file.** An agent must hold a file's lease to edit it; editing a free
    file in its scope takes it, and a whole folder (`src/api/*`) can be reserved for a
-   task. Leases run out when their holder stops working. (With git branches on, each
+   task. Leases run out when their holder stops working, and closing its last task
+   releases an agent's files. (With git branches on, each
    agent edits its own copy instead: see below.)
 10. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
     Messages stay private to the sender, the receiver and their superiors.
