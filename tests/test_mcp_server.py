@@ -343,3 +343,22 @@ def test_bad_role_exits_with_a_message(tmp_path):
     )
     assert proc.returncode == 2
     assert "not in this team" in proc.stderr
+
+
+def test_antigravity_gets_every_tools_arguments_without_opening_files(client):
+    # Antigravity writes tool descriptions to files its model opens one by one; my_role lists them all
+    text, err = client("worker-b").call("tools/call", {"name": "my_role", "arguments": {}})["result"]["content"][0]["text"], False
+    assert "YOUR TEAM TOOLS" in text and "- finish_task(task_id, result, outcome?)" in text
+    codex_card = client("worker-a").tool("my_role")[0]
+    assert "YOUR TEAM TOOLS" not in codex_card  # programs that see the tools' descriptions need no list
+
+
+def test_an_argument_of_the_obvious_other_type_is_taken(client, hub):
+    worker = client("worker-a")
+    text, err = worker.tool("set_status", state="working", task=4)  # seen: a number where text was asked
+    assert not err and hub.store.get_status("worker-a").task == "4"
+    lead = client("tech-lead")
+    lead.tool("assign_task", to="worker-a", title="Parser", done_when="tests pass")
+    [task] = hub.store.tasks(assignee="worker-a")
+    text, err = worker.tool("task_details", task_id=f"#{task.id}")  # and "#3" where a number was asked
+    assert not err and "Parser" in text

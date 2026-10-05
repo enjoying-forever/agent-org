@@ -88,7 +88,8 @@ LAW = [
      "act on: no 'thanks' or 'ok' messages. Put long material in a file and send its path."),
     ("One writer per file", "You must hold a file's lease to edit it: editing a free file in "
      "your scope takes it, and claim_file can reserve a whole folder (src/api/*) for a task. "
-     "Leases run out when their holder stops working. Release files when you are done."),
+     "Leases run out when their holder stops working. Closing your last task releases your files; "
+     "release_file one earlier if someone needs it."),
     ("Everyone sees the team", "Anyone can see every role's status, tasks and files "
      "(team_status). Messages stay private to the sender, the receiver and their superiors."),
     ("Silence is a problem", "A task that shows no progress gets a reminder, then its assigner "
@@ -422,6 +423,7 @@ class RoleSession:
         self.hub = hub
         self.store = hub.store
         self.name = name
+        self.released: list[str] = []  # files the last finish_task let go of
 
     @property
     def team(self) -> Team:
@@ -641,7 +643,20 @@ class RoleSession:
             self.hub.release_dependents(task)
         elif outcome in ("failed", "rejected"):
             self.hub.stall_dependents(task)
+        self.released = self._release_when_idle() if outcome != "blocked" else []
         return task
+
+    def _release_when_idle(self) -> list[str]:
+        """With its last task closed, an agent has nothing to hold files for: they are released for it
+        (seen: an agent spent a call per file releasing them by hand). Blocked work keeps its files."""
+        if any(t.state in ("open", "working", "blocked") for t in self.my_tasks()):
+            return []
+        released = []
+        for lock in self.store.locks(self.name):
+            self.store.release(self.hub.lock_key(lock.path)[0])
+            self.hub.event("file", self.name, f"released {lock.path}: its tasks are finished")
+            released.append(lock.path)
+        return released
 
     def _checks(self, files: list[str], cwd: Path, refusal: str, task_id: int | None) -> str:
         """Run the team's checks that apply to `files` in `cwd`; refuse with their output if one fails."""

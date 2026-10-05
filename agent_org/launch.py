@@ -207,7 +207,7 @@ AGENT_CLAUDE_SETTINGS = {"env": {"CLAUDE_CODE_PLUGIN_DIRS": ""}, "spinnerTipsEna
 # workflows, schedules, its own subagents...) are left out: they are sent with every request (a
 # request measured 41.7k tokens with them, 13.2k without) and would let an agent reach past the team.
 AGENT_CLAUDE_TOOLS = ("Bash", "PowerShell", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit",
-                      "WebFetch", "WebSearch", "ToolSearch")
+                      "WebFetch", "WebSearch")
 
 
 def claude_model(model: str) -> str:
@@ -246,7 +246,9 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
         cli.append(resume_kickoff(role) if resume else kickoff(role))
     # Several agents share one Claude Code install; an update started by one tab can't
     # replace the program while the others run it, and leaves a broken install behind.
-    env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1"}
+    # ENABLE_TOOL_SEARCH=false: the org tools are there from the start; deferred, each first use cost a
+    # ToolSearch step (seen: three in one short task).
+    env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1", "ENABLE_TOOL_SEARCH": "false"}
     return Launch(role, "claude", "claude", cli, env)
 
 
@@ -404,8 +406,8 @@ def install_antigravity_plugin() -> None:
 
 
 def antigravity_kickoff(role: str, resume: bool) -> str:
-    where = (" In Antigravity the team tools are on the MCP server agent-org_org (call them with call_mcp_tool); "
-             "their descriptions are in your tool list.")
+    where = (f" In Antigravity call them with call_mcp_tool, ServerName agent-org_{SERVER_NAME} (my_role: Arguments "
+             "{}); my_role also lists every team tool's arguments, so there is no need to open their files.")
     return (resume_kickoff(role) if resume else kickoff(role)) + where
 
 

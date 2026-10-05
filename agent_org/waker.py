@@ -64,8 +64,9 @@ def wake_line(harness: str, role: str, tasks: list[str] | None = None) -> str:
         line = (f"agent-org: '{role}', you have new messages. Call read_inbox and act on them, then end "
                 "your turn.")
     if harness == "antigravity":  # no system prompt of its own: a new conversation learns its role here
-        line += (f" If this conversation has not read your role yet, call my_role first. The team tools are "
-                 f"on the MCP server agent-org_{SERVER_NAME} (call them with call_mcp_tool).")
+        line += (f" If this conversation has not read your role yet, first call_mcp_tool with ServerName "
+                 f"agent-org_{SERVER_NAME}, ToolName my_role, Arguments {{}}: it also lists every team tool's "
+                 "arguments, so there is no need to open their files.")
     return line
 
 

@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .cards import role_card
+from .cards import SERVER_NAME, role_card
 from . import presets
 from .hub import BROADCAST, OUTCOMES, Hub, HubError, RoleSession
 from .launch import stop_role, tab_opener
@@ -57,7 +57,7 @@ class Tools:
         reply = {"type": "integer", "description": "id of the message you are answering"}
 
         self._add("my_role", "Show your role, duties, superior, team and the rules you work under.",
-                  {}, [], lambda a: role_card(me))
+                  {}, [], lambda a: role_card(me) + self.reference())
         self._add("team_status",
                   "See the whole team: every role, who it reports to, what it is doing, and whether it is running.",
                   {}, [], lambda a: self._team_status())
@@ -77,7 +77,8 @@ class Tools:
                   "Close a task assigned to you. outcome: 'done' (it meets its 'done when'; say what you did "
                   "and where), 'blocked' (say exactly what you need), 'failed' (say why), or 'rejected' (it "
                   "is not something you can or should do). Whoever assigned it is told. Every task must "
-                  "be closed this way. If the team has checks (see my_role), 'done' is refused until they pass.",
+                  "be closed this way. If the team has checks (see my_role), 'done' is refused until they pass. "
+                  "Closing your last open task also releases every file you hold.",
                   {"task_id": {"type": "integer"}, "result": text,
                    "outcome": {"type": "string", "enum": list(OUTCOMES)}},
                   ["task_id", "result"], self._finish)
@@ -209,6 +210,20 @@ class Tools:
                   "Files it holds go back to the agent it helped.",
                   {"name": text}, ["name"], self._dismiss)
 
+    def reference(self) -> str:
+        """For a program that keeps tool descriptions out of the model's sight (Antigravity writes them
+        to files it must open, one by one): every tool with its arguments, so it can call them at once."""
+        role = self.me.hub.team.roles.get(self.me.name)
+        if role is None or role.harness != "antigravity":
+            return ""
+        lines = ["", f"YOUR TEAM TOOLS (call_mcp_tool, ServerName \"agent-org_{SERVER_NAME}\"; '?' marks an "
+                     "optional argument; no need to open their files):"]
+        for spec in self.specs:
+            schema = spec["inputSchema"]
+            args = [a if a in schema.get("required", []) else f"{a}?" for a in schema["properties"]]
+            lines.append(f"- {spec['name']}({', '.join(args)})")
+        return "\n".join(lines)
+
     def _props(self, name: str) -> list[str]:
         spec = next((s for s in self.specs if s["name"] == name), None)
         return list(spec["inputSchema"]["properties"]) if spec else []
@@ -227,7 +242,19 @@ class Tools:
                 fitted[meant] = value
             else:
                 unknown.append(key)
+        types = self._types(name)
+        for key, value in fitted.items():  # 4 for "4" and "4" for 4: no call refused (and redone) for it
+            want = types.get(key)
+            if want == "string" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                fitted[key] = str(value)
+            elif want == "integer" and isinstance(value, str) and value.strip().lstrip("#").isdigit():
+                fitted[key] = int(value.strip().lstrip("#"))
         return fitted, unknown
+
+    def _types(self, name: str) -> dict[str, str]:
+        spec = next((s for s in self.specs if s["name"] == name), None)
+        props = spec["inputSchema"]["properties"] if spec else {}
+        return {k: v.get("type", "") for k, v in props.items() if isinstance(v, dict)}
 
     def _add(self, name: str, description: str, props: dict[str, Any], required: list[str],
              handler: Callable[[dict[str, Any]], str]) -> None:
@@ -303,7 +330,8 @@ class Tools:
     def _finish(self, args: dict[str, Any]) -> str:
         task = self.me.finish_task(int(args["task_id"]), args["result"], args.get("outcome") or "done")
         told = "the owner" if task.assigner == self.me.team.owner else task.assigner  # the owner may be called "you"
-        return f"Task #{task.id} is {task.state}; {told} has been told."
+        freed = f" Your files are released ({', '.join(self.me.released)})." if self.me.released else ""
+        return f"Task #{task.id} is {task.state}; {told} has been told.{freed}"
 
     def _cancel(self, args: dict[str, Any]) -> str:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
@@ -422,7 +450,9 @@ def server_instructions(me) -> str:
     """What the server tells a program at the start (Claude Code adds it to the system prompt). A
     program that has the role card as its system prompt gets a pointer, not the card a second time."""
     role = me.hub.team.roles.get(me.name)
-    return SHORT_INSTRUCTIONS if role is not None and role.harness in CARD_IN_SYSTEM_PROMPT else role_card(me)
+    if role is not None and role.harness in CARD_IN_SYSTEM_PROMPT:
+        return SHORT_INSTRUCTIONS
+    return role_card(me) + Tools(me).reference()
 
 
 class Server:

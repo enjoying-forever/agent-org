@@ -204,7 +204,7 @@ def test_antigravity_learns_its_role_from_the_line(hub):
     now = later()
     term = FakeTerm(now)
     assert waker.Waker().tick(hub, FakeHost(**{"worker-b": term}), now) == ["worker-b"]
-    assert "call my_role first" in term.got[0] and "call_mcp_tool" in term.got[0]
+    assert "ToolName my_role" in term.got[0] and "call_mcp_tool" in term.got[0] and "no need to open" in term.got[0]
     assert "my_role" not in waker.wake_line("claude", "leader")  # the others have it as system prompt
 
 

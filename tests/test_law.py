@@ -175,6 +175,15 @@ def test_reminders_follow_the_law(hub):
     assert f"worker-b asked you for help (#{question.id}) and has no answer yet" in reason
 
 
+def test_an_agent_waiting_for_the_work_it_gave_out_is_not_pushed_on(hub):
+    lead = hub.session("tech-lead")
+    mine = hub.session("leader").assign_task("tech-lead", "Design the API")
+    lead.read_inbox()
+    lead.assign_task("worker-a", "Build it")  # it handed the work down and now waits for the result
+    out = hooks.on_stop(lead, {"stop_hook_active": False}, wait=0.1, poll=0.05)
+    assert out is None or f"Task #{mine.id}" not in out.get("reason", "")
+
+
 # memory: where you left off
 
 

@@ -172,7 +172,8 @@ def test_a_claude_agent_gets_only_the_tools_a_teammate_needs(team_file):
     script = (run_dry(team_file, "leader") / "leader" / "start.ps1").read_text(encoding="utf-8")
     assert "'--strict-mcp-config'" in script and "'--no-chrome'" in script  # none of your MCP servers or Chrome
     tools = re.search(r"'--tools' '([^']*)'", script).group(1).split(",")
-    assert {"Bash", "Read", "Edit", "Write", "ToolSearch"} <= set(tools)
+    assert {"Bash", "Read", "Edit", "Write"} <= set(tools)
+    assert "$env:ENABLE_TOOL_SEARCH = 'false'" in script  # the org tools are there at once: no lookup step
     assert not {"Task", "Workflow", "Artifact", "CronCreate"} & set(tools)  # no subagents or side channels
     assert "'--allowedTools' 'mcp__org'" in script  # the team's own tools stay
 

@@ -66,8 +66,11 @@ def block(reason: str) -> dict[str, Any]:
 def duties_left(me: RoleSession) -> list[str]:
     """What the message law still asks of an agent that is about to go quiet."""
     left = []
+    # Waiting for the work it gave out is a fine place to stop: their results wake it. (Reminding it
+    # cost a whole model call, seen in a real run, only for it to start waiting.)
+    waiting_on_others = any(t.state in ("waiting", "open", "working") for t in me.given_tasks())
     for task in me.my_tasks():
-        if task.state in ("open", "working"):
+        if task.state in ("open", "working") and not waiting_on_others:
             check = f" Done when: {task.done_when}." if task.done_when else ""
             left.append(
                 f"Task #{task.id} from {task.assigner} ({task.title}) is still open.{check} If it is "

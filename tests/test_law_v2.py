@@ -323,4 +323,18 @@ def test_events_record_what_happened(hub):
     hub.session("worker-a").finish_task(task.id, "built")
     texts = [e.text for e in hub.store.events_after(0)]
     assert texts == [f"gave #{task.id} to worker-a: Build it", f"started #{task.id}: Build it",
-                     f"took src/app.py (task #{task.id})", f"#{task.id} done: Build it"]
+                     f"took src/app.py (task #{task.id})", f"#{task.id} done: Build it",
+                     "released src/app.py: its tasks are finished"]
+
+
+def test_closing_the_last_task_releases_the_agents_files(hub):
+    worker = hub.session("worker-a")
+    lead = hub.session("tech-lead")
+    first = lead.assign_task("worker-a", "Parser")
+    second = lead.assign_task("worker-a", "Writer")
+    worker.read_inbox()
+    worker.claim("src/parser.py")
+    worker.finish_task(first.id, "parsed")
+    assert [lock.path for lock in hub.store.locks("worker-a")] == ["src/parser.py"]  # still busy: keeps them
+    worker.finish_task(second.id, "written")
+    assert hub.store.locks("worker-a") == [] and worker.released == ["src/parser.py"]  # nothing left to hold for
