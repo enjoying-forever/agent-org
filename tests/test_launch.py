@@ -96,6 +96,24 @@ def test_codex_script_passes_valid_toml(team_file, tmp_path):
     assert "check_for_update_on_startup=false" in built.args  # no update menu waiting for a key at start
 
 
+def test_a_codex_agent_leaves_your_plugins_servers_and_memories_out(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[plugins."browser@openai-bundled"]\nenabled = true\n'
+                      '[mcp_servers.node_repl]\ncommand = "node_repl.exe"\n'
+                      '[mcp_servers.org]\ncommand = "x"\n[memories]\nuse_memories = true\n', encoding="utf-8")
+    off = launch.codex_extras_off(config)
+    pairs = [off[i + 1] for i in range(0, len(off), 2)]
+    # Codex splits keys at dots and takes quotes literally ("node_repl" would be a new, broken server)
+    assert "plugins.browser@openai-bundled.enabled=false" in pairs
+    assert "mcp_servers.node_repl.enabled=false" in pairs
+    assert not any("org" in p for p in pairs)  # the team's own server stays
+    assert "memories.use_memories=false" in pairs and "memories.generate_memories=false" in pairs
+    for p in pairs:  # each is valid TOML, as Codex reads it
+        key, _, value = p.partition("=")
+        assert tomllib.loads(f"v = {value}")["v"] is False
+    assert launch.codex_extras_off(tmp_path / "missing.toml") == []  # no config: nothing to turn off
+
+
 def test_grok_registers_the_project_server_then_starts(team_file):
     base = run_dry(team_file, "researcher")
     script = (base / "researcher" / "start.ps1").read_text(encoding="utf-8")
@@ -148,6 +166,15 @@ def test_claude_gets_the_hooks_through_settings(team_file):
     assert stop["command"].endswith("org_hook.py stop") and stop["timeout"] > launch.STOP_WAIT
     script = (out / "start.ps1").read_text(encoding="utf-8")
     assert f"'--settings' '{out / 'settings.json'}'" in script
+
+
+def test_a_claude_agent_gets_only_the_tools_a_teammate_needs(team_file):
+    script = (run_dry(team_file, "leader") / "leader" / "start.ps1").read_text(encoding="utf-8")
+    assert "'--strict-mcp-config'" in script and "'--no-chrome'" in script  # none of your MCP servers or Chrome
+    tools = re.search(r"'--tools' '([^']*)'", script).group(1).split(",")
+    assert {"Bash", "Read", "Edit", "Write", "ToolSearch"} <= set(tools)
+    assert not {"Task", "Workflow", "Artifact", "CronCreate"} & set(tools)  # no subagents or side channels
+    assert "'--allowedTools' 'mcp__org'" in script  # the team's own tools stay
 
 
 def test_a_claude_agent_runs_without_your_mods_and_tips(team_file):

@@ -19,6 +19,7 @@ import subprocess
 import os
 import sys
 import time
+import tomllib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -201,6 +202,12 @@ def grok_hooks_state() -> str:
 # These go in the agent's own settings because Claude Code applies your settings' "env"
 # over whatever environment it starts with.
 AGENT_CLAUDE_SETTINGS = {"env": {"CLAUDE_CODE_PLUGIN_DIRS": ""}, "spinnerTipsEnabled": False}
+# A teammate works with the shell, files and the web, and with the team through the org tools. Your own
+# MCP servers and connectors, Claude in Chrome, and Claude Code's other built-in tools (artifacts,
+# workflows, schedules, its own subagents...) are left out: they are sent with every request (a
+# request measured 41.7k tokens with them, 13.2k without) and would let an agent reach past the team.
+AGENT_CLAUDE_TOOLS = ("Bash", "PowerShell", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit",
+                      "WebFetch", "WebSearch", "ToolSearch")
 
 
 def claude_model(model: str) -> str:
@@ -221,7 +228,8 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
     settings = out / "settings.json"
     settings.write_text(json.dumps(AGENT_CLAUDE_SETTINGS | {"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")},
                                    indent=2), encoding="utf-8")
-    cli = ["--mcp-config", str(config), "--allowedTools", f"mcp__{SERVER_NAME}",
+    cli = ["--mcp-config", str(config), "--strict-mcp-config", "--allowedTools", f"mcp__{SERVER_NAME}",
+           "--tools", ",".join(AGENT_CLAUDE_TOOLS), "--no-chrome",
            "--append-system-prompt-file", str(card), "--settings", str(settings)]
     if spec.model:
         cli += ["--model", claude_model(spec.model)]
@@ -242,6 +250,33 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
     return Launch(role, "claude", "claude", cli, env)
 
 
+def codex_extras_off(config: Path | None = None) -> list[str]:
+    """-c overrides that leave your own Codex plugins, MCP servers and memories out of an agent.
+
+    They are sent with every request (a request measured 21.4k tokens with them, 16.4k without),
+    some reach past the team (a browser, computer use), and an agent's work would fill your own
+    memories. Your config.toml is not changed: each agent starts with them off.
+    """
+    path = config or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    off: list[str] = []
+    # Codex splits a -c key at its dots and takes quotes literally: a name goes in as it is, and one it
+    # would split (or another odd one) is left alone.
+    plain = re.compile(r"[A-Za-z0-9_@-]+")
+    for name in (data.get("plugins") or {}):
+        if plain.fullmatch(name):
+            off += ["-c", f"plugins.{name}.enabled=false"]
+    for name in (data.get("mcp_servers") or {}):
+        if name != SERVER_NAME and plain.fullmatch(name):
+            off += ["-c", f"mcp_servers.{name}.enabled=false"]
+    if data.get("memories") or (data.get("features") or {}).get("memories"):
+        off += ["-c", "memories.use_memories=false", "-c", "memories.generate_memories=false"]
+    return off
+
+
 def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
                  resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
@@ -257,6 +292,7 @@ def codex_launch(hub: Hub, team_file: Path, role: str, out: Path,
         # several agents share one install: an update offered at start would wait for a key (and
         # replacing the program while others run it breaks them)
         "-c", "check_for_update_on_startup=false",
+        *codex_extras_off(),
     ]
     # Codex asks you once to review and trust new hooks; the commands are the same for
     # every role, so one "Trust all" covers them all.
