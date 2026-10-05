@@ -341,17 +341,22 @@ def test_closing_the_last_task_releases_the_agents_files(hub):
 
 
 def test_where_you_left_off_carries_only_what_is_still_useful(hub):
-    from agent_org.cards import QUIET_RECENT, role_card
+    from agent_org.cards import role_card
     lead = hub.session("tech-lead")
+    worker = hub.session("worker-a")
+    old = lead.assign_task("worker-a", "Old work")
+    worker.read_inbox()
+    worker.finish_task(old.id, "done long ago")
+    lead.review_task(old.id, accept=True)
     for i in range(6):
         lead.send("worker-a", f"note {i}")
-    worker = hub.session("worker-a")
-    card = role_card(worker)
-    assert "note 5" in card and "note 1" not in card and card.count("tech-lead -> worker-a") == QUIET_RECENT
-    assert "Your last" not in role_card(worker, resumed=True)  # a continued conversation has them already
+    # nothing open: no old messages (seen: an old 'please review' was taken as still pending)
+    assert "Your last" not in role_card(worker) and "Your last" not in role_card(lead)
     task = lead.assign_task("worker-a", "Build the parser")
     card = role_card(worker)
     assert f"Task #{task.id}" in card and "note 5" not in card  # with open work: the messages about it
+    assert f"(task #{task.id} is now open)" in card  # and what became of each task
+    assert "Your last" not in role_card(worker, resumed=True)  # a continued conversation has them already
 
 
 def test_the_hub_keeps_an_agents_status_without_calls(hub):

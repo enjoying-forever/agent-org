@@ -58,46 +58,41 @@ class Tools:
 
         self._add("my_role", "Show your role, duties, superior, team and the rules you work under.",
                   {}, [], lambda a: role_card(me) + self.reference())
-        self._add("team_status",
-                  "See the whole team: every role, who it reports to, what it is doing, and whether it is running.",
+        self._add("team_status", "The whole team: who reports to whom, what each does, who is running.",
                   {}, [], lambda a: self._team_status())
         self._add("send_message",
-                  "Send a message to your direct superior (a report), a peer with the same superior, "
-                  "anyone below you (an instruction), or answer anyone who wrote to you (with reply_to). "
-                  "to='@team' writes to all your direct subordinates, to='@all' to everyone below you. "
-                  "Send only what the receiver needs to act on: every message wakes them.",
+                  "Message your superior, a peer (same superior) or anyone below you, or answer anyone who "
+                  "wrote to you (reply_to). to='@team': your direct subordinates; '@all': everyone below you. "
+                  "Every message wakes its receiver: send only what they need.",
                   {"to": text, "text": text, "reply_to": reply,
-                   "urgent": {"type": "boolean", "description": "only for messages going down: "
-                              "interrupts the receiver's current work"}},
+                   "urgent": {"type": "boolean", "description": "going down only: interrupts their work"}},
                   ["to", "text"], self._send)
-        self._add("list_tasks", "Your tasks (to do, and queued behind others), and the tasks you gave that "
-                                "are not finished yet, including those waiting for your review.",
+        self._add("list_tasks", "Your tasks, and the unfinished tasks you gave (those to review too).",
                   {}, [], lambda a: self._list_tasks())
         self._add("finish_task",
-                  "Close a task assigned to you. outcome: 'done' (it meets its 'done when'; say what you did "
-                  "and where), 'blocked' (say exactly what you need), 'failed' (say why), or 'rejected' (it "
-                  "is not something you can or should do). Whoever assigned it is told. Every task must "
-                  "be closed this way. If the team has checks (see my_role), 'done' is refused until they pass. "
-                  "Closing your last open task also releases every file you hold.",
+                  "Close your task. outcome: 'done' (it meets its 'done when': say what you did and where), "
+                  "'blocked' (say what you need), 'failed' (why) or 'rejected' (not yours to do: why). Its "
+                  "assigner is told. 'done' is refused until the team's checks pass. Closing your last task "
+                  "releases your files.",
                   {"task_id": {"type": "integer"}, "result": text,
                    "outcome": {"type": "string", "enum": list(OUTCOMES)}},
                   ["task_id", "result"], self._finish)
-        self._add("task_details", "A task with its whole conversation (its thread).",
+        self._add("task_details", "A task and its whole conversation.",
                   {"task_id": {"type": "integer"}}, ["task_id"], self._details)
-        self._add("search_messages", "Search the messages you may read (yours and your team's below you).",
+        self._add("search_messages", "Search the messages you may read.",
                   {"words": text}, ["words"],
                   lambda a: _fmt_messages(me.search(a["words"]), "Nothing found."))
         self._add("save_notes",
-                  "Save your working notes (replacing the previous ones): what you know, decided and are "
-                  "doing. If your session is ever replaced, the new one starts from these notes.",
+                  "Replace your notes: what you know, decided and are doing. A new session of yours starts "
+                  "from them.",
                   {"text": text}, ["text"], lambda a: (me.save_notes(a["text"]), "Notes saved.")[1])
         self._add("ask_help", "Ask your direct superior for help.",
                   {"question": text, "reply_to": reply}, ["question"],
                   lambda a: "Sent " + _fmt_message(me.ask_help(a["question"], a.get("reply_to"))))
-        self._add("read_inbox", "Read your new messages (each is returned once).", {}, [],
+        self._add("read_inbox", "Your new messages (each returned once).", {}, [],
                   lambda a: _fmt_messages(me.read_inbox(), "No new messages."))
         self._add("wait_for_messages",
-                  "Wait until a message arrives for you, then return it. Call this whenever you are idle.",
+                  "Wait for your next message and return it - while you wait for results (no cost meanwhile).",
                   {"timeout_seconds": {"type": "integer", "description": f"default {DEFAULT_WAIT}"}}, [],
                   self._wait)
         self._add("set_status", "Say what you are doing, if it is more than your task (the hub sets that by "
@@ -105,23 +100,20 @@ class Tools:
                   {"state": {"type": "string", "enum": ["idle", "working", "waiting", "blocked", "done"]},
                    "task": text}, ["state"],
                   lambda a: self._status(a))
-        self._add("view", "Look at a role: its status and locks, and its recent messages if it is you "
-                          "or below you.",
+        self._add("view", "A role's status and files; its messages too if it is you or below you.",
                   {"role": text}, ["role"], self._view)
         self._add("claim_file",
-                  "Take the lease on a file, or on a whole folder with a pattern such as src/api/*, before "
-                  "editing. One writer per file. (Editing a free file in your scope takes it for you.) "
-                  "Leases run out after an hour without activity.",
-                  {"path": {"type": "string", "description": "file or pattern, relative to the project folder"},
-                   "reason": {"type": "string", "description": "what for, e.g. task #12"}},
+                  "Reserve a file, or a folder pattern like src/api/*, before editing (editing a free file in "
+                  "your scope takes it anyway). A lease ends after an hour idle.",
+                  {"path": {"type": "string", "description": "relative to the project folder"},
+                   "reason": {"type": "string", "description": "e.g. task #12"}},
                   ["path"], self._claim)
-        self._add("release_file", "Release a lease you (or someone below you) hold: the file or pattern "
-                                  "exactly as it was claimed.",
+        self._add("release_file", "Release a lease held by you or someone below you (path as claimed).",
                   {"path": text}, ["path"], lambda a: "Released " + me.release(a["path"]).path)
-        self._add("list_locks", "List every file that is currently being written, and by whom.", {}, [],
+        self._add("list_locks", "Who is writing which files.", {}, [],
                   lambda a: "\n".join(_fmt_lock(x) for x in me.store.locks()) or "No files are locked.")
         self._add("hand_over_file",
-                  "Give a file you hold to your direct superior or a direct subordinate (such as your consultant).",
+                  "Give a file you hold to your superior or a direct subordinate (e.g. your consultant).",
                   {"path": text, "to": text}, ["path", "to"],
                   lambda a: "Handed over " + _fmt_lock(me.hand_over(a["path"], a["to"])))
 
@@ -131,60 +123,54 @@ class Tools:
             return  # consultants neither assign work, summon nor dismiss
         if any(not team.roles[s].is_consultant for s in team.subordinates_of(me.name)):
             self._add("assign_task",
-                      "Give work to someone below you: one clear, self-contained task. They close it with "
-                      "finish_task, you get the result and review it (review_task).",
+                      "Give someone below you one clear, self-contained task. They finish_task it; you "
+                      "review_task the result.",
                       {"to": text, "title": {"type": "string", "description": "one line"},
-                       "details": {"type": "string", "description": "everything they need to do it"},
-                       "done_when": {"type": "string", "description": "how anyone can check it is finished, "
-                                     "e.g. 'pytest passes and the page shows 10 stories'"},
+                       "details": {"type": "string", "description": "all they need to do it"},
+                       "done_when": {"type": "string", "description": "how anyone can check it, e.g. 'pytest passes'"},
                        "after": {"type": "array", "items": {"type": "integer"},
-                                 "description": "ids of tasks that must be done before this one starts"},
-                       "priority": {"type": "integer", "enum": [1, 2, 3],
-                                    "description": "1 urgent, 2 normal, 3 low"},
-                       "part_of": {"type": "integer", "description": "id of your own task this is a piece of"}},
+                                 "description": "task ids to wait for"},
+                       "priority": {"type": "integer", "enum": [1, 2, 3], "description": "1 urgent, 2 normal, 3 low"},
+                       "part_of": {"type": "integer", "description": "your own task this is a piece of"}},
                       ["to", "title"], self._assign)
             self._add("review_task",
-                      "Review a done task you gave: accept it, or send it back with specific feedback "
-                      "(up to three times).",
+                      "Accept a done task you gave, or send it back with specific feedback.",
                       {"task_id": {"type": "integer"}, "accept": {"type": "boolean"}, "feedback": text},
                       ["task_id", "accept"], self._review)
-            self._add("cancel_task", "Withdraw a task you gave (or one below you) that is no longer needed.",
+            self._add("cancel_task", "Withdraw a task you gave (or one below you).",
                       {"task_id": {"type": "integer"}, "reason": text}, ["task_id"], self._cancel)
             self._add("reassign_task",
-                      "Move an unfinished task you gave (or one below you) to another agent below you - for "
-                      "example when its assignee is out of its usage limit. Prefer an agent on a different "
-                      "program (see team_status). Its file leases and history go with it.",
+                      "Move an unfinished task below you to another agent below you (say its assignee is out "
+                      "of usage: prefer another program). Its leases and history go with it.",
                       {"task_id": {"type": "integer"}, "to": text,
-                       "reason": {"type": "string", "description": "why it moves; the new assignee reads this"}},
+                       "reason": {"type": "string", "description": "the new assignee reads it"}},
                       ["task_id", "to"], self._reassign)
         if team.settings.team_changes and (team.subordinates_of(me.name) or me.name == team.leader):
             role_props = {"duties": text, "model": {"type": "string", "description": "e.g. sonnet, gpt-6-luna, "
-                          "grok-4.7, gemini-3.8-flash-medium; empty for the program's default"},
+                          "gemini-3.8-flash-medium; empty: the program's default"},
                           "effort": text, "write_scope": {"type": "array", "items": {"type": "string"},
-                          "description": "files it may write, e.g. [\"src/*\", \"tests/*\"]; [] for none"}}
+                          "description": "files it may write, e.g. [\"src/*\"]; [] for none"}}
             self._add("hire_agent",
-                      "Add an agent to the team, under you (or under someone below you). It starts at once, in "
-                      "its own terminal. Pick the cheapest program and model that can do the work; every "
-                      "agent uses the owner's subscriptions.",
+                      "Add an agent under you (or below you); it starts at once. Pick the cheapest program and "
+                      "model that can do the work: every agent uses the owner's subscriptions.",
                       {"name": text, "harness": {"type": "string", "enum": list(HARNESSES)},
-                       "superior": {"type": "string", "description": "who it reports to (default: you)"},
-                       "preset": {"type": "string", "enum": presets.names(), "description": "start from a role "
-                                  "in the owner's library (its program, model, duties, instructions and files); "
-                                  "anything else you give overrides it"},
-                       "instructions": {"type": "string", "description": "how it should work, beyond its duties"},
+                       "superior": {"type": "string", "description": "default: you"},
+                       "preset": {"type": "string", "enum": presets.names(), "description": "a role from the "
+                                  "owner's library to start from; what else you give overrides it"},
+                       "instructions": {"type": "string", "description": "how it should work"},
                        **role_props}, ["name"],
                       lambda a: self._hired(me.hire(a["name"], a.get("harness") or "", a.get("duties") or "",
                                                     a.get("model") or "", a.get("effort") or "",
                                                     a.get("write_scope"), a.get("superior") or "",
                                                     a.get("preset") or "", a.get("instructions") or "")))
             self._add("change_agent",
-                      "Change an agent below you: its duties, files, model or effort (a new model applies "
-                      "from its next start), or whom it reports to (you or someone below you).",
+                      "Change an agent below you: duties, files, model or effort (from its next start), or "
+                      "its superior.",
                       {"name": text, "superior": text, **role_props}, ["name"],
                       lambda a: f"Changed {me.change_role(a['name'], a.get('duties'), a.get('model'), a.get('effort'), a.get('write_scope'), a.get('superior')).name}.")
             self._add("let_go_agent",
-                      "Remove an agent below you from the team when its work is over (reassign or cancel its "
-                      "unfinished tasks first). Its program stops; its subordinates move up to its superior.",
+                      "Remove an agent below you whose work is over (move or cancel its tasks first). Its "
+                      "subordinates move up.",
                       {"name": text, "reason": text}, ["name"],
                       lambda a: "Let go of {}.{}".format(a["name"], (lambda moved: f" {', '.join(moved)} now report "
                                                                      "to its superior." if moved else "")(
@@ -206,10 +192,11 @@ class Tools:
                       "latest main into your copy, runs the checks, and lands your work.",
                       {"summary": {"type": "string", "description": "what you are sharing, in one line"}},
                       ["summary"], lambda a: f"Shared: your work is in main as {me.share_work(a['summary'])}.")
-        self._add("dismiss_consultant",
-                  "Dismiss a consultant working for you (or below you) once its problem is solved. "
-                  "Files it holds go back to the agent it helped.",
-                  {"name": text}, ["name"], self._dismiss)
+        if team.tiers:  # no tiers: there will never be a consultant to dismiss
+            self._add("dismiss_consultant",
+                      "Dismiss a consultant working for you (or below you) once its problem is solved; its "
+                      "files go back to the agent it helped.",
+                      {"name": text}, ["name"], self._dismiss)
 
     def reference(self) -> str:
         """For a program that keeps tool descriptions out of the model's sight (Antigravity writes them

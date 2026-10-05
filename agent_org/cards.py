@@ -9,7 +9,6 @@ from .verify import describe
 
 SERVER_NAME = "org"
 RECENT = 12  # messages recalled in "where you left off" (about open work)
-QUIET_RECENT = 3  # ... when nothing is open
 
 
 def role_card(me: RoleSession, resumed: bool = False) -> str:
@@ -103,8 +102,9 @@ def where_you_left_off(me: RoleSession, resumed: bool = False) -> list[str]:
     """What the hub remembers about this role, so even a brand-new session can carry on.
 
     Its recent messages only for a new conversation (a continued one has them already), and only
-    those about its open work - or the last few, when nothing is open: the history of finished
-    work is sent with every request and helps nobody.
+    those about its open work: the history of finished work is sent with every request, and an old
+    "please review" read as still pending (seen: a leader went looking for a task long accepted).
+    Each message about a task says what became of it.
     """
     lines: list[str] = []
     notes = me.store.get_notes(me.name)
@@ -112,7 +112,7 @@ def where_you_left_off(me: RoleSession, resumed: bool = False) -> list[str]:
     held = [lock.path for lock in me.store.locks(me.name)]
     recent = [] if resumed else me.store.messages_involving(me.name, RECENT)
     open_ids = {t.id for t in mine + given}
-    recent = [m for m in recent if m.task_id in open_ids] if open_ids else recent[-QUIET_RECENT:]
+    recent = [m for m in recent if m.task_id in open_ids]
     if not (notes or mine or given or held or recent):
         return lines
     lines += ["", "WHERE YOU LEFT OFF (kept by the hub between sessions):"]
@@ -132,7 +132,9 @@ def where_you_left_off(me: RoleSession, resumed: bool = False) -> list[str]:
             when = time.strftime("%m-%d %H:%M", time.localtime(m.sent_at))
             text = " ".join(m.text.split())
             text = text if len(text) <= 240 else text[:240] + "..."
-            lines.append(f"  #{m.id} {when} [{m.kind}] {m.sender} -> {m.recipient}: {text}")
+            task = me.store.get_task(m.task_id) if m.task_id else None
+            now = f" (task #{task.id} is now {task.state})" if task else ""
+            lines.append(f"  #{m.id} {when} [{m.kind}] {m.sender} -> {m.recipient}: {text}{now}")
     return lines
 
 

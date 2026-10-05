@@ -362,3 +362,19 @@ def test_an_argument_of_the_obvious_other_type_is_taken(client, hub):
     [task] = hub.store.tasks(assignee="worker-a")
     text, err = worker.tool("task_details", task_id=f"#{task.id}")  # and "#3" where a number was asked
     assert not err and "Parser" in text
+
+
+def test_a_team_without_consultant_tiers_offers_no_consultant_tools(tmp_path):
+    from agent_org import mcp_server
+    from agent_org.hub import Hub
+    data = json.loads(json.dumps(TEAM))
+    data.pop("consultants")
+    (tmp_path / "project").mkdir()
+    (tmp_path / "team.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    hub = Hub.open(tmp_path / "team.yaml")
+    try:
+        names = {s["name"] for s in mcp_server.Tools(hub.session("tech-lead")).specs}
+        assert "dismiss_consultant" not in names and "summon_consultant" not in names
+        assert "assign_task" in names
+    finally:
+        hub.close()
