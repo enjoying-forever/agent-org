@@ -92,6 +92,20 @@ def test_a_program_with_the_card_as_system_prompt_is_not_given_it_twice(client):
     assert "You are 'worker-a'" not in result["instructions"] and "my_role" in result["instructions"]
 
 
+def test_a_misnamed_argument_is_not_lost(client, hub):
+    lead = client("tech-lead")
+    # seen in a real run: the leader wrote description=..., and the worker got the task without it
+    text, err = lead.tool("assign_task", to="worker-a", title="Parser", description="Handle quoted fields.",
+                          done_when="tests pass")
+    assert not err
+    [task] = hub.store.tasks(assignee="worker-a")
+    assert task.details == "Handle quoted fields."
+    text, err = lead.tool("send_message", to="worker-a", message="Start with the CSV reader.")
+    assert not err and hub.session("worker-a").read_inbox()[-1].text == "Start with the CSV reader."
+    text, err = lead.tool("send_message", to="worker-a", text="hi", colour="blue")  # no use for it: say so
+    assert err and "Unknown argument colour" in text and "to, text" in text
+
+
 BASIC_TOOLS = {"my_role", "team_status", "send_message", "ask_help", "read_inbox", "wait_for_messages",
                "set_status", "view", "claim_file", "release_file", "list_locks", "hand_over_file",
                "list_tasks", "finish_task", "save_notes", "task_details", "search_messages"}

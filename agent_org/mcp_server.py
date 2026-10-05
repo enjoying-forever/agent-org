@@ -209,6 +209,26 @@ class Tools:
                   "Files it holds go back to the agent it helped.",
                   {"name": text}, ["name"], self._dismiss)
 
+    def _props(self, name: str) -> list[str]:
+        spec = next((s for s in self.specs if s["name"] == name), None)
+        return list(spec["inputSchema"]["properties"]) if spec else []
+
+    def _fit_args(self, name: str, args: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        """The arguments under the names the tool knows: a common other name (description for details,
+        message for text...) is taken as the one it stands for. Returns them, and the ones left unknown."""
+        props = self._props(name)
+        fitted, unknown = {}, []
+        for key, value in args.items():
+            if key in props:
+                fitted[key] = value
+                continue
+            meant = next((p for p in ARG_ALIASES.get(key, ()) if p in props and p not in args), None)
+            if meant is not None:
+                fitted[meant] = value
+            else:
+                unknown.append(key)
+        return fitted, unknown
+
     def _add(self, name: str, description: str, props: dict[str, Any], required: list[str],
              handler: Callable[[dict[str, Any]], str]) -> None:
         self.specs.append({
@@ -282,7 +302,8 @@ class Tools:
 
     def _finish(self, args: dict[str, Any]) -> str:
         task = self.me.finish_task(int(args["task_id"]), args["result"], args.get("outcome") or "done")
-        return f"Task #{task.id} is {task.state}; {task.assigner} has been told."
+        told = "the owner" if task.assigner == self.me.team.owner else task.assigner  # the owner may be called "you"
+        return f"Task #{task.id} is {task.state}; {told} has been told."
 
     def _cancel(self, args: dict[str, Any]) -> str:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
@@ -365,6 +386,10 @@ class Tools:
             return f"Unknown tool: {name}", True
         if name == "wait_for_messages":  # the one tool that must notice the caller giving up
             handler = lambda a: self._wait(a, cancelled)  # noqa: E731
+        args, unknown = self._fit_args(name, args if isinstance(args, dict) else {})
+        if unknown:  # an argument it has no use for would be dropped without a word: say so instead
+            takes = ", ".join(self._props(name)) or "no arguments"
+            return f"Unknown argument {', '.join(unknown)} for {name}. It takes: {takes}.", True
         try:
             text, is_error = handler(args), False
         except KeyError as e:
@@ -377,6 +402,16 @@ class Tools:
             text += self._mail_notice()
         return text, is_error
 
+
+# Names models reach for instead of a tool's own (seen: assign_task(description=...) lost the details).
+ARG_ALIASES = {
+    "description": ("details", "summary", "text"), "body": ("text", "details"), "content": ("text", "details"),
+    "message": ("text",), "msg": ("text",), "instructions": ("details",), "task": ("title", "task_id"),
+    "recipient": ("to",), "assignee": ("to",), "role": ("to", "name"), "id": ("task_id",), "task_number": ("task_id",),
+    "summary": ("result", "text"), "status": ("state", "outcome"), "comment": ("feedback", "reason"),
+    "acceptance": ("done_when",), "acceptance_criteria": ("done_when",), "done_criteria": ("done_when",),
+    "file": ("path",), "file_path": ("path",),
+}
 
 CARD_IN_SYSTEM_PROMPT = ("claude", "codex", "grok")  # launch gives these the role card as system prompt
 SHORT_INSTRUCTIONS = ("These are your agent-org team tools. Your role card - who you are, your team and the "
