@@ -278,8 +278,8 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
 .panes.has-max > .pane:not(.max), .panes.has-max > .pane-gutter { visibility: hidden; }
 .pane-head { cursor: default; user-select: none; }
 .pane-gutter { position: absolute; z-index: 3; touch-action: none; }
-.pane-gutter.x { top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; }
-.pane-gutter.y { left: 0; right: 0; height: 10px; margin-top: -5px; cursor: row-resize; }
+.pane-gutter.x { width: 10px; margin-left: -5px; cursor: col-resize; }  /* top, height: set by layout.js */
+.pane-gutter.y { height: 10px; margin-top: -5px; cursor: row-resize; }  /* left, width: set by layout.js */
 .pane-gutter::after { content: ""; position: absolute; border-radius: 2px; }
 .pane-gutter.x::after { top: 0; bottom: 0; left: 4px; width: 2px; }
 .pane-gutter.y::after { left: 0; right: 0; top: 4px; height: 2px; }

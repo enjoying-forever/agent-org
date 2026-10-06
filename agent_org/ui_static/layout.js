@@ -107,7 +107,7 @@ function applyLayout() {
     p.el.style.gridColumn = max ? 'auto' : `${c + 1} / span ${cs}`;
     p.el.style.gridRow = max ? 'auto' : `${r + 1} / span ${rs}`;
   }
-  drawGutters(box, cols, rows, key);
+  drawGutters(box, cols, rows, key, plan.place);
   fitAllTerms(); // at once: the browser's own resize notice can come late
   const empty = box.querySelector(':scope > .empty');
   if (!visible.length && all.length && !empty) {
@@ -118,20 +118,47 @@ function applyLayout() {
   }
 }
 
-/** The draggable borders between columns and between rows. */
-function drawGutters(box, cols, rows, key) {
+/** Where track `k` of `list` starts, in pixels, in a box `size` long with GAP between tracks. */
+function trackStart(list, k, size) {
+  const avail = size - GAP * (list.length - 1);
+  const total = list.reduce((a, b) => a + b, 0);
+  return (avail * list.slice(0, k).reduce((a, b) => a + b, 0)) / total + GAP * k;
+}
+
+/** The runs of tracks along which border `i` separates two panes: none where a pane spans across it
+ * (seen: the column border of the top row ran down through the wide pane below it). */
+function borderRuns(i, along, place, axis) {
+  const crosses = (q, t) => (axis === 'x'
+    ? q.c <= i && q.c + q.cs - 1 >= i + 1 && q.r <= t && t < q.r + q.rs
+    : q.r <= i && q.r + q.rs - 1 >= i + 1 && q.c <= t && t < q.c + q.cs);
+  const runs = [];
+  for (let t = 0; t < along; t += 1) {
+    if (place.some((q) => crosses(q, t))) continue;
+    const last = runs[runs.length - 1];
+    if (last && last[1] === t) last[1] = t + 1; else runs.push([t, t + 1]);
+  }
+  return runs;
+}
+
+/** The draggable borders between columns and between rows - only where two panes meet. */
+function drawGutters(box, cols, rows, key, place) {
   box.querySelectorAll(':scope > .pane-gutter').forEach((g) => g.remove());
   if (L.max) return;
   const W = box.clientWidth;
   const H = box.clientHeight;
-  const add = (axis, i, list) => {
+  const add = (axis, i, list, from, to) => {
     const size = axis === 'x' ? W : H;
     const avail = size - GAP * (list.length - 1);
     const total = list.reduce((a, b) => a + b, 0);
-    const before = list.slice(0, i + 1).reduce((a, b) => a + b, 0);
-    const at = (avail * before) / total + GAP * i + GAP / 2;
+    const at = trackStart(list, i + 1, size) - GAP / 2;
     const g = h('div', { class: `pane-gutter ${axis}`, title: 'Drag to resize; double-click to make them equal' });
     g.style[axis === 'x' ? 'left' : 'top'] = `${at}px`;
+    const other = axis === 'x' ? rows : cols; // the tracks it runs along
+    const otherSize = axis === 'x' ? H : W;
+    const start = trackStart(other, from, otherSize);
+    const end = to >= other.length ? otherSize : trackStart(other, to, otherSize) - GAP;
+    g.style[axis === 'x' ? 'top' : 'left'] = `${start}px`;
+    g.style[axis === 'x' ? 'height' : 'width'] = `${end - start}px`;
     g.addEventListener('pointerdown', (e) => dragTrack(e, axis, i, list, avail, total, key));
     g.addEventListener('dblclick', () => {
       delete (axis === 'x' ? L.cols : L.rows)[key];
@@ -140,8 +167,12 @@ function drawGutters(box, cols, rows, key) {
     });
     box.append(g);
   };
-  for (let i = 0; i < cols.length - 1; i += 1) add('x', i, cols);
-  for (let i = 0; i < rows.length - 1; i += 1) add('y', i, rows);
+  for (let i = 0; i < cols.length - 1; i += 1) {
+    for (const [from, to] of borderRuns(i, rows.length, place, 'x')) add('x', i, cols, from, to);
+  }
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    for (const [from, to] of borderRuns(i, cols.length, place, 'y')) add('y', i, rows, from, to);
+  }
 }
 
 function dragTrack(e, axis, i, list, avail, total, key) {
