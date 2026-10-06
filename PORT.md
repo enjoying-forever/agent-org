@@ -12,23 +12,23 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 
 | Python module | TypeScript | Tests ported |
 |---|---|---|
-| store.py | src/store.ts | - |
-| team.py | src/team.ts | - |
-| (fnmatch) | src/fnmatch.ts | - |
-| filelock.py | | |
-| safety.py | | |
-| verify.py | | |
-| gitops.py | | |
-| hub.py | | |
-| cards.py | | |
-| sessions.py | | |
-| usage.py | | |
-| hooks.py + org_hook.py | | |
+| store.py | src/store.ts | hub, law (upgrade of old databases) |
+| team.py | src/team.ts | team.test.ts |
+| (fnmatch) | src/fnmatch.ts | via safety, leases |
+| filelock.py | src/filelock.ts | via team changes |
+| safety.py | src/safety.ts | safety.test.ts |
+| verify.py | src/verify.ts | history.test.ts |
+| gitops.py | src/gitops.ts | history, branches |
+| hub.py | src/hub.ts | hub, law, law_v2, consultants, team_changes, failover |
+| cards.py | src/cards.ts | law, consultants, presets |
+| sessions.py | src/sessions.ts | (sessions tests need launch) |
+| usage.py | src/usage.ts | usage.test.ts (DeepSeek one waits for runview) |
+| hooks.py + org_hook.py | src/hooks.ts, src/org_hook.ts | hooks.test.ts |
 | mcp_server.py | | |
-| presets.py | | |
-| templates.py | | |
+| presets.py | src/presets.ts | presets.test.ts |
+| templates.py | src/templates.ts | (ui tests) |
 | launch.py | | |
-| watchdog.py | | |
+| watchdog.py | src/watchdog.ts | law_v2, failover |
 | waker.py | | |
 | wake.py, runview.py (DeepSeek) | | |
 | terminals.py | | |

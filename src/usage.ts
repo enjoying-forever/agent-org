@@ -337,6 +337,13 @@ const stuckCache = new Map<string, [string, Stuck | null]>();
 /** Why the conversation's last turn ended on an error, or null if it did not. An agent in this state sits at its
  * prompt: it makes no more calls, so its hooks never run and nothing wakes it until it is restarted. */
 export function stuck(harness: string, sessionId: string | null | undefined): Stuck | null {
+  return check.stuck(harness, sessionId);
+}
+
+/** Where `stuck` looks (tests put a stand-in here). */
+export const check = { stuck: readStuck };
+
+function readStuck(harness: string, sessionId: string | null | undefined): Stuck | null {
   const file = sessionFile(harness, sessionId);
   const reader = harness === 'claude' ? claudeStuck : harness === 'codex' ? codexStuck : null;
   if (file === null || reader === null) return null;
