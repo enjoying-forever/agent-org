@@ -323,8 +323,8 @@ class Tools:
 
     def _cancel(self, args: dict[str, Any]) -> str:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
-        if task.message_id is None:  # it was still waiting for other tasks: its assignee never had it
-            return f"Task #{task.id} is cancelled before it started."
+        if task.started_at is None:  # its assignee never read it: the delivery was taken back, nothing sent
+            return f"Task #{task.id} is cancelled before {task.assignee} started it."
         return f"Task #{task.id} is cancelled; {task.assignee} has been told."
 
     def _claim(self, args: dict[str, Any]) -> str:

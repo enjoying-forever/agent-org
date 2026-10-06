@@ -91,6 +91,7 @@ def test_a_blocked_task_stays_open_for_the_assigner_to_resolve(hub):
 
 def test_cancelling(hub):
     task = hub.session("tech-lead").assign_task("worker-a", "Old idea")
+    hub.session("worker-a").read_inbox()  # it started: it is told to stop (an unread task is just taken back)
     with pytest.raises(PermissionDenied, match="only tech-lead or someone above worker-a"):
         hub.session("worker-b").cancel_task(task.id)
     hub.session("leader").cancel_task(task.id, "not needed")  # above the assignee

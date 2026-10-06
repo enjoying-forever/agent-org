@@ -380,6 +380,12 @@ class Store:
         return [_message(r) for r in rows]
 
     @_locked
+    def withdraw(self, recipient: str, task_id: int) -> int:
+        """Take back the unread deliveries of a task to `recipient` (they count as read). Returns how many."""
+        return self._db.execute("UPDATE messages SET read_at = ? WHERE recipient = ? AND task_id = ? AND kind = 'task'"
+                                " AND read_at IS NULL", (time.time(), recipient, task_id)).rowcount
+
+    @_locked
     def mark_read(self, ids: list[int]) -> None:
         self._db.executemany("UPDATE messages SET read_at = ? WHERE id = ? AND read_at IS NULL",
                              [(time.time(), i) for i in ids])

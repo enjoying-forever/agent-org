@@ -831,12 +831,12 @@ class RoleSession:
             raise PermissionDenied(f"only {task.assigner} or someone above {task.assignee} can cancel task #{task_id}")
         if task.state in CLOSED:
             raise HubError(f"task #{task_id} is already {task.state}")
-        delivered = task.state != "waiting"
+        unseen = self._unseen(task)
         task = self.store.update_task(task_id, state="cancelled", result=reason.strip())
         self.hub.event("task", self.name, f"cancelled #{task.id}: {task.title}", task.id)
         freed = self.hub.session(task.assignee)._settle() if team.is_member(task.assignee) else []
         why = f" Reason: {_sentence(reason)}" if reason.strip() else ""
-        if delivered:
+        if not unseen:
             self.store.add_message(self.name, task.assignee, "instruction",
                                    f"Task #{task.id} ({task.title}) is cancelled; stop working on it.{why}"
                                    + (f" Your files are released ({', '.join(freed)})." if freed else ""),
@@ -847,6 +847,15 @@ class RoleSession:
                                            f"{task.assignee}.{why} Plan without it.", task.id)
         self.hub.stall_dependents(task)
         return task
+
+    def _unseen(self, task: Task) -> bool:
+        """Whether its assignee never read the task (it waits for others, or its delivery is unread). Then
+        a cancel or move takes the delivery back and says nothing: a message would wake the agent only to
+        tell it to stop what it never started (seen: a worker woken for that, in a live run)."""
+        if task.state not in ("waiting", "open"):
+            return False
+        self.store.withdraw(task.assignee, task.id)
+        return True
 
     def reassign_task(self, task_id: int, to: str, reason: str = "") -> Task:
         """Move an unfinished task to someone else - say, because its assignee is out of its usage limit.
@@ -873,6 +882,7 @@ class RoleSession:
         if not (team.is_above(self.name, to) and (task.assigner == team.owner or team.is_above(task.assigner, to))):
             raise PermissionDenied(f"{to} must be below both you and {task.assigner}, who gave task #{task_id}")
         before = task.assignee
+        unseen = self._unseen(task)
         files = self.store.task_files(task_id)
         moved, freed = [], []
         for f in files:
@@ -902,6 +912,7 @@ class RoleSession:
             task = self.hub.deliver_task(task, "\n".join(notes))
         if before in team.roles:
             rest = self.hub.session(before)._settle()  # its status (and, with nothing left, its other files)
+        if before in team.roles and not unseen:
             self.store.add_message(self.name, before, "instruction",
                                    f"Task #{task.id} ({task.title}) was moved to {to}; stop working on it."
                                    + (f" Reason: {_sentence(why)}" if why else "")

@@ -419,3 +419,15 @@ def test_an_owners_cancel_reads_right_to_whoever_gave_the_task(hub):
     [told] = hub.session("tech-lead").read_inbox()
     # seen as "you cancelled task #4 ... Reason: not needed Plan without it."
     assert told.text.startswith(f"The owner cancelled task #{task.id}") and "Reason: not needed. Plan" in told.text
+
+
+def test_a_task_taken_away_before_it_was_read_wakes_nobody_for_nothing(hub):
+    lead = hub.session("tech-lead")
+    first = lead.assign_task("worker-a", "Build the parser")
+    lead.reassign_task(first.id, "worker-b")  # worker-a never read it
+    # seen live: the old assignee was woken to read a task and "stop working on it"
+    assert hub.store.unread_count("worker-a") == 0
+    second = lead.assign_task("worker-a", "Build the writer")
+    lead.cancel_task(second.id)
+    assert hub.store.unread_count("worker-a") == 0 and hub.session("worker-a").read_inbox() == []
+    assert [m.task_id for m in hub.session("worker-b").read_inbox()] == [first.id]  # the new one has it
