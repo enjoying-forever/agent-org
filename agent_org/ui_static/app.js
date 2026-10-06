@@ -307,6 +307,11 @@ $('#create-go').addEventListener('click', async () => {
   if (!folder) { toast('Choose the project folder first.', true); return; }
   const body = template === BUILD ? { folder, roles: builderRoles() } : { folder, template };
   if (template === BUILD && !body.roles.length) { toast('Pick at least one role from the market first.', true); return; }
+  const note = document.querySelector('#templates input:checked')?.closest('label')?.querySelector('.programs');
+  const lacking = note ? note.dataset.programs.split(',').filter((p) => MISSING.has(p)).map((p) => PROGRAM[p] || p) : [];
+  if (lacking.length && !confirm(`${lacking.join(' and ')} ${lacking.length > 1 ? 'are' : 'is'} not installed on this `
+    + 'computer, so the agents that use it could not start. Create the team anyway? (You can switch an agent to '
+    + 'another program on its card.)')) return;
   await act(api('/api/create', body), () => 'Team created. Check it in "Edit team", then Launch team.');
 });
 $('#shortcut-btn').addEventListener('click', () =>
