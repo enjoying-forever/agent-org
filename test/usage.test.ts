@@ -157,3 +157,21 @@ test('a usage limit reset time is read in its own time zone', () => {
   assert.equal(usage.resetTime('try again in 2 hours 30 minutes', at)! - at, 9000);
   assert.equal(usage.resetTime('nothing about a reset', at), null);
 });
+
+test('DeepSeek runs keep their usage by conversation', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  const { readFileSync: read } = await import('node:fs');
+  const { entry } = await import('../src/runtime.ts');
+  const kept = path.join(tmpDir(t), usage.DSH_USAGE);
+  const step = (n: number): object => ({ type: 'status', phase: 'step_end', usage: { inputTokens: 1000 * n, outputTokens: 10, cacheReadTokens: 400, cacheWriteTokens: 5 } });
+  const run = (events: object[]): void => { // each run is its own process, as the start script runs it
+    const done = spawnSync(process.execPath, [entry('runview'), '--usage-file', kept], { input: events.map((e) => JSON.stringify(e)).join('\n'), encoding: 'utf8' });
+    assert.equal(done.status, 0, done.stderr);
+  };
+  run([{ type: 'session', sessionId: 'session-a' }, step(1), step(2), { type: 'final', text: 'hi' }]);
+  run([{ type: 'session', sessionId: 'session-a' }, step(3)]); // the next run continues it
+  run([{ type: 'session', sessionId: 'session-b' }, step(1)]); // Start fresh: a new conversation
+  const u = usage.deepseek(kept);
+  assert.deepEqual([u.tokens_in, u.tokens_cached, u.tokens_out, u.messages], [7020, 1600, 40, 4]);
+  assert.deepEqual(Object.keys(JSON.parse(read(kept, 'utf8'))).sort(), ['session-a', 'session-b']);
+});

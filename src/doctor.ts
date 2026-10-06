@@ -18,7 +18,7 @@ export interface Check {
 const check = (name: string, ok: boolean, detail: string, fix = '', needed = true): Check => ({ name, ok, detail, fix, needed });
 
 /** Run a program to its end: [exit code, its output]. A .cmd shim (an npm-installed program) runs through cmd. */
-export function run(command: string, args: string[], timeout = 40, env: NodeJS.ProcessEnv = process.env): Promise<[number, string]> {
+function runProgram(command: string, args: string[], timeout = 40, env: NodeJS.ProcessEnv = process.env): Promise<[number, string]> {
   return new Promise((resolve) => {
     const shell = /\.(cmd|bat)$/i.test(command);
     const quote = (a: string): string => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a);
@@ -47,6 +47,11 @@ export function run(command: string, args: string[], timeout = 40, env: NodeJS.P
     });
   });
 }
+
+/** How checks run programs (a test may stand in for it). */
+export const proc = { run: runProgram };
+const run = (command: string, args: string[], timeout = 40, env: NodeJS.ProcessEnv = process.env): Promise<[number, string]> =>
+  proc.run(command, args, timeout, env);
 
 export const firstLine = (text: string): string => (text ? text.split(/\r?\n/)[0].slice(0, 120) : '');
 
@@ -93,7 +98,7 @@ export async function checkGrok(harnesses: Set<string>): Promise<Check[]> {
   return checks;
 }
 
-let agySignin: [number, Check | null] = [0, null];
+export const signin = { agy: [0, null] as [number, Check | null] }; // the last Antigravity sign-in test
 
 /** Antigravity's CLI: installed, and - if the team uses it - signed in and verified. The sign-in test lists the
  * account's models (no model runs, nothing is used up); it runs at most every ten minutes. */
@@ -102,20 +107,20 @@ export async function checkAntigravity(harnesses: Set<string>): Promise<Check[]>
   c.needed = harnesses.has('antigravity');
   const checks = [c];
   if (c.ok && c.needed) {
-    if (Date.now() / 1000 - agySignin[0] > 600) {
+    if (Date.now() / 1000 - signin.agy[0] > 600) {
       const [code, out] = await run(which('agy') ?? 'agy', ['models'], 60);
       const low = out.toLowerCase();
       const listed = code === 0 && out.split(/\r?\n/).some((l) => l.includes('\t'));
-      let signin: Check | null;
+      let found: Check | null;
       if (!listed && (low.includes('verify your account') || low.includes('sign in') || low.includes('login'))) {
-        signin = check('Antigravity sign-in', false, 'Antigravity needs you to sign in or verify your Google account',
+        found = check('Antigravity sign-in', false, 'Antigravity needs you to sign in or verify your Google account',
           'Open a terminal, run agy, and finish the sign-in in your browser.');
       } else {
-        signin = listed ? check('Antigravity sign-in', true, 'signed in') : null;
+        found = listed ? check('Antigravity sign-in', true, 'signed in') : null;
       }
-      agySignin = [Date.now() / 1000, signin];
+      signin.agy = [Date.now() / 1000, found];
     }
-    if (agySignin[1] !== null) checks.push(agySignin[1]);
+    if (signin.agy[1] !== null) checks.push(signin.agy[1]);
   }
   return checks;
 }

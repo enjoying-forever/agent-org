@@ -22,7 +22,7 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | hub.py | src/hub.ts | hub, law, law_v2, consultants, team_changes, failover |
 | cards.py | src/cards.ts | law, consultants, presets |
 | sessions.py | src/sessions.ts | sessions.test.ts |
-| usage.py | src/usage.ts | usage.test.ts (DeepSeek one waits for runview) |
+| usage.py | src/usage.ts | usage.test.ts |
 | hooks.py + org_hook.py | src/hooks.ts, src/org_hook.ts | hooks.test.ts |
 | mcp_server.py | src/mcp_server.ts, src/org_server.ts | mcp_server.test.ts (launcher hooks in via `main(argv, launcher)`) |
 | presets.py | src/presets.ts | presets.test.ts |
@@ -31,10 +31,10 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | watchdog.py | src/watchdog.ts | law_v2, failover |
 | waker.py | src/waker.ts | waker.test.ts |
 | wake.py, runview.py (DeepSeek) | src/wake.ts, src/runview.ts | launch, waker |
-| terminals.py | src/terminals.ts (node-pty) | terminals.test.ts (window parts wait for ui) |
-| doctor.py | src/doctor.ts (Python checks become Runtime and Terminals) | (ui tests) |
+| terminals.py | src/terminals.ts (node-pty) | terminals.test.ts, window.test.ts |
+| doctor.py | src/doctor.ts (Python checks become Runtime and Terminals) | control.test.ts |
 | cli.py | src/cli.ts | cli.test.ts (new) |
-| ui.py (server) | | |
+| ui.py (server) | src/ui.ts (node:http; the page in agent_org/ui_static unchanged) | ui, web_security, window, control |
 | Electron shell | | |
 | install / launcher / README | | |
 
@@ -44,6 +44,8 @@ Found while porting:
 - Agent-org's own programs (tool server, hooks, DeepSeek's waiter) run on the Node that runs agent-org:
   inside the app that is Electron with ELECTRON_RUN_AS_NODE=1. Hook commands are plain command lines run
   by several shells, so inside the app they go through ~/.agent-org/bin/org_hook.cmd, which sets it.
+- Windows Terminal's wt.exe is an app execution alias: stat fails on it, lstat sees a link. `which`
+  takes such a link as found (the Python setup check had the same need).
 - node-pty ends a terminal asynchronously: TerminalHost.closeAll returns a promise for the programs' end.
 - A new program's environment: agent-org's own minus what its starter set (Claude Code's, Electron's),
   with the registry's current variables and PATH (no CreateEnvironmentBlock without native code).

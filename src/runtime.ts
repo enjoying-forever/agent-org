@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -79,7 +79,14 @@ function hookShim(): string {
 }
 
 /** The full path of program `name` on `searchPath` (default this process's PATH), as a shell would find it. */
-export function which(name: string, searchPath: string | undefined = process.env.PATH ?? process.env.Path): string | null {
+export function which(name: string, searchPath?: string): string | null {
+  return lookup.which(name, searchPath);
+}
+
+/** How programs are found (a test may stand in for it). */
+export const lookup = { which: findProgram };
+
+function findProgram(name: string, searchPath: string | undefined = process.env.PATH ?? process.env.Path): string | null {
   const windows = process.platform === 'win32';
   const exts = windows ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter((x) => x) : [''];
   const hasExt = windows && exts.some((x) => name.toLowerCase().endsWith(x.toLowerCase()));
@@ -91,7 +98,11 @@ export function which(name: string, searchPath: string | undefined = process.env
     try {
       return statSync(p).isFile();
     } catch {
-      return false;
+      try { // an app execution alias (Windows Terminal's wt.exe): a link that only Windows itself follows
+        return lstatSync(p).isSymbolicLink();
+      } catch {
+        return false;
+      }
     }
   };
   if (path.isAbsolute(name) || name.includes('/') || name.includes('\\')) return candidates('').find(isFile) ?? (isFile(name) ? name : null);
