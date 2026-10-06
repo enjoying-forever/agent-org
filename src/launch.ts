@@ -344,9 +344,9 @@ export function antigravityPluginDir(): string {
 /** Run a program to its end; a .cmd shim (an npm-installed program) runs through cmd, its words quoted. */
 const run = (command: string, args: string[], timeout = 60): { ok: boolean; out: string } => {
   const shell = /\.(cmd|bat)$/i.test(command);
-  const quote = (a: string): string => (shell && /[\s&|<>^()]/.test(a) ? `"${a}"` : a);
-  const done = spawnSync(quote(command), args.map(quote), { encoding: 'utf8', timeout: timeout * 1000, windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'], shell });
+  const quote = (a: string): string => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a);
+  const opts = { encoding: 'utf8' as const, timeout: timeout * 1000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] };
+  const done = shell ? spawnSync([command, ...args].map(quote).join(' '), { ...opts, shell: true }) : spawnSync(command, args, opts);
   return { ok: done.status === 0, out: `${done.stdout ?? ''}${done.stderr ?? ''}` };
 };
 

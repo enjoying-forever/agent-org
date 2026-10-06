@@ -32,8 +32,8 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | waker.py | src/waker.ts | waker.test.ts |
 | wake.py, runview.py (DeepSeek) | src/wake.ts, src/runview.ts | launch, waker |
 | terminals.py | src/terminals.ts (node-pty) | terminals.test.ts (window parts wait for ui) |
-| doctor.py | | |
-| cli.py | | |
+| doctor.py | src/doctor.ts (Python checks become Runtime and Terminals) | (ui tests) |
+| cli.py | src/cli.ts | cli.test.ts (new) |
 | ui.py (server) | | |
 | Electron shell | | |
 | install / launcher / README | | |
