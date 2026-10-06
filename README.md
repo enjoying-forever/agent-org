@@ -470,3 +470,7 @@ How it fits together:
 - `ui.py` + `ui_static/` - the window's page (also runs the watchdog and automatic starts);
 - `terminals.py` - the agents' pseudo-terminals the window shows;
   `templates.py` - the starting teams; `doctor.py` - the setup check.
+
+## License
+
+MIT - see [LICENSE](LICENSE). The bundled xterm.js is MIT too (`agent_org/ui_static/xterm-LICENSE.txt`).
