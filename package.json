@@ -1,0 +1,25 @@
+{
+  "name": "agent-org",
+  "version": "0.3.0",
+  "description": "Run a team of AI agents (Claude Code, Codex, Grok, Antigravity, DeepSeek) that work together like a small company",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "dist/electron/main.js",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "node --test --test-concurrency=4 \"test/**/*.test.ts\"",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "@lydell/node-pty": "^1.1.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^44.5.1",
+    "typescript": "^5.9.0"
+  }
+}

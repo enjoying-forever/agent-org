@@ -5,3 +5,5 @@ __pycache__/
 team.yaml
 .venv/
 python-path.txt
+node_modules/
+dist/
