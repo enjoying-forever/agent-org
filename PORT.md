@@ -35,7 +35,7 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | doctor.py | src/doctor.ts (Python checks become Runtime and Terminals) | control.test.ts |
 | cli.py | src/cli.ts | cli.test.ts (new) |
 | ui.py (server) | src/ui.ts (node:http; the page in agent_org/ui_static unchanged) | ui, web_security, window, control |
-| Electron shell | | |
+| Electron shell | src/electron/main.ts | live run (below) |
 | install / launcher / README | | |
 
 Found while porting:
@@ -49,6 +49,14 @@ Found while porting:
 - node-pty ends a terminal asynchronously: TerminalHost.closeAll returns a promise for the programs' end.
 - A new program's environment: agent-org's own minus what its starter set (Claude Code's, Electron's),
   with the registry's current variables and PATH (no CreateEnvironmentBlock without native code).
+
+Live run (2026-10-08, Electron app, Claude leader + Claude worker, trusted test folder): the owner's
+task went leader -> worker -> file written -> reviewed -> reported back in about 45 seconds. Seen working:
+agents in the window's node-pty terminals, the tool server as Electron-as-Node, the waker's wake lines,
+the in-server pre-edit hook (lease taken and released), the Stop hook through org_hook.cmd, Stop and Quit
+from the page. Memory with GPU acceleration off: about 126 MB private over 4 processes (223 MB with it on).
+Not run live yet: Codex (its new hook command needs the owner's one-time "Trust all"), Grok (installing
+its hooks rewrites ~/.grok/hooks), Antigravity (replaces the user-level plugin), DeepSeek.
 
 To do before release:
 - A hook process (Codex, Grok, Antigravity per step; Claude only at turn end) takes ~590 ms here
