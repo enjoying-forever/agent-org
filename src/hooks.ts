@@ -366,7 +366,7 @@ export function asciiJson(value: unknown): string {
 }
 
 /** Run one hook as its own process: read the event from stdin, answer on stdout. */
-export async function main(argv: string[], openHub: (teamFile: string) => Hub): Promise<number> {
+export async function main(argv: string[], openHub: (teamFile: string) => Hub, input: string | null = null): Promise<number> {
   const event = argv[0] ?? '';
   const antigravity = argv.slice(1).includes('agy');
   const teamFile = process.env.AGENT_ORG_TEAM;
@@ -377,7 +377,7 @@ export async function main(argv: string[], openHub: (teamFile: string) => Hub): 
   }
   let payload: Payload = {};
   try {
-    const parsed = JSON.parse(readFileSync(0, 'utf8') || '{}');
+    const parsed = JSON.parse((input ?? readFileSync(0, 'utf8')) || '{}');
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) payload = parsed;
   } catch {
     // no event, or not JSON: an empty one

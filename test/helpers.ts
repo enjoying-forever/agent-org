@@ -1,12 +1,12 @@
 /** What the tests share: the example team, a fresh hub per test, a fake terminal opener. */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import { Hub } from '../src/hub.ts';
 import { Store } from '../src/store.ts';
-import { type Role, Team } from '../src/team.ts';
+import { dumpYaml, type Role, Team } from '../src/team.ts';
 
 // Never touch the real ~/.agent-org from tests (saved teams, roles, recent list).
 process.env.AGENT_ORG_HOME = mkdtempSync(path.join(os.tmpdir(), 'agent-org-home-'));
@@ -117,4 +117,22 @@ export async function rejects(fn: () => Promise<unknown>, kind: new (...args: ne
     if (!re.test(caught.message)) throw new Error(`${kind.name} message ${JSON.stringify(caught.message)} does not match ${re}`);
   }
   return caught;
+}
+
+/** The example team written to a team.yaml (as the window and agents read it); returns its path. */
+export function writeTeamFile(t: TestContext, config: object = team()): string {
+  const dir = tmpDir(t);
+  mkdirSync(path.join(dir, 'project'), { recursive: true });
+  const file = path.join(dir, 'team.yaml');
+  writeFileSync(file, dumpYaml(config), 'utf8');
+  return file;
+}
+
+/** A fresh agent-org home folder (saved roles, teams, recent list) for this test alone. */
+export function freshHome(t: TestContext): string {
+  const before = process.env.AGENT_ORG_HOME;
+  const dir = tmpDir(t);
+  process.env.AGENT_ORG_HOME = dir;
+  cleanup(t, () => { process.env.AGENT_ORG_HOME = before; });
+  return dir;
 }

@@ -40,3 +40,9 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 
 Found while porting:
 - The `yaml` package's YAML 1.1 mode reads a lone `.` as NaN: team files are parsed as YAML 1.2.
+- Time zones come from Intl (every JavaScript engine has them): no tzdata package.
+
+To do before release:
+- A hook process (Codex, Grok, Antigravity per step; Claude only at turn end) takes ~590 ms here
+  against ~340 ms for an empty Node: 86 ms is the work, the rest is loading many module files.
+  Bundle src/ into one file per entry point when packaging.
