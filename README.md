@@ -119,8 +119,8 @@ agent carries on where it stopped.
   keeps the count), in its pane's title - hover it for new, cached and output tokens and
   the model - and the team's total at the bottom of the team list. Read from each program's
   own records: Claude Code's and Codex's session files, Antigravity's conversation
-  database, DeepSeek's run events; Grok keeps no token counts (messages only). For Codex
-  the title also shows how much of your subscription limit is used.
+  database, DeepSeek's run events, and Grok's turn records (a Grok turn is counted when it
+  ends). For Codex the title also shows how much of your subscription limit is used.
 - **Edit team:** add and remove roles, choose the leader and each role's superior, the
   program and model each role uses, what files it may write, the consultant tiers,
   the checks, and whether agents start by themselves.

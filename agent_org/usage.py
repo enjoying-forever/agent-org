@@ -3,7 +3,7 @@
 - Claude Code: token counts on every reply (deduplicated by message id).
 - Codex: the running total, and - when the provider reports them - how much of each
   subscription limit window is used.
-- Grok: no token counts on disk; the number of messages and the model instead.
+- Grok: each finished turn's counts, from the conversation's updates.jsonl.
 - Antigravity: each model call's counts, in its conversation's database (protobuf records).
 - DeepSeek Harness: each step's counts from its JSON events, which agent_org.runview keeps
   in the role's launch folder (its own session files are compressed).
@@ -100,8 +100,10 @@ def _version(path: Path) -> tuple[float, ...]:
     """What changes when the file does. A database's new rows sit in its -wal file until they are
     checkpointed into it (seen: an Antigravity agent's count stayed at 0 for its whole task)."""
     stat = path.stat()
-    wal = path.with_name(path.name + "-wal")
-    extra = (wal.stat().st_mtime, wal.stat().st_size) if path.suffix == ".db" and wal.exists() else ()
+    # what else the reader reads: a database's -wal file, a Grok conversation's updates
+    side = path.with_name(path.name + "-wal") if path.suffix == ".db" else (
+        path.with_name(GROK_UPDATES) if path.name == "summary.json" else None)
+    extra = (side.stat().st_mtime, side.stat().st_size) if side is not None and side.exists() else ()
     return (stat.st_mtime, stat.st_size, *extra)
 
 
@@ -163,8 +165,35 @@ def _codex(path: Path) -> Usage:
 
 
 def _grok(path: Path) -> Usage:
+    """Grok writes each finished turn's usage into the conversation's updates.jsonl (a turn_completed
+    update: its input includes what was read from the cache, its output the reasoning). A turn still
+    running is counted when it ends. Without any yet, the number of messages."""
     summary = json.loads(path.read_text(encoding="utf-8"))
-    return Usage(messages=int(summary.get("num_chat_messages") or 0), model=summary.get("current_model_id") or "")
+    u = Usage(model=summary.get("current_model_id") or "")
+    updates = path.with_name(GROK_UPDATES)
+    if updates.is_file():
+        with updates.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"turn_completed"' not in line:
+                    continue
+                try:
+                    turn = (json.loads(line).get("params") or {}).get("update") or {}
+                except ValueError:
+                    continue
+                used = turn.get("usage") if turn.get("sessionUpdate") == "turn_completed" else None
+                if not isinstance(used, dict):
+                    continue
+                cached = int(used.get("cachedReadTokens") or 0)
+                u.tokens_cached += cached
+                u.tokens_in += max(0, int(used.get("inputTokens") or 0) - cached)
+                u.tokens_out += int(used.get("outputTokens") or 0)
+                u.messages += int(used.get("modelCalls") or 0)
+    if not (u.tokens_in or u.tokens_cached or u.tokens_out):
+        u.messages = int(summary.get("num_chat_messages") or 0)
+    return u
+
+
+GROK_UPDATES = "updates.jsonl"
 
 
 def _antigravity(path: Path) -> Usage:

@@ -57,9 +57,32 @@ def test_grok_reports_messages_and_model(home):
     folder.mkdir(parents=True)
     (folder / "summary.json").write_text(json.dumps({"num_chat_messages": 42, "current_model_id": "grok-4.7"}),
                                          encoding="utf-8")
-    u = usage.usage("grok", SID)
+    u = usage.usage("grok", SID)  # no finished turn yet: its messages
     assert (u.messages, u.model, u.tokens_out) == (42, "grok-4.7", 0)
 
+
+def test_grok_usage_adds_up_its_finished_turns(home):
+    folder = home / ".grok" / "sessions" / "E%3A%5Cproj" / SID
+    folder.mkdir(parents=True)
+    (folder / "summary.json").write_text(json.dumps({"num_chat_messages": 42, "current_model_id": "grok-4.7"}),
+                                         encoding="utf-8")
+
+    def turn(tokens_in, cached, out, calls):  # as Grok writes it when a turn ends
+        return {"method": "_x.ai/session/update", "params": {"sessionId": SID, "update": {
+            "sessionUpdate": "turn_completed", "stop_reason": "end_turn", "usage": {
+                "inputTokens": tokens_in, "outputTokens": out, "totalTokens": tokens_in + out,
+                "cachedReadTokens": cached, "reasoningTokens": out // 2, "modelCalls": calls}}}}
+
+    chunk = {"method": "session/update", "params": {"update": {"sessionUpdate": "agent_message_chunk"},
+                                                    "_meta": {"totalTokens": 1661}}}
+    (folder / "updates.jsonl").write_text(lines(chunk, turn(2664859, 2181248, 50712, 22)), encoding="utf-8")
+    u = usage.usage("grok", SID)
+    # seen: the researcher's pane said "80 msg" though Grok had recorded 2,715,571 tokens
+    assert (u.tokens_in, u.tokens_cached, u.tokens_out, u.messages) == (483611, 2181248, 50712, 22)
+    with (folder / "updates.jsonl").open("a", encoding="utf-8") as f:  # the next turn ends: counted at once
+        f.write(lines(turn(79189, 75648, 858, 3)))
+    u = usage.usage("grok", SID)
+    assert (u.tokens_in, u.tokens_cached, u.tokens_out, u.messages) == (483611 + 3541, 2181248 + 75648, 51570, 25)
 
 def test_unknown_or_missing_conversations(home):
     assert usage.usage("claude", SID) is None
