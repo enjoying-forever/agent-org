@@ -271,7 +271,7 @@ function programsNote(programs) {
   return note;
 }
 
-// The Setup check's name for each program (see agent_org/doctor.py).
+// The Setup check's name for each program (see src/doctor.ts).
 const CHECK_NAME = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', antigravity: 'Antigravity', deepseek: 'DeepSeek Harness' };
 let MISSING = new Set(); // programs the last Setup check found not installed
 
@@ -750,7 +750,7 @@ function markOutput(p) {
 
 // What a program waiting for its user shows: a permission question, the trust question at the
 // first start, a yes/no - with its choices, so a question the agent only wrote in its answer does
-// not count. Read from the screen as it is now, once the terminal has gone quiet (as agent_org.waker).
+// not count. Read from the screen as it is now, once the terminal has gone quiet (as src/waker.ts does).
 const ASKING = new RegExp(['do you want to', 'would you like to', 'do you trust',
   'trust (?:this|the) (?:folder|directory|files)', 'trust all', 'review (?:the )?hooks', 'allow (?:this|command|once|always)',
   '\\[y/n\\]', '\\(y/n\\)', 'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');

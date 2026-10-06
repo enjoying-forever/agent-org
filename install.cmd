@@ -1,6 +1,6 @@
 @echo off
-rem Set up agent-org on this computer: a private Python environment in this folder (.venv) with
-rem the few packages it needs. Run it once (again after updating agent-org; it is safe to repeat).
+rem Set up agent-org on this computer: its packages (in node_modules here, Electron among them) and its
+rem compiled code (dist). Run it once, and again after updating agent-org; it is safe to repeat.
 title agent-org setup
 setlocal
 set "HERE=%~dp0"
@@ -11,34 +11,26 @@ echo  agent-org setup
 echo  ===============
 echo.
 
-rem 1. A Python 3.11 or newer: the Python launcher (py) first, then python on PATH.
-set "PY="
-for %%V in (3.13 3.12 3.11 3) do (
-  if not defined PY (
-    py -%%V -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul && set "PY=py -%%V"
-  )
-)
-if not defined PY (
-  python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul && set "PY=python"
-)
-if not defined PY (
-  echo  agent-org needs Python 3.11 or newer, and none was found.
-  echo  Install it from https://www.python.org/downloads/ ^(tick "Add python.exe to PATH"^),
-  echo  or in a terminal: winget install Python.Python.3.12
-  echo  Then run install.cmd again.
+rem 1. Node.js 22.13 or newer: it installs agent-org (the app itself then runs on its own Electron).
+set "NODE_OK="
+for /f "delims=" %%V in ('node -e "const [a,b]=process.versions.node.split('.').map(Number);console.log(a>22||(a===22&&b>=13)?'yes':'old')" 2^>nul') do set "NODE_OK=%%V"
+if not "%NODE_OK%"=="yes" (
+  if "%NODE_OK%"=="old" (echo  agent-org needs Node.js 22.13 or newer; this computer has an older one.) else (echo  agent-org needs Node.js 22.13 or newer, and none was found.)
+  echo  Install it from https://nodejs.org ^(the LTS version^), or in a terminal:
+  echo      winget install OpenJS.NodeJS.LTS
+  echo  Then open a new window and run install.cmd again.
   echo.
   pause
   exit /b 1
 )
-echo  Python: %PY%
+for /f "delims=" %%V in ('node -v') do echo  Node.js: %%V
 
-rem 2. The private environment, and the packages in it.
-if not exist "%HERE%.venv\Scripts\python.exe" (
-  echo  Creating the environment in .venv ...
-  %PY% -m venv "%HERE%.venv" || goto :failed
-)
-echo  Installing the packages ^(PyYAML, pywinpty, pywebview, tzdata^) ...
-"%HERE%.venv\Scripts\python.exe" -m pip install --disable-pip-version-check --quiet -r "%HERE%requirements.txt" || goto :failed
+rem 2. The packages, and the compiled code. A proxy in HTTPS_PROXY is used for the downloads.
+set "NODE_USE_ENV_PROXY=1"
+echo  Installing the packages ^(Electron, node-pty, yaml, smol-toml^) ...
+call npm install --no-fund --no-audit --loglevel=error || goto :failed
+echo  Building ...
+call npm run --silent build || goto :failed
 
 rem 3. PowerShell 7: every agent starts through it.
 where pwsh >nul 2>nul
@@ -57,9 +49,9 @@ if errorlevel 1 (
 rem 4. What else is needed: the agent programs, signed in.
 echo.
 echo  Setup check:
-"%HERE%.venv\Scripts\python.exe" -m agent_org.doctor
+node "%HERE%dist\doctor.js"
 echo.
-echo  Done. Start agent-org by double-clicking agent-org-ui.cmd.
+echo  Done. Start agent-org by double-clicking agent-org.cmd.
 echo  Each agent program you use must be signed in once in a normal terminal: claude, codex, grok, agy.
 echo.
 pause
@@ -67,7 +59,8 @@ exit /b 0
 
 :failed
 echo.
-echo  Setup did not finish ^(see the message above^). Check your internet connection and run install.cmd again.
+echo  Setup did not finish ^(see the message above^). Check your internet connection ^(behind a proxy: set
+echo  HTTPS_PROXY first^) and run install.cmd again.
 echo.
 pause
 exit /b 1

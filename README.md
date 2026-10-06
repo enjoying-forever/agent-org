@@ -8,8 +8,8 @@ with the subscription you already have, and you watch, type to and steer all of 
 ## What you need
 
 - **Windows 10 or 11.**
-- **Python 3.11 or newer** ([python.org](https://www.python.org/downloads/), or
-  `winget install Python.Python.3.12`).
+- **Node.js 22.13 or newer** to install it ([nodejs.org](https://nodejs.org), the LTS version, or
+  `winget install OpenJS.NodeJS.LTS`). agent-org itself then runs on its own copy of Electron.
 - **PowerShell 7** - every agent starts through it (`winget install Microsoft.PowerShell`;
   the PowerShell that comes with Windows is version 5 and is not enough).
 - **At least one agent program, signed in** - each runs on your own subscription:
@@ -20,27 +20,22 @@ with the subscription you already have, and you watch, type to and steer all of 
   - Grok Build (`grok login`), the Antigravity CLI (`agy`, from antigravity.google) or
     DeepSeek Harness.
 
-  The npm commands need [Node.js](https://nodejs.org). A team can mix programs: the
-  ready-made teams say which ones they use, and the *Setup check* says what is missing.
+  A team can mix programs: the ready-made teams say which ones they use, and the *Setup check*
+  says what is missing.
 
 ## Install
 
 1. Put this folder where you want to keep it (download it, or `git clone` it).
-2. **Double-click `install.cmd`.** It makes a private Python environment in the folder
-   (`.venv`) with the four small packages agent-org needs (PyYAML, pywinpty, pywebview,
-   tzdata), offers to install PowerShell 7 if it is missing, and ends with the setup check.
-   Run it again after updating agent-org; it is safe to repeat.
-
-To use a Python you already have instead, put the full path of its `python.exe` on one line
-in a file `python-path.txt` next to `agent-org-ui.cmd` (or set `AGENT_ORG_PYTHON`), and install
-the packages there: `python -m pip install -r requirements.txt`.
+2. **Double-click `install.cmd`.** It installs agent-org's packages into the folder
+   (`node_modules`: Electron, node-pty for the agents' terminals, and two small ones), builds it,
+   offers to install PowerShell 7 if it is missing, and ends with the setup check. Run it again
+   after updating agent-org; it is safe to repeat. Behind a proxy, set `HTTPS_PROXY` first.
 
 ## Quick start
 
-1. **Double-click `agent-org-ui.cmd`.** The agent-org window opens. (Keep the small black
-   window open too.) Closing the window while agents run asks: keep them running in the
-   background (double-click `agent-org-ui.cmd` again to bring the window back), or stop them
-   (their conversations are kept, and *Start* resumes them).
+1. **Double-click `agent-org.cmd`.** The agent-org window opens. Closing it while agents run
+   asks: keep them running in the background (double-click `agent-org.cmd` again to bring the
+   window back), or stop them (their conversations are kept, and *Start* resumes them).
 2. **Create a team.** Choose the project folder the agents should work in, pick a
    starting team (Solo, Leader and worker, or Full team) and click *Create team*.
    The *Setup* check on the same page tells you if Claude, Codex or Grok needs fixing.
@@ -128,16 +123,17 @@ agent carries on where it stopped.
 
 ### The window, or a browser, or terminal tabs
 
-agent-org opens in a window of its own (Windows' WebView2, through `pywebview`), and runs
-each agent in a pseudo-terminal it owns (`pywinpty`), shown with xterm.js. The agents get a
+agent-org opens in a window of its own (Electron, kept light: one page, no GPU process
+work, about 130 MB in all), and runs each agent in a pseudo-terminal it owns (node-pty, Windows'
+ConPTY), shown with xterm.js. The agents get a
 fresh copy of your user environment, as a new terminal would, not the environment agent-org
 itself was started from. Your PowerShell profile is not run (each agent starts faster, and
 nothing in it changes the agent's settings); the agent gets agent-org's proxy, or Windows' own.
 
-- `python -m agent_org.ui --browser` opens the same page in your browser instead; press
-  Enter in the black window for another sign-in link.
-- Without `pywinpty`, or with the environment variable `AGENT_ORG_TABS=1`, agents open in
-  Windows Terminal tabs as before, and keep running when agent-org closes.
+- `node dist/ui.js` opens the same page in your browser instead; press Enter in its terminal
+  for another sign-in link.
+- With the environment variable `AGENT_ORG_TABS=1`, agents open in Windows Terminal tabs instead,
+  and keep running when agent-org closes.
 
 ### DeepSeek Harness
 
@@ -432,45 +428,49 @@ the work.
 
 ## For developers
 
-It runs on Python 3.11+ with the packages in `requirements.txt`: PyYAML, plus `pywinpty` (the
-agents' terminals) and `pywebview` (the window) - without those two, agent-org falls back to
-Windows Terminal tabs and the browser - and `tzdata`. For the tests: `pip install pytest`. xterm.js (MIT, see `ui_static/xterm-LICENSE.txt`) is bundled in
-`ui_static`. From this folder:
+agent-org is TypeScript, run by Node 22.13+ straight from `src/` (type stripping) and compiled to
+`dist/` (`npm run build`) for the Electron window. Its packages: Electron, `@lydell/node-pty` (the
+agents' terminals, prebuilt), `yaml` and `smol-toml`; the database is Node's own `node:sqlite`.
+xterm.js (MIT, see `static/xterm-LICENSE.txt`) is bundled in `static/`, the window's page. From this
+folder:
 
 | Command | What it does |
 |---|---|
-| `python -m agent_org.ui [--team team.yaml] [--browser]` | the agent-org window (or the page in a browser) |
-| `python -m agent_org.launch --team team.yaml [roles] [--fresh] [--force] [--dry-run]` | open agent tabs from the command line |
-| `python -m agent_org.launch --install-grok-hooks` | install the hooks for Grok |
-| `python -m agent_org.cli --team team.yaml [--as ROLE] tree/send/inbox/view/claim/...` | the hub from the command line |
-| `python -m agent_org.doctor` | the setup check, in the terminal |
-| `python -m pytest` | the tests |
+| `npm start` | the agent-org window (after `npm run build`) |
+| `node dist/ui.js [--team team.yaml] [--no-browser]` | the page in your browser, without the window |
+| `node dist/launch.js --team team.yaml [roles] [--fresh] [--force] [--dry-run]` | open agent tabs from the command line |
+| `node dist/launch.js --install-grok-hooks` | install the hooks for Grok |
+| `node dist/cli.js --team team.yaml [--as ROLE] tree/send/inbox/view/claim/...` | the hub from the command line |
+| `node dist/doctor.js` | the setup check, in the terminal |
+| `npm test` | the tests (`node --test`, no build needed) |
 
-How it fits together:
+How it fits together (in `src/`):
 
-- `team.py` - the role tree and consultant tiers, from `team.yaml`.
-- `hub.py` - the message law, the task lifecycle, file leases and consultants, over
-  `store.py` (one SQLite file per team in `.agent-org/`, shared by every agent's
+- `team.ts` - the role tree and consultant tiers, from `team.yaml`.
+- `hub.ts` - the message law, the task lifecycle, file leases and consultants, over
+  `store.ts` (one SQLite file per team in `.agent-org/`, shared by every agent's
   process, upgraded in place when the format grows).
-- `watchdog.py` - nudges, escalations, expired leases and the problems list
-  (`python -m agent_org.watchdog --team team.yaml` runs it without the UI).
-- `usage.py` - token use per agent, and whether its last turn ended on a usage limit
+- `watchdog.ts` - nudges, escalations, expired leases and the problems list.
+- `usage.ts` - token use per agent, and whether its last turn ended on a usage limit
   or an API error, from each harness's session files.
-- `mcp_server.py` - the `org` tools each agent gets (standard-library MCP over stdio).
-- `hooks.py` / `org_hook.py` - the hooks each harness runs: deliver mail, remind of
-  duties, guard edits, record the conversation id.
-- `launch.py` - writes each role's start script (Claude Code: `--mcp-config`,
+- `mcp_server.ts` / `org_server.ts` - the `org` tools each agent gets (MCP over stdio).
+- `hooks.ts` / `org_hook.ts` - the hooks each harness runs: deliver mail, remind of
+  duties, guard edits, record the conversation id. Claude Code's per-step hooks run inside
+  its tool server instead, so no process starts for them.
+- `launch.ts` - writes each role's start script (Claude Code: `--mcp-config`,
   `--settings`, `--append-system-prompt-file`; Codex: `-c` overrides; Grok: project
-  MCP config and `--rules`; Antigravity: a project plugin in
-  `.agents/plugins/agent-org/` with its MCP config and hooks), resumes conversations
-  (`sessions.py`), stops agents, and keeps to the team's running limit.
-- `cards.py` - the role card: the law, the team, and where the agent left off.
-- `verify.py` - the team's checks; `gitops.py` - task diffs and one commit per
+  MCP config and `--rules`; Antigravity: a user-level plugin with its MCP config and hooks),
+  resumes conversations (`sessions.ts`), stops agents, and keeps to the team's running limit.
+  `runtime.ts` says how agent-org runs its own programs (on the Node or Electron that runs it).
+- `cards.ts` - the role card: the law, the team, and where the agent left off.
+- `verify.ts` - the team's checks; `gitops.ts` - task diffs, branches and one commit per
   accepted task (only in a repository whose top folder is the project).
-- `ui.py` + `ui_static/` - the window's page (also runs the watchdog and automatic starts);
-- `terminals.py` - the agents' pseudo-terminals the window shows;
-  `templates.py` - the starting teams; `doctor.py` - the setup check.
+- `ui.ts` + `static/` - the page and its local server (also runs the watchdog, the waker and
+  automatic starts); `electron/main.ts` - the window.
+- `terminals.ts` - the agents' pseudo-terminals the window shows; `waker.ts` - wakes an agent
+  resting at its prompt when work arrives; `wake.ts` / `runview.ts` - DeepSeek's runs.
+- `templates.ts` - the starting teams; `presets.ts` - the Role Market; `doctor.ts` - the setup check.
 
 ## License
 
-MIT - see [LICENSE](LICENSE). The bundled xterm.js is MIT too (`agent_org/ui_static/xterm-LICENSE.txt`).
+MIT - see [LICENSE](LICENSE). The bundled xterm.js is MIT too (`static/xterm-LICENSE.txt`).

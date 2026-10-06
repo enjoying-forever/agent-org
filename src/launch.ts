@@ -824,3 +824,5 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   return 0;
 }
+
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) process.exitCode = await main();

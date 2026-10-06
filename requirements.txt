@@ -1,6 +1,0 @@
-# What agent-org needs, on Windows 10 or 11 with Python 3.11 or newer.
-# install.cmd puts these in a private environment in this folder (.venv).
-PyYAML>=6
-pywinpty>=2.0     # the agents' terminals inside the agent-org window
-pywebview>=5.0    # the window itself (without it agent-org opens in your web browser)
-tzdata            # time zones (Windows has none for Python): when a usage limit resets
