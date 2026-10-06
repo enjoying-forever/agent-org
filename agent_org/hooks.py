@@ -281,10 +281,10 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
             me.note_edit(rel)
             continue
         if lock is not None:
-            why = f" for {lock.reason}" if lock.reason else ""
-            covered = f" (its lease on {lock.path} covers it)" if lock.pattern else ""
-            return deny(f"{rel} is being written by {lock.owner}{why}{covered}; only one agent may write a "
-                        f"file. Do not edit it: ask {me.superior} (or {lock.owner} directly if they are your peer).")
+            covered = f", whose lease on {lock.path} covers it" if lock.pattern else ""
+            peer = f" (or {lock.owner} directly: you are peers)" if lock.owner in me._peers(me.team) else ""
+            return deny(f"{rel} is being written by {me.held_by(lock)}{covered}; only one agent may write a "
+                        f"file. Do not edit it: ask {me.superior}{peer}.")
         try:
             me.claim(full)
         except HubError as e:

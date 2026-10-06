@@ -135,3 +135,15 @@ def test_a_hire_waits_when_the_running_limit_is_reached(hub, team_file):
     hub.store.check_in(4242, "leader")
     hub.session("leader").hire("helper", "claude", "Help.")
     assert hub.opener.opened == []  # hired, but not started past the limit
+
+
+def test_no_claude_haiku_agent_that_would_ask_the_owner_at_every_step(hub, team_file):
+    lead = hub.session("tech-lead")
+    # seen: a Claude Haiku worker (no auto mode) sat at "Do you want to create greet.py?"
+    with pytest.raises(HubError, match="no auto mode"):
+        lead.hire("tester", "claude", "Write the tests.", model="haiku")
+    lead.hire("tester", "claude", "Write the tests.", model="sonnet")
+    with pytest.raises(HubError, match="no auto mode"):
+        lead.change_role("tester", model="claude-haiku-4-5")
+    lead.hire("cheap", "codex", "Small chores.", model="haiku-like-name")  # other programs: their own rules
+    assert "tester" in roles_in(team_file) and hub.opener.opened == ["tester", "cheap"]

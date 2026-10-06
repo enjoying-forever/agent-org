@@ -60,8 +60,8 @@ EFFORTS = {
     "deepseek": list(launch.DSH_EFFORTS),
 }
 DEEPSEEK_MODELS = ["deepseek-flash", "deepseek-v4-pro"]  # what its API accepts
-CLAUDE_MODELS = ["opus", "sonnet", "fable", "haiku", "claude-opus-5-5", "claude-sonnet-5-5",
-                 "claude-fable-5-1", "claude-haiku-4-5"]
+# No Haiku: it has no auto mode, so a Haiku agent stops to ask you before every edit and command.
+CLAUDE_MODELS = ["opus", "sonnet", "fable", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]
 
 
 class ApiError(Exception):

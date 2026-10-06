@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from .cards import SERVER_NAME, role_card
-from . import presets
+from . import hooks, presets
 from .hub import BROADCAST, OUTCOMES, Hub, HubError, RoleSession
-from .launch import stop_role, tab_opener
+from .launch import HOOK_TOOL, stop_role, tab_opener
 from .store import Lock, Message
 from .team import HARNESSES, TeamError
 
@@ -397,8 +397,34 @@ class Tools:
         return (f"\n\n[agent-org] {len(new)} new message(s) for you from {senders} "
                 f"({', '.join(f'#{m.id}' for m in new)}). Read them with read_inbox.")
 
+    def hook(self, args: dict[str, Any]) -> str:
+        """One of Claude Code's hooks (launch.mcp_hook), run here rather than in a process of its own.
+        Its answer is what the command hook would print: JSON, or nothing. It never fails the call: a
+        failing hook is logged, as in hooks.main."""
+        event = str(args.get("event") or "")
+        handler = hooks.HANDLERS.get(event)
+        if handler is None:
+            return ""
+        try:
+            tool_input = json.loads(args.get("tool_input") or "{}")  # Claude Code hands it over as JSON text
+        except (TypeError, ValueError):
+            tool_input = {}
+        payload = {"session_id": str(args.get("session_id") or ""), "tool_name": str(args.get("tool_name") or ""),
+                   "tool_input": tool_input if isinstance(tool_input, dict) else {}, "cwd": str(args.get("cwd") or "")}
+        try:
+            hooks.remember_session(self.me, payload)
+            out = handler(self.me, payload)
+        except HubError:
+            return ""  # e.g. a dismissed consultant
+        except Exception:  # noqa: BLE001 - a failing hook shows up in the agent's tab on every step
+            hooks.log_error(self.me.hub, event, self.me.name)
+            return ""
+        return json.dumps(out) if out else ""
+
     def call(self, name: str, args: dict[str, Any],
              cancelled: threading.Event | None = None) -> tuple[str, bool]:
+        if name == HOOK_TOOL:  # not a tool of the model's: no argument checks, no mail line
+            return self.hook(args if isinstance(args, dict) else {}), False
         handler = self.handlers.get(name)
         if handler is None:
             return f"Unknown tool: {name}", True

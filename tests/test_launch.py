@@ -50,6 +50,9 @@ def test_claude_role_files(team_file):
     script = (out / "start.ps1").read_text(encoding="utf-8")
     assert "$env:AGENT_ORG_ROLE = 'leader'" in script
     assert "$env:MCP_TOOL_TIMEOUT = '3600000'" in script
+    # a wait for mail stays one quiet call: not moved to the background, not cut off as idle
+    assert "$env:CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS = '0'" in script
+    assert "$env:CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT = '3600000'" in script
     assert "$env:DISABLE_AUTOUPDATER = '1'" in script  # agents must not update the shared install
     assert re.search(r"'--model' 'opus' '--effort' 'high' '--session-id' '[0-9a-f-]{36}' '--name' 'leader' "
                      r"'You are the ''leader'' agent", script)
@@ -162,6 +165,12 @@ def test_claude_gets_the_hooks_through_settings(team_file):
     hooks = json.loads((out / "settings.json").read_text(encoding="utf-8"))["hooks"]
     assert set(hooks) == {"SessionStart", "Stop", "PostToolUse", "PreToolUse"}
     assert hooks["PreToolUse"][0]["matcher"] == "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
+    # the hooks of every tool call run in its org tool server: no Python process to start for each
+    for event, name in (("PreToolUse", "pre-edit"), ("PostToolUse", "post-tool")):
+        [hook] = hooks[event][0]["hooks"]
+        assert (hook["type"], hook["server"], hook["tool"], hook["input"]["event"]) == (
+            "mcp_tool", "org", launch.HOOK_TOOL, name)
+        assert hook["input"]["tool_input"] == "${tool_input}"
     stop = hooks["Stop"][0]["hooks"][0]
     assert stop["command"].endswith("org_hook.py stop") and stop["timeout"] > launch.STOP_WAIT
     script = (out / "start.ps1").read_text(encoding="utf-8")

@@ -378,3 +378,29 @@ def test_a_team_without_consultant_tiers_offers_no_consultant_tools(tmp_path):
         assert "assign_task" in names
     finally:
         hub.close()
+
+
+def test_claude_hooks_run_in_the_tool_server_unseen_by_the_model(client, hub):
+    import json as _json
+    from agent_org.launch import HOOK_TOOL
+    worker = client("worker-a")
+    tools = {t["name"] for t in worker.call("tools/list")["result"]["tools"]}
+    assert HOOK_TOOL not in tools  # the model never sees it: only Claude Code's hooks call it
+    root = hub.base_team.project_root
+
+    def hook(event, tool_name, tool_input):  # as Claude Code fills in launch.mcp_hook's input
+        text, err = worker.tool(HOOK_TOOL, event=event, session_id="", tool_name=tool_name,
+                                tool_input=_json.dumps(tool_input), cwd=str(root))
+        assert not err
+        return _json.loads(text) if text else None
+
+    out = hook("pre-edit", "Edit", {"file_path": str(root / "src" / "app.py")})
+    assert "you now hold the write lock on src/app.py" in out["hookSpecificOutput"]["additionalContext"]
+    hub.session("worker-b").claim("tests/test_app.py")
+    out = hook("pre-edit", "Write", {"file_path": str(root / "tests" / "test_app.py")})
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # someone else writes it
+    assert hook("post-tool", "Read", {"file_path": "x"}) is None  # nothing new: no answer at all
+    hub.session("tech-lead").send("worker-a", "use the new parser")
+    out = hook("post-tool", "Read", {"file_path": "x"})
+    assert "1 new message(s) for you from tech-lead" in out["hookSpecificOutput"]["additionalContext"]
+    assert hook("no-such-event", "Read", {}) is None

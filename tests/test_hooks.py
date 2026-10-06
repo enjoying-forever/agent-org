@@ -158,7 +158,7 @@ def test_editing_someone_elses_file_is_refused(hub, team):
     hub.session("worker-a").claim("tests/test_app.py")
     reason = denied(hooks.on_pre_edit(hub.session("worker-b"), edit("tests/test_app.py", "Write", team.project_root)))
     assert "tests/test_app.py is being written by worker-a" in reason
-    assert "ask tech-lead (or worker-a directly if they are your peer)" in reason
+    assert "ask tech-lead (or worker-a directly: you are peers)" in reason
 
 
 def test_editing_outside_the_write_scope_is_refused(hub, team):
@@ -313,3 +313,14 @@ def test_a_note_is_not_announced_mid_work(hub):
     hub.note("worker-a", "tech-lead changed your role (duties). Call my_role to see it now.")
     assert hooks.on_post_tool(worker, {}) is None  # it comes with the next read_inbox
     assert "changed your role" in worker.read_inbox()[0].text
+
+
+def test_a_file_the_owner_holds_is_refused_in_plain_words(hub):
+    hub.session("you").claim("src/app.py", "kept by the owner")
+    worker = hub.session("worker-a")
+    out = hooks.on_pre_edit(worker, {"tool_name": "Edit", "tool_input": {"file_path": "src/app.py"},
+                                     "cwd": str(hub.base_team.project_root)})
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    # seen: "is being written by you for kept by the owner ... ask tech-lead (or you directly if they are your peer)"
+    assert "is being written by the owner (kept by the owner); only one agent" in reason
+    assert reason.endswith("ask tech-lead.")

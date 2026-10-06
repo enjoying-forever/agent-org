@@ -196,7 +196,12 @@ How the rules are kept:
 - After every step it takes, a busy agent is told about new messages; urgent ones
   interrupt it immediately. Its activity also renews its file leases.
 - Before every file edit, the hub checks the lease, so two agents never write the same
-  file.
+  file. For Claude agents these per-step checks run inside the agent's own org tool server
+  (a few milliseconds each) instead of starting a program for every step (about half a
+  second each on Windows).
+- Claude agents need Sonnet, Opus or Fable: Claude Haiku has no auto mode, so it would stop
+  and ask you before every edit and command. A leader cannot hire one, and the model lists
+  leave it out.
 - While the page is open, a **watchdog** patrols every half minute: it releases leases
   that ran out, nudges a stalled task and then tells whoever gave it, passes unanswered
   questions up, and marks what needs you on the agents' panes.

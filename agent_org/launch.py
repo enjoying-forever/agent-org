@@ -29,7 +29,7 @@ from . import sessions
 from .cards import SERVER_NAME, role_card
 from .usage import DSH_USAGE
 from .hooks import STOP_WAIT
-from .hub import Hub, HubError, Opener
+from .hub import Hub, HubError, Opener, asks_owner_for_everything
 from .team import Role, Team
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -167,6 +167,26 @@ def hook_table(edit_matcher: str | None) -> dict[str, list[dict[str, object]]]:
     }
 
 
+HOOK_TOOL = "agent_org_hook"  # answered by the agent's org tool server, which lists it to no model
+
+
+def mcp_hook(event: str) -> dict[str, object]:
+    """A hook the agent's own org tool server runs (Claude Code's mcp_tool hooks), so no process starts
+    for it: a new Python takes about half a second on Windows, and the tool hooks run on every call."""
+    return {"type": "mcp_tool", "server": SERVER_NAME, "tool": HOOK_TOOL, "timeout": 30,
+            "input": {"event": event, "session_id": "${session_id}", "tool_name": "${tool_name}",
+                      "tool_input": "${tool_input}", "cwd": "${cwd}"}}
+
+
+def claude_hooks() -> dict[str, list[dict[str, object]]]:
+    """Claude Code's hooks: the per-call ones in its org server. SessionStart stays a command (it runs
+    before MCP servers start), and so does Stop (once a turn, and it may wait for mail a while)."""
+    table = hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")
+    table["PreToolUse"][0]["hooks"] = [mcp_hook("pre-edit")]
+    table["PostToolUse"][0]["hooks"] = [mcp_hook("post-tool")]
+    return table
+
+
 def install_grok_hooks() -> Path:
     """Grok reads hooks only globally or at a git root, so ours go in ~/.grok/hooks.
 
@@ -219,6 +239,9 @@ def claude_model(model: str) -> str:
 def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
                   resume: str | None = None, new_id: str | None = None, quiet: bool = False) -> Launch:
     spec = hub.team.roles[role]
+    if asks_owner_for_everything("claude", spec.model):
+        hub.event("agent", role, "runs Claude Haiku, which has no auto mode: it will ask you in its terminal "
+                                 "before every edit and command (Sonnet works on its own)")
     card = out / "role.md"
     card.write_text(role_card(hub.session(role), resumed=bool(resume)) + "\n", encoding="utf-8")
     command, args, env = mcp_server(team_file, role)
@@ -227,8 +250,7 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
         {"mcpServers": {SERVER_NAME: {"type": "stdio", "command": command, "args": args, "env": env}}},
         indent=2), encoding="utf-8")
     settings = out / "settings.json"
-    settings.write_text(json.dumps(AGENT_CLAUDE_SETTINGS | {"hooks": hook_table("Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell")},
-                                   indent=2), encoding="utf-8")
+    settings.write_text(json.dumps(AGENT_CLAUDE_SETTINGS | {"hooks": claude_hooks()}, indent=2), encoding="utf-8")
     cli = ["--mcp-config", str(config), "--strict-mcp-config", "--allowedTools", f"mcp__{SERVER_NAME}",
            "--tools", ",".join(AGENT_CLAUDE_TOOLS), "--no-chrome",
            "--append-system-prompt-file", str(card), "--settings", str(settings)]
@@ -249,7 +271,13 @@ def claude_launch(hub: Hub, team_file: Path, role: str, out: Path,
     # replace the program while the others run it, and leaves a broken install behind.
     # ENABLE_TOOL_SEARCH=false: the org tools are there from the start; deferred, each first use cost a
     # ToolSearch step (seen: three in one short task).
-    env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "DISABLE_AUTOUPDATER": "1", "ENABLE_TOOL_SEARCH": "false"}
+    # A wait_for_messages call is a quiet wait by design. Claude Code moves a tool call still running after
+    # 2 minutes to the background (seen: the leader called it again every 2 minutes - a model call each -
+    # with four waits piling up, each able to take the result), and aborts one silent for 30 minutes (the
+    # default wait is 30 minutes): neither for an agent's own org tools.
+    env = {"MCP_TOOL_TIMEOUT": str(WAIT_LIMIT * 1000), "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
+           "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT": str(WAIT_LIMIT * 1000),
+           "DISABLE_AUTOUPDATER": "1", "ENABLE_TOOL_SEARCH": "false"}
     return Launch(role, "claude", "claude", cli, env)
 
 

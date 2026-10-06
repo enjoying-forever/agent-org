@@ -173,14 +173,14 @@ def test_a_folder_lease_covers_every_file_in_it(hub, team):
     assert lease.pattern and lease.reason == "task #7"
     assert worker.can_write("src/api/users.py")
     assert not hub.session("tech-lead").can_write("src/api/users.py")
-    with pytest.raises(LockConflict, match="being written by worker-a for task #7"):
+    with pytest.raises(LockConflict, match=r"being written by worker-a \(task #\d+\)"):
         hub.session("tech-lead").claim("src/api/users.py")
     with pytest.raises(LockConflict):
         hub.session("tech-lead").claim("src/*")  # overlaps the folder
     hub.session("tech-lead").claim("src/web/app.py")  # elsewhere is fine
     denied = hooks.on_pre_edit(hub.session("tech-lead"), {"tool_name": "Edit", "cwd": str(team.project_root),
                                                           "tool_input": {"file_path": "src/api/users.py"}})
-    assert "its lease on src/api/* covers it" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "whose lease on src/api/* covers it" in denied["hookSpecificOutput"]["permissionDecisionReason"]
     with pytest.raises(HubError, match="covered by worker-a's lease on src/api/\\*"):
         worker.release("src/api/users.py")
     worker.release("src/api/*")

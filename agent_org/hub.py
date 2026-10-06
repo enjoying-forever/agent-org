@@ -964,6 +964,8 @@ class RoleSession:
             raise HubError(f"there is already a '{name}' in the team")
         if harness not in HARNESSES:
             raise HubError(f"harness must be one of {list(HARNESSES)}")
+        if asks_owner_for_everything(harness, model):
+            raise HubError(NO_HAIKU)
         if len(self.hub.base_team.roles) >= team.settings.max_agents:
             raise HubError(f"the team already has {team.settings.max_agents} agents, the most the owner allows; "
                            "let one go first, or ask the owner")
@@ -1001,6 +1003,8 @@ class RoleSession:
             raise PermissionDenied(f"{name} can only move under you or someone below you")
         if write_scope is not None:
             self._scope_allowed(team, write_scope)
+        if model is not None and asks_owner_for_everything(team.roles[name].harness, model):
+            raise HubError(NO_HAIKU)
         what = {"duties": duties, "model": model, "effort": effort, "write_scope": write_scope,
                 "superior": superior}
         what = {k: v for k, v in what.items() if v is not None}
@@ -1193,12 +1197,16 @@ class RoleSession:
             reason = f"task #{task.id}"
         lock = self.store.claim(key, rel, self.name, pattern=is_pattern(str(path)), reason=reason.strip()[:200])
         if lock.owner != self.name:
-            why = f" for {lock.reason}" if lock.reason else ""
-            raise LockConflict(f"{lock.path} is being written by {lock.owner}{why}")
+            raise LockConflict(f"{lock.path} is being written by {self.held_by(lock)}")
         if not lock.pattern:
             self.note_edit(rel)
         self.hub.event("file", self.name, f"took {rel}" + (f" ({lock.reason})" if lock.reason else ""))
         return lock
+
+    def held_by(self, lock: Lock) -> str:
+        """'worker-b (task #12)', or 'the owner (...)' - whom an agent would take 'you' for."""
+        who = "the owner" if lock.owner == self.hub.base_team.owner else lock.owner
+        return who + (f" ({lock.reason})" if lock.reason else "")
 
     def release(self, path: str | Path) -> Lock:
         """Release a lease. A consultant's release hands the file back to the agent it helps."""
@@ -1336,6 +1344,16 @@ def describe_stuck(info: dict) -> str:
         fmt = "%H:%M" if until - time.time() < 20 * 3600 else "%b %d %H:%M"
         return f"out of its usage limit until {time.strftime(fmt, time.localtime(until))}"
     return f"stopped by an API error: {str(info.get('text', ''))[:120]}"
+
+
+def asks_owner_for_everything(harness: str, model: str) -> bool:
+    """Claude Code runs Haiku without auto mode (it does not support it): such an agent stops and asks
+    the owner before every edit and command (seen: a Haiku worker sat at "Do you want to create ...?")."""
+    return harness == "claude" and "haiku" in (model or "").lower()
+
+
+NO_HAIKU = ("Claude Haiku has no auto mode, so that agent would stop and ask the owner before every edit and "
+            "command. Use sonnet, or a cheap model of another program.")
 
 
 def _sentence(text: str) -> str:
