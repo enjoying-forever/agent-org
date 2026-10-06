@@ -58,7 +58,12 @@ from the page. Memory with GPU acceleration off: about 126 MB private over 4 pro
 Not run live yet: Codex (its new hook command needs the owner's one-time "Trust all"), Grok (installing
 its hooks rewrites ~/.grok/hooks), Antigravity (replaces the user-level plugin), DeepSeek.
 
-To do before release:
-- A hook process (Codex, Grok, Antigravity per step; Claude only at turn end) takes ~590 ms here
-  against ~340 ms for an empty Node: 86 ms is the work, the rest is loading many module files.
-  Bundle src/ into one file per entry point when packaging.
+Hook speed (a hook process runs on every tool step of Codex, Grok and Antigravity; Claude's run inside its
+tool server): about 190 ms each, on Node or on Electron as Node, against 55-65 ms for an empty start.
+Bundling into one file (esbuild, tried) saves about 50 ms more; the rest is the work itself (the database,
+team.yaml). Not worth a bundler for now.
+
+Before this branch becomes main:
+- Live runs on Codex (the new hook command needs the owner's one-time "Trust all"), Grok (agent-org
+  rewrites ~/.grok/hooks/agent-org.json for the new command), Antigravity (it replaces the user-level
+  plugin) and DeepSeek. Each changes something of the owner's, so the owner starts those.
