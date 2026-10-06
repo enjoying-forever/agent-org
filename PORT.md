@@ -24,7 +24,7 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | sessions.py | src/sessions.ts | (sessions tests need launch) |
 | usage.py | src/usage.ts | usage.test.ts (DeepSeek one waits for runview) |
 | hooks.py + org_hook.py | src/hooks.ts, src/org_hook.ts | hooks.test.ts |
-| mcp_server.py | | |
+| mcp_server.py | src/mcp_server.ts, src/org_server.ts | mcp_server.test.ts (launcher hooks in via `main(argv, launcher)`) |
 | presets.py | src/presets.ts | presets.test.ts |
 | templates.py | src/templates.ts | (ui tests) |
 | launch.py | | |

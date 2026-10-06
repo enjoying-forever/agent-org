@@ -4,6 +4,7 @@ import { lawText, type RoleSession } from './hub.ts';
 import { describe } from './verify.ts';
 
 export const SERVER_NAME = 'org';
+export const HOOK_TOOL = 'agent_org_hook'; // answered by an agent's org tool server, which lists it to no model
 const RECENT = 12; // messages recalled in "where you left off" (about open work)
 
 /** `resumed`: for a conversation that is continued, which has its own messages already. */
