@@ -25,7 +25,7 @@ def test_ordinary_files_are_not(rel):
     "git push", "git push --force origin main", "cd x && git push -u origin HEAD",
     "rm -rf /", "rm -rf ~", "sudo rm -fr /*", "rd /s /q C:\\", "Remove-Item -Recurse -Force C:\\",
     "Remove-Item -Recurse -Force ~", "format D:", "shutdown /s /t 0", "mkfs.ext4 /dev/sda1",
-    "dd if=/dev/zero of=/dev/sda", "rm -rf E:/work/other", "Remove-Item -Recurse -Force C:\\Users\\qiu\\Documents",
+    "dd if=/dev/zero of=/dev/sda", "rm -rf E:/work/other", "Remove-Item -Recurse -Force C:\\Users\\me\\Documents",
     "python -c \"import shutil; shutil.rmtree('D:/data')\"",
 ])
 def test_dangerous_commands_are_refused(command):
