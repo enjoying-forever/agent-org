@@ -29,6 +29,9 @@ rem 2. The packages, and the compiled code. A proxy in HTTPS_PROXY is used for t
 set "NODE_USE_ENV_PROXY=1"
 echo  Installing the packages ^(Electron, node-pty, yaml, smol-toml^) ...
 call npm install --no-fund --no-audit --loglevel=error || goto :failed
+rem Electron's own program comes separately (once; it stays in a cache for later installs).
+echo  Getting Electron ^(about 110 MB the first time^) ...
+node "%HERE%node_modules\electron\install.js" || goto :failed
 echo  Building ...
 call npm run --silent build || goto :failed
 
