@@ -92,7 +92,7 @@ class Waker:
 
     def __init__(self) -> None:
         self._typed_at: dict[int, float] = {}  # terminal id -> when it last got a line
-        self._tries: dict[int, tuple[float | None, int]] = {}  # terminal id -> (mail it was woken for, times)
+        self._tries: dict[int, tuple[int | None, int]] = {}  # terminal id -> (oldest mail id it was woken for, times)
         self._started: set[int] = set()  # terminals already checked for unfinished work
 
     def tick(self, hub: Hub, host: TerminalHost, now: float | None = None) -> list[str]:
@@ -111,9 +111,9 @@ class Waker:
                 continue
             if getattr(term, "unsent", False) and now - term.last_input < UNSENT:
                 continue
-            since = unread_since.get(name)
+            since, oldest = unread_since.get(name, (None, None))
             woken_for, times = self._tries.get(term.id, (None, 0))
-            if since != woken_for:
+            if oldest != woken_for:
                 times = 0  # other mail than last time: it did read what it was woken for
             if now - self._typed_at.get(term.id, 0.0) < min(AGAIN * 2 ** times, MOST):
                 continue
@@ -129,7 +129,7 @@ class Waker:
                 self._started.discard(term.id)  # look again once it is answered
                 continue
             self._typed_at[term.id] = now
-            self._tries[term.id] = (since, times + 1)
+            self._tries[term.id] = (oldest, times + 1)
             type_line(term, line)
             hub.event("agent", name, "woken: " + ("unfinished work after a restart" if "restarted" in line
                                                   else "new messages"))

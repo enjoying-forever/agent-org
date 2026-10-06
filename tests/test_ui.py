@@ -535,3 +535,10 @@ def test_state_shows_each_agents_usage_over_all_its_conversations(server, monkey
     monkeypatch.setattr(usage_mod, "usage", lambda h, sid: usage_mod.Usage(tokens_in=counts[sid], messages=1))
     role = next(r for r in server.ok("/api/state")["roles"] if r["name"] == "leader")
     assert (role["usage"]["tokens_in"], role["usage"]["conversations"]) == (150, 2)
+
+
+def test_launch_says_plainly_when_no_agent_can_start(server, monkeypatch):
+    from agent_org import launch as launch_mod
+    monkeypatch.setattr(launch_mod.shutil, "which", lambda name: None if name == "pwsh" else name)
+    code, body = server.request("/api/launch", {})
+    assert code == 400 and "PowerShell 7" in body["error"] and "winget install Microsoft.PowerShell" in body["error"]

@@ -269,3 +269,15 @@ def test_deepseek_starts_at_once_only_with_unfinished_tasks(hub, team_file, tmp_
     hub.session("tech-lead").assign_task("worker-a", "Fix the parser")
     hub.session("worker-a").read_inbox()
     assert wake.main(args) == 0  # unfinished work: run now
+
+
+def test_new_mail_sent_within_one_clock_tick_still_counts_as_new(hub):
+    # Windows' clock ticks every 15.6 ms: two messages can share a send time (seen: a flaky test)
+    first = hub.session("leader").send("researcher", "look into X")
+    w, now = waker.Waker(), later()
+    term = FakeTerm(now)
+    assert w.tick(hub, FakeHost(researcher=term), now) == ["researcher"]
+    hub.session("researcher").read_inbox()
+    second = hub.session("leader").send("researcher", "and Y")
+    hub.store._db.execute("UPDATE messages SET sent_at = ? WHERE id = ?", (first.sent_at, second.id))
+    assert w.tick(hub, FakeHost(researcher=term), now + waker.AGAIN) == ["researcher"]  # new mail: no back-off

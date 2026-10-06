@@ -341,6 +341,7 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
   font: 11.5px/1.4 var(--font-code); color: var(--faint); background: var(--sheet); }
 .pane-status .hot { color: var(--accent-ink); }
 .pane-status .bad { color: var(--danger); }
+.warn-text { color: var(--danger); }
 
 /* status bits shared by rail, panes and drawer */
 .run { display: inline-flex; align-items: center; gap: 5px; }

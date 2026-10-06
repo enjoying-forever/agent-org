@@ -788,13 +788,30 @@ def prepare(hub: Hub, team_file: Path, roles: list[str], owner_tab: bool, force:
     return tabs, skipped
 
 
+PWSH_MISSING = ("Agents start through PowerShell 7, which is not installed on this computer. Install it (in a "
+                "terminal: winget install Microsoft.PowerShell), then start agent-org again.")
+WT_MISSING = ("Agents open in Windows Terminal tabs here, and it is not installed. Install 'Windows Terminal' "
+              "from the Microsoft Store, then start agent-org again.")
+
+
+def cannot_start(in_window: bool) -> str:
+    """Why no agent can start on this computer ('' if they can). Each runs its start script in PowerShell 7
+    (Windows PowerShell 5.1 would mangle the quoted settings Codex is given); outside the window, in a
+    Windows Terminal tab."""
+    if shutil.which("pwsh") is None:
+        return PWSH_MISSING
+    if not in_window and shutil.which("wt") is None:
+        return WT_MISSING
+    return ""
+
+
 def open_tab(tab: list[str]) -> None:
     if os.environ.get("PYTEST_CURRENT_TEST"):  # a test must never start real agents
         raise HubError("refusing to open a real terminal tab inside a test")
-    wt = shutil.which("wt")
-    if wt is None or shutil.which("pwsh") is None:
-        raise HubError("needs Windows Terminal (wt) and PowerShell 7 (pwsh) on PATH")
-    subprocess.run([wt, *tab[1:]], check=True, stdin=subprocess.DEVNULL)
+    why = cannot_start(in_window=False)
+    if why:
+        raise HubError(why)
+    subprocess.run([shutil.which("wt") or "wt", *tab[1:]], check=True, stdin=subprocess.DEVNULL)
 
 
 HARNESS_PROGRAMS = {"claude.exe", "codex.exe", "grok.exe", "agy.exe", "node.exe", "deepseek harness.exe"}

@@ -236,6 +236,9 @@ class App:
         team_file, role = Path(_str(body, "team")).resolve(), _str(body, "role")
         if not self.in_window or (team_file not in self._hosts and team_file != self.team_file):
             raise ApiError("that team's agents do not run in this window", HTTPStatus.CONFLICT)
+        why = launch.cannot_start(in_window=True)
+        if why:
+            raise ApiError(why, HTTPStatus.CONFLICT)
         own = team_file == self.team_file and self._hub is not None
         hub = self._hub if own else Hub.open(team_file)
         try:
@@ -316,6 +319,8 @@ class App:
     def _autostart(self, hub: Hub, problems: list[watchdog.Problem]) -> None:
         """Start agents that have work but are not running (Gas Town's 'sling'), within the cap,
         and restart agents left idle at their prompt by a usage limit that has reset or an API error."""
+        if launch.cannot_start(self.in_window):
+            return  # nothing could start (the Launch button says why)
         now = time.time()
         for p in problems:
             if p.kind not in ("stopped", "stuck") or now - self._autostarted.get(p.role, 0) < AUTOSTART_GAP:
@@ -644,6 +649,9 @@ class App:
         role = _str(body, "role")
         if role not in self.hub.team.roles:
             raise ApiError(f"'{role}' is not a role")
+        why = launch.cannot_start(self.in_window)
+        if why:
+            raise ApiError(why)  # before stopping it: it could not come back
         stopped = launch.stop_role(self.hub, role)
         result = self.launch({"roles": [role]})
         self.hub.event("agent", role, "restarted by the owner")
@@ -674,6 +682,9 @@ class App:
         for name in names:
             if name not in team.roles:
                 raise ApiError(f"'{name}' is not a role")
+        why = launch.cannot_start(self.in_window)
+        if why:
+            raise ApiError(why)
         tabs, skipped = launch.prepare(self.hub, self.team_file, names, owner_tab=False,
                                        force=bool(body.get("force")), fresh=bool(body.get("fresh")),
                                        limit=self.hub.base_team.settings.max_running, quiet=self.in_window)

@@ -107,3 +107,31 @@ def test_the_antigravity_sign_in_test_runs_no_model(monkeypatch):
     checks = {c.name: c for c in doctor.check_antigravity({"antigravity"})}
     assert checks["Antigravity sign-in"].ok
     assert ["models"] in ran and not any("-p" in c for c in ran)  # it lists models; it never prompts one
+
+
+def test_with_no_team_open_any_one_program_will_do(monkeypatch):
+    present = {"claude"}
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: name if name in present | {"pwsh"} else None)
+    monkeypatch.setattr(doctor, "run", lambda command, timeout=40: (0, "1.0"))
+    monkeypatch.setattr(launch, "deepseek_command", lambda: None)
+    checks = {c.name: c for c in doctor.run_checks()}
+    assert checks["Claude Code"].ok and not checks["Codex"].ok
+    assert all(not c.needed for name, c in checks.items() if name in ("Codex", "Grok", "Antigravity"))  # no red
+    assert "Agent programs" not in checks
+    present.clear()  # nothing at all: that one is a real problem
+    checks = {c.name: c for c in doctor.run_checks()}
+    assert not checks["Agent programs"].ok and checks["Agent programs"].needed
+
+
+def test_no_agent_starts_without_powershell_7(monkeypatch):
+    monkeypatch.setattr(launch.shutil, "which", lambda name: None if name == "pwsh" else name)
+    assert "winget install Microsoft.PowerShell" in launch.cannot_start(in_window=True)
+    monkeypatch.setattr(launch.shutil, "which", lambda name: None if name == "wt" else name)
+    assert launch.cannot_start(in_window=True) == ""  # the window hosts the agents itself
+    assert "Windows Terminal" in launch.cannot_start(in_window=False)
+
+
+def test_each_starting_team_says_which_programs_it_uses():
+    from agent_org import templates
+    programs = {t["id"]: t["programs"] for t in templates.catalogue() if not t["mine"]}
+    assert programs["solo"] == ["claude"] and programs["pair"] == ["claude", "codex"]

@@ -5,6 +5,36 @@ together like a small company. You set up who reports to whom; the leader plans,
 and reports back to you. Every agent runs in its own live terminal inside the agent-org window,
 with the subscription you already have, and you watch, type to and steer all of them in one place.
 
+## What you need
+
+- **Windows 10 or 11.**
+- **Python 3.11 or newer** ([python.org](https://www.python.org/downloads/), or
+  `winget install Python.Python.3.12`).
+- **PowerShell 7** - every agent starts through it (`winget install Microsoft.PowerShell`;
+  the PowerShell that comes with Windows is version 5 and is not enough).
+- **At least one agent program, signed in** - each runs on your own subscription:
+  - [Claude Code](https://code.claude.com/docs): `npm install -g @anthropic-ai/claude-code`,
+    then run `claude` once and log in. Claude agents need Sonnet, Opus or Fable (Haiku has no
+    auto mode, so it would ask you before every step).
+  - [Codex](https://github.com/openai/codex): `npm install -g @openai/codex`, then `codex` once to log in.
+  - Grok Build (`grok login`), the Antigravity CLI (`agy`, from antigravity.google) or
+    DeepSeek Harness.
+
+  The npm commands need [Node.js](https://nodejs.org). A team can mix programs: the
+  ready-made teams say which ones they use, and the *Setup check* says what is missing.
+
+## Install
+
+1. Put this folder where you want to keep it (download it, or `git clone` it).
+2. **Double-click `install.cmd`.** It makes a private Python environment in the folder
+   (`.venv`) with the four small packages agent-org needs (PyYAML, pywinpty, pywebview,
+   tzdata), offers to install PowerShell 7 if it is missing, and ends with the setup check.
+   Run it again after updating agent-org; it is safe to repeat.
+
+To use a Python you already have instead, put the full path of its `python.exe` on one line
+in a file `python-path.txt` next to `agent-org-ui.cmd` (or set `AGENT_ORG_PYTHON`), and install
+the packages there: `python -m pip install -r requirements.txt`.
+
 ## Quick start
 
 1. **Double-click `agent-org-ui.cmd`.** The agent-org window opens. (Keep the small black
@@ -402,9 +432,9 @@ the work.
 
 ## For developers
 
-Everything runs in the `formal` conda environment with PyYAML, plus `pywinpty` (the agents'
-terminals) and `pywebview` (the window); without those two, agent-org falls back to terminal
-tabs and the browser. xterm.js (MIT, see `ui_static/xterm-LICENSE.txt`) is bundled in
+It runs on Python 3.11+ with the packages in `requirements.txt`: PyYAML, plus `pywinpty` (the
+agents' terminals) and `pywebview` (the window) - without those two, agent-org falls back to
+Windows Terminal tabs and the browser - and `tzdata`. For the tests: `pip install pytest`. xterm.js (MIT, see `ui_static/xterm-LICENSE.txt`) is bundled in
 `ui_static`. From this folder:
 
 | Command | What it does |
@@ -413,6 +443,7 @@ tabs and the browser. xterm.js (MIT, see `ui_static/xterm-LICENSE.txt`) is bundl
 | `python -m agent_org.launch --team team.yaml [roles] [--fresh] [--force] [--dry-run]` | open agent tabs from the command line |
 | `python -m agent_org.launch --install-grok-hooks` | install the hooks for Grok |
 | `python -m agent_org.cli --team team.yaml [--as ROLE] tree/send/inbox/view/claim/...` | the hub from the command line |
+| `python -m agent_org.doctor` | the setup check, in the terminal |
 | `python -m pytest` | the tests |
 
 How it fits together:

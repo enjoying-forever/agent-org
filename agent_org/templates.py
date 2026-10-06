@@ -163,8 +163,14 @@ def team_config(template: str) -> dict[str, Any]:
 def catalogue() -> list[dict[str, Any]]:
     default = default_template()
     mine = [{"id": key, "title": key[len(MINE):], "summary": "Your saved team.",
-             "roles": ", ".join(config["roles"]), "mine": True, "default": key == default}
-            for key, config in _saved().items()]
+             "roles": ", ".join(config["roles"]), "programs": _programs(config), "mine": True,
+             "default": key == default} for key, config in _saved().items()]
     built_in = [{"id": key, "title": t["title"], "summary": t["summary"], "roles": ", ".join(t["roles"]),
-                 "mine": False, "default": key == default} for key, t in TEMPLATES.items()]
+                 "programs": _programs(t), "mine": False, "default": key == default} for key, t in TEMPLATES.items()]
     return mine + built_in
+
+
+def _programs(config: dict[str, Any]) -> list[str]:
+    """The programs a team's roles run on, in order of first use (its consultants come only when called)."""
+    roles = config.get("roles") or {}
+    return list(dict.fromkeys(str(r.get("harness", "")) for r in roles.values() if isinstance(r, dict) and r.get("harness")))

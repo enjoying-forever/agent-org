@@ -252,13 +252,33 @@ async function renderHome() {
     h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen, onchange: () => renderBuilder() }),
     h('span', {}, h('b', {}, t.title), t.default ? h('span', { class: 'tag' }, 'default') : null,
       h('span', { class: 'muted' }, `  ${t.roles}`)),
-    h('small', {}, t.summary,
+    h('small', {}, t.summary, ' ', programsNote(t.programs),
       !t.default && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('default', t); } },
         'Make default'),
       t.mine && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('delete', t); } },
         'Delete')))));
   renderChecks($('#home-checks'));
   renderBuilder();
+}
+
+/** "Uses Claude Code, OpenAI Codex." - and, once the Setup check has looked, which of them this computer lacks. */
+function programsNote(programs) {
+  if (!programs || !programs.length) return null;
+  const note = h('span', { class: 'programs', 'data-programs': programs.join(',') },
+    h('span', { class: 'muted' }, `Uses ${programs.map((p) => PROGRAM[p] || p).join(', ')}.`),
+    h('span', { class: 'warn-text missing' }), ' ');
+  markMissing(note);
+  return note;
+}
+
+// The Setup check's name for each program (see agent_org/doctor.py).
+const CHECK_NAME = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', antigravity: 'Antigravity', deepseek: 'DeepSeek Harness' };
+let MISSING = new Set(); // programs the last Setup check found not installed
+
+function markMissing(note) {
+  const missing = note.dataset.programs.split(',').filter((p) => MISSING.has(p)).map((p) => PROGRAM[p] || p);
+  note.querySelector('.missing').textContent = missing.length
+    ? ` ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not installed here: see the Setup check.` : '';
 }
 
 async function templateAction(kind, t) {
@@ -304,6 +324,9 @@ async function renderChecks(box, fresh = false) {
   try { ({ checks } = await api(`/api/checks${fresh ? '?fresh=1' : ''}`)); } catch (e) {
     box.replaceChildren(h('span', { class: 'muted' }, e.message)); return;
   }
+  MISSING = new Set(Object.keys(CHECK_NAME).filter((p) => checks.some((c) => c.name === CHECK_NAME[p] && !c.ok
+    && c.detail === 'not installed')));
+  document.querySelectorAll('.programs[data-programs]').forEach(markMissing);
   box.replaceChildren(
     ...checks.map((c) => h('div', { class: `check ${c.ok ? 'ok' : c.needed ? 'bad' : 'warn'}` },
       h('span', { class: 'mark' }, c.ok ? '✓' : c.needed ? '✗' : '!'),

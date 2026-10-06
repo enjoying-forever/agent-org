@@ -137,21 +137,66 @@ def check_deepseek(harnesses: set[str]) -> Check:
     return Check("DeepSeek Harness", True, f"dsh {first_line(out)}", "", needed)
 
 
+def in_window() -> bool:
+    from . import terminals  # noqa: PLC0415
+    return terminals.available() and not os.environ.get("AGENT_ORG_TABS")
+
+
+def check_python() -> list[Check]:
+    """The Python agent-org runs on, and the packages its window needs (what install.cmd sets up)."""
+    import importlib.util  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+    fix = "Run install.cmd in the agent-org folder (or: python -m pip install -r requirements.txt)"
+    version = ".".join(map(str, sys.version_info[:3]))
+    checks = [Check("Python", sys.version_info >= (3, 11), f"{version} ({sys.executable})",
+                    "" if sys.version_info >= (3, 11) else "agent-org needs Python 3.11 or newer")]
+    missing = [name for name, module in (("pywinpty", "winpty"), ("pywebview", "webview"))
+               if importlib.util.find_spec(module) is None]
+    checks.append(Check("Python packages", not missing,
+                        "all there" if not missing else f"missing {', '.join(missing)}: without them agents open "
+                        "in Windows Terminal tabs and agent-org in your browser", "" if not missing else fix))
+    return checks
+
+
 def run_checks(harnesses: set[str] | None = None) -> list[Check]:
     """All checks, in parallel. `harnesses`: the ones the open team uses (all if None)."""
-    used = set(harnesses) if harnesses is not None else {"claude", "codex", "grok"}  # agy: only if used
-    basics = [
-        Check("Windows Terminal", shutil.which("wt") is not None,
-              "found" if shutil.which("wt") else "not found",
-              "Install 'Windows Terminal' from the Microsoft Store."),
-        Check("PowerShell 7", shutil.which("pwsh") is not None,
-              "found" if shutil.which("pwsh") else "not found",
-              "Install it: winget install Microsoft.PowerShell"),
-    ]
+    # With no team open nothing is required yet: any one agent program will do.
+    used = set(harnesses) if harnesses is not None else set()
+    basics = [*check_python(),
+              Check("PowerShell 7", shutil.which("pwsh") is not None,
+                    "found" if shutil.which("pwsh") else "not found: no agent can start without it",
+                    "Install it: winget install Microsoft.PowerShell")]
+    if not in_window():  # agents run in Windows Terminal tabs only when the window cannot host them
+        basics.append(Check("Windows Terminal", shutil.which("wt") is not None,
+                            "found" if shutil.which("wt") else "not found",
+                            "Install 'Windows Terminal' from the Microsoft Store."))
     with ThreadPoolExecutor(5) as pool:
         claude = pool.submit(check_claude, used)
         codex = pool.submit(check_codex, used)
         grok = pool.submit(check_grok, used)
         antigravity = pool.submit(check_antigravity, used)
         deepseek = pool.submit(check_deepseek, used)
-        return basics + [claude.result(), codex.result(), *grok.result(), *antigravity.result(), deepseek.result()]
+        programs = [claude.result(), codex.result(), *grok.result(), *antigravity.result(), deepseek.result()]
+    if not any(c.ok for c in programs if c.name in AGENT_PROGRAMS):
+        programs.append(Check("Agent programs", False, "none is installed: agent-org needs at least one",
+                              "Install Claude Code, Codex, Grok, Antigravity or DeepSeek Harness (see above), then "
+                              "sign in to it once in a terminal."))
+    return basics + programs
+
+
+AGENT_PROGRAMS = ("Claude Code", "Codex", "Grok", "Antigravity", "DeepSeek Harness")
+
+
+def main() -> int:
+    """Print the setup check (install.cmd ends with it)."""
+    checks = run_checks()
+    for c in checks:
+        mark = "OK " if c.ok else ("!! " if c.needed else "-- ")
+        print(f"  {mark}{c.name}: {c.detail}")
+        if not c.ok and c.fix:
+            print(f"       {c.fix}")
+    return 0 if all(c.ok or not c.needed for c in checks) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -409,12 +409,14 @@ class Store:
         return {r[0]: r[1] for r in rows}
 
     @_locked
-    def unread_since(self) -> dict[str, float]:
-        """When each recipient's oldest unread message that wakes it was sent."""
+    def unread_since(self) -> dict[str, tuple[float, int]]:
+        """Each recipient's oldest unread message that wakes it: when it was sent, and its id (which tells
+        one message from another: on Windows two sent within the clock's 15.6 ms tick share a time)."""
         rows = self._db.execute(
-            "SELECT recipient, MIN(sent_at) FROM messages WHERE read_at IS NULL AND kind != 'note' GROUP BY recipient"
+            "SELECT recipient, MIN(sent_at), MIN(id) FROM messages WHERE read_at IS NULL AND kind != 'note'"
+            " GROUP BY recipient"
         ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        return {r[0]: (r[1], r[2]) for r in rows}
 
     @_locked
     def messages_after(self, after: int, limit: int = 300) -> list[Message]:
