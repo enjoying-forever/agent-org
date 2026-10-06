@@ -18,7 +18,14 @@ const SCAN_BYTES = 400_000; // how far into a conversation file to look for the 
 const SCAN_DAYS = 45; // how old a Codex conversation may be to still be found by searching
 
 /** The user's home folder (tests point it elsewhere). */
-export const where = { home: (): string => os.homedir() };
+export const where = {
+  home: (): string => os.homedir(),
+  /** When a file was created (Windows keeps it; elsewhere the last change of its metadata). */
+  born(file: string): number {
+    const st = statSync(file);
+    return (st.birthtimeMs || st.ctimeMs) / 1000;
+  },
+};
 
 export function home(): string {
   return where.home();
@@ -111,10 +118,9 @@ export function markers(role: string): string[] {
   return [`You are the '${role}' agent in a team`, `you are back as '${role}'`, `agent-org: '${role}', `];
 }
 
-/** When a file was created (Windows keeps it; elsewhere the last change of its metadata). */
+/** When a file was created. */
 export function born(file: string): number {
-  const st = statSync(file);
-  return (st.birthtimeMs || st.ctimeMs) / 1000;
+  return where.born(file);
 }
 
 /** Python's urllib.parse.quote(text, safe=''): Grok names project folders this way. */

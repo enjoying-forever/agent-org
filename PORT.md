@@ -21,17 +21,17 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 | gitops.py | src/gitops.ts | history, branches |
 | hub.py | src/hub.ts | hub, law, law_v2, consultants, team_changes, failover |
 | cards.py | src/cards.ts | law, consultants, presets |
-| sessions.py | src/sessions.ts | (sessions tests need launch) |
+| sessions.py | src/sessions.ts | sessions.test.ts |
 | usage.py | src/usage.ts | usage.test.ts (DeepSeek one waits for runview) |
 | hooks.py + org_hook.py | src/hooks.ts, src/org_hook.ts | hooks.test.ts |
 | mcp_server.py | src/mcp_server.ts, src/org_server.ts | mcp_server.test.ts (launcher hooks in via `main(argv, launcher)`) |
 | presets.py | src/presets.ts | presets.test.ts |
 | templates.py | src/templates.ts | (ui tests) |
-| launch.py | | |
+| launch.py | src/launch.ts (+ src/runtime.ts: own entry points, which, registry) | launch.test.ts |
 | watchdog.py | src/watchdog.ts | law_v2, failover |
-| waker.py | | |
-| wake.py, runview.py (DeepSeek) | | |
-| terminals.py | | |
+| waker.py | src/waker.ts | waker.test.ts |
+| wake.py, runview.py (DeepSeek) | src/wake.ts, src/runview.ts | launch, waker |
+| terminals.py | src/terminals.ts (node-pty) | terminals.test.ts (window parts wait for ui) |
 | doctor.py | | |
 | cli.py | | |
 | ui.py (server) | | |
@@ -41,6 +41,12 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 Found while porting:
 - The `yaml` package's YAML 1.1 mode reads a lone `.` as NaN: team files are parsed as YAML 1.2.
 - Time zones come from Intl (every JavaScript engine has them): no tzdata package.
+- Agent-org's own programs (tool server, hooks, DeepSeek's waiter) run on the Node that runs agent-org:
+  inside the app that is Electron with ELECTRON_RUN_AS_NODE=1. Hook commands are plain command lines run
+  by several shells, so inside the app they go through ~/.agent-org/bin/org_hook.cmd, which sets it.
+- node-pty ends a terminal asynchronously: TerminalHost.closeAll returns a promise for the programs' end.
+- A new program's environment: agent-org's own minus what its starter set (Claude Code's, Electron's),
+  with the registry's current variables and PATH (no CreateEnvironmentBlock without native code).
 
 To do before release:
 - A hook process (Codex, Grok, Antigravity per step; Claude only at turn end) takes ~590 ms here

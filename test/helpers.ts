@@ -5,11 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import { Hub } from '../src/hub.ts';
+import * as launch from '../src/launch.ts';
 import { Store } from '../src/store.ts';
 import { dumpYaml, type Role, Team } from '../src/team.ts';
 
-// Never touch the real ~/.agent-org from tests (saved teams, roles, recent list).
+// Never touch the real ~/.agent-org from tests (saved teams, roles, recent list), nor the real ~/.grok hooks,
+// and never start real agents (also in programs a test starts).
 process.env.AGENT_ORG_HOME = mkdtempSync(path.join(os.tmpdir(), 'agent-org-home-'));
+process.env.AGENT_ORG_TESTING = '1';
+launch.paths.grokHooksFile = () => path.join(process.env.AGENT_ORG_HOME ?? '', '.grok', 'hooks', 'agent-org.json');
 
 // you
 // └── leader
@@ -45,7 +49,15 @@ export function cleanup(t: TestContext, fn: () => unknown): void {
     const fresh: (() => unknown)[] = [];
     stacks.set(t, fresh);
     t.after(async () => {
-      for (const step of fresh.reverse()) await step();
+      let failed: unknown = null;
+      for (const step of fresh.reverse()) { // every step, even after one fails: a left-over process would keep the tests running
+        try {
+          await step();
+        } catch (e) {
+          failed ??= e;
+        }
+      }
+      if (failed !== null) throw failed;
     });
     stack = fresh;
   }

@@ -6,7 +6,9 @@
   "private": true,
   "type": "module",
   "main": "dist/electron/main.js",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsc -p .",
     "typecheck": "tsc -p . --noEmit",
@@ -15,6 +17,7 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.1.0",
+    "smol-toml": "^1.9.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {
