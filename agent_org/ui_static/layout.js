@@ -342,10 +342,9 @@ function renderLayoutMenu() {
     h('hr'),
     h('button', { onclick: () => { L.cols = {}; L.rows = {}; saveLayout(); applyLayout(); $('#layout-menu').open = false; } },
       h('span', { class: 'check' }), 'Equal sizes'),
-    h('button', { disabled: !L.order?.length && !L.main, onclick: () => { L.order = []; L.main = null; saveLayout(); renderPanes(); $('#layout-menu').open = false; } },
-      h('span', { class: 'check' }), 'Team order'),
-    h('button', { disabled: !L.hidden?.length, onclick: () => { showAllPanes(); $('#layout-menu').open = false; } },
-      h('span', { class: 'check' }), L.hidden?.length ? `Show closed panes (${L.hidden.length})` : 'No closed panes'));
+    // (No "Team order": it only undid moving panes by their titles, which dragging back does too.)
+    L.hidden?.length ? h('button', { onclick: () => { showAllPanes(); $('#layout-menu').open = false; } },
+      h('span', { class: 'check' }), `Show closed panes (${L.hidden.length})`) : null);
 }
 
 // ---------- the first-run steps: one button in the title bar ----------
