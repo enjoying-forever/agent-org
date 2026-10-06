@@ -788,11 +788,13 @@ class Store:
 
     @_locked
     def unnoticed(self, role: str) -> list[Message]:
-        """Unread messages for `role` it hasn't been told about yet; marks them as told."""
+        """Unread messages for `role` it hasn't been told about yet; marks them as told. Notes are left
+        out: they wait for the next read_inbox (a mention would cost the agent a call for no news)."""
         with self._transaction() as db:
             row = db.execute("SELECT last_id FROM notices WHERE role = ?", (role,)).fetchone()
             rows = db.execute(
-                "SELECT * FROM messages WHERE recipient = ? AND read_at IS NULL AND id > ? ORDER BY id",
+                "SELECT * FROM messages WHERE recipient = ? AND read_at IS NULL AND id > ? AND kind != 'note'"
+                " ORDER BY id",
                 (role, row[0] if row else 0),
             ).fetchall()
             if rows:

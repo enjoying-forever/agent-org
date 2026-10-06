@@ -106,6 +106,30 @@ def test_antigravity_usage_comes_from_its_conversation_database(home):
     assert (u.tokens_in, u.tokens_out, u.tokens_cached, u.messages, u.model) == (24343, 194, 300, 2, "gemini-3.8-flash")
 
 
+def test_antigravity_usage_counts_calls_still_in_the_write_ahead_log(home):
+    import sqlite3
+    folder = home / ".gemini" / "antigravity-cli" / "conversations"
+    folder.mkdir(parents=True)
+    db = sqlite3.connect(folder / f"{SID}.db")  # kept open, as by the running agent: nothing is checkpointed
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("CREATE TABLE gen_metadata (idx integer, data blob, size integer, PRIMARY KEY (idx))")
+    db.commit()
+
+    def call(i, tokens_in):
+        record = _pb((1, _pb((4, _pb((2, tokens_in), (3, 1))), (19, b"gemini-3.8-flash"))))
+        db.execute("INSERT INTO gen_metadata VALUES (?, ?, 0)", (i, record))
+        db.commit()
+
+    try:
+        assert usage.usage("antigravity", SID).messages == 0  # just started
+        call(0, 1000)
+        assert usage.usage("antigravity", SID).tokens_in == 1000  # (seen: stayed at 0 for a whole task)
+        call(1, 500)
+        assert usage.usage("antigravity", SID).tokens_in == 1500
+    finally:
+        db.close()
+
+
 def test_deepseek_runs_keep_their_usage_by_conversation(tmp_path, monkeypatch):
     import io
     import sys as _sys

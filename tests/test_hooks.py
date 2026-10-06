@@ -40,11 +40,35 @@ def test_stop_reminds_to_report_before_going_quiet(hub):
     assert "no answer" not in out["reason"]  # nothing owed now: straight to waiting
 
 
-def test_stop_reminds_to_release_files(hub):
+def test_an_agent_resting_with_no_task_lets_go_of_its_files(hub):
     worker = hub.session("worker-a")
     worker.claim("src/app.py")
     out = hooks.on_stop(worker, {"stop_hook_active": False}, wait=0.1, poll=0.05)
-    assert "You still hold the write lock on src/app.py" in out["reason"]
+    assert "lock" not in out["reason"]  # no reminder (it cost a model call): the hub releases them
+    assert hub.store.locks("worker-a") == []
+    task = hub.session("tech-lead").assign_task("worker-a", "Build it")
+    worker.read_inbox()
+    worker.claim("src/app.py")
+    hooks.on_stop(worker, {"stop_hook_active": True}, wait=0.1, poll=0.05)
+    assert [lock.path for lock in hub.store.locks("worker-a")] == ["src/app.py"]  # mid-task: kept
+    assert task.id
+
+
+def test_a_cancelled_task_needs_no_answer(hub):
+    worker = hub.session("worker-a")
+    task = hub.session("tech-lead").assign_task("worker-a", "Build it")
+    worker.read_inbox()
+    hub.session("tech-lead").cancel_task(task.id, "not needed")
+    worker.read_inbox()
+    out = hooks.on_stop(worker, {"stop_hook_active": False}, wait=0.1, poll=0.05)
+    assert "no answer" not in out["reason"]
+
+
+def test_delivered_mail_keeps_the_agents_task_in_its_status(hub):
+    worker = hub.session("worker-a")
+    task = hub.session("tech-lead").assign_task("worker-a", "Build the parser")
+    hooks.on_stop(worker, {"stop_hook_active": False}, wait=0.1, poll=0.05)
+    assert hub.store.get_status("worker-a").task == f"#{task.id} Build the parser"
 
 
 def test_reminders_come_once_per_turn(hub):
@@ -282,3 +306,10 @@ def test_a_crashing_handler_is_logged_not_fatal(hub, monkeypatch, capsys, tmp_pa
     assert hooks.main(["post-tool"]) == 0
     log = (tmp_path / "t" / ".agent-org" / hooks.HOOK_LOG).read_text(encoding="utf-8")
     assert "RuntimeError: something odd" in log and "worker-a post-tool" in log
+
+
+def test_a_note_is_not_announced_mid_work(hub):
+    worker = hub.session("worker-a")
+    hub.note("worker-a", "tech-lead changed your role (duties). Call my_role to see it now.")
+    assert hooks.on_post_tool(worker, {}) is None  # it comes with the next read_inbox
+    assert "changed your role" in worker.read_inbox()[0].text

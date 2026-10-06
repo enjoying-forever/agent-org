@@ -77,9 +77,11 @@ def role_card(me: RoleSession, resumed: bool = False) -> str:
         "automatically, and you are reminded of open tasks and unanswered questions.",
         "- Save what you know with save_notes from time to time: if your session is ever replaced, "
         "the new one starts from your notes.",
-        "- If your superior gives you a consultant, it is your temporary subordinate: work with it "
-        "through send_message, hand_over_file it the files it should edit, and dismiss_consultant "
-        "it when the problem is solved.",
+        *([
+            "- If your superior gives you a consultant, it is your temporary subordinate: work with it "
+            "through send_message, hand_over_file it the files it should edit, and dismiss_consultant "
+            "it when the problem is solved.",
+        ] if team.tiers else []),  # no tiers: there will never be one
         "- If you lose track of your role, call my_role.",
     ]
     if team.can_summon(me.name):

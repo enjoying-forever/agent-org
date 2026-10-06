@@ -863,6 +863,11 @@ class App:
             raise ApiError(f"'{name}' is not in team.yaml")
         if self.hub.store.online().get(name):
             raise ApiError(f"{name} is running: stop it first.")
+        # its unfinished tasks would stay open with nobody to do them (and keep their assigners waiting)
+        busy = self.hub.store.tasks(assignee=name, open_only=True)
+        if busy:
+            raise ApiError(f"{name} still has unfinished tasks ({', '.join(f'#{t.id}' for t in busy)}): move them "
+                           "to someone else or cancel them first (Tasks).")
         superior = team.roles[name].superior
 
         def change(config: dict[str, Any]) -> None:
@@ -876,6 +881,8 @@ class App:
             self.hub.edit_team(change)
         except HubError as e:
             raise ApiError(str(e)) from None
+        for lock in self.hub.store.locks(name):
+            self.hub.store.release(self.hub.lock_key(lock.path)[0])
         self.hub.event("team", team.owner, f"removed {name} from the team")
         return {"removed": name, "moved_to": superior}
 

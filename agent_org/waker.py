@@ -40,11 +40,19 @@ ASKING = re.compile("|".join([
     r"allow\s+(?:this|command|once|always)", r"\[y/n\]", r"\(y/n\)", r"press\s+enter\s+to\s+(?:continue|confirm)",
     r"waiting\s+for\s+(?:your\s+)?(?:approval|confirmation)"]), re.I)
 # ... with its choices: a question the agent only wrote in its answer must not keep it from waking.
-CHOICES = re.compile(r"(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y/n\]|\(y/n\)|\(esc\)|enter\s+to\s+(?:confirm|select|continue)",
-                     re.I | re.M)
-# A menu with one choice highlighted (Claude's ❯, Codex's ›) waits for a key, whatever it asks - an
-# update, a folder to trust: Enter would pick for you.
-MENU = re.compile(r"[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc", re.I)
+CHOICES = re.compile(r"(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y/n\]|\(y/n\)|\(esc\)|"
+                     r"enter\s+(?:to\s+)?(?:confirm|select|continue)|navigate", re.I | re.M)
+# A menu with one choice highlighted (Claude's ❯, Codex's ›, Antigravity's >) waits for a key, whatever
+# it asks - an update, a folder to trust: Enter would pick for you.
+MENU = re.compile(r"[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc|"
+                  r"(?:^|\s)[❯›>]\s*(?:yes|no)\b.{0,80}(?:navigate|enter\s+(?:to\s+)?(?:confirm|select))",
+                  re.I | re.S)
+# Whether to trust a folder (or its hooks) is the owner's decision alone: such a question blocks
+# waking whatever its choices look like (seen: Antigravity's unnumbered "> Yes, I trust this folder"
+# slipped past the checks above, and the line's Enter trusted the folder).
+TRUST = re.compile(r"do\s+you\s+trust|trust\s+(?:this|the)\s+(?:folder|directory|files|workspace|project)|"
+                   r"trust\s+all|review\s+(?:the\s+)?hooks", re.I)
+CLEARED = re.compile(r"\x1b\[[23]J|\x1bc")  # the screen was cleared: what came before is gone
 
 
 def unfinished(me: RoleSession) -> list[str]:
@@ -71,9 +79,12 @@ def wake_line(harness: str, role: str, tasks: list[str] | None = None) -> str:
 
 
 def asking(term: Terminal) -> bool:
-    data = term.chunk(max(0, term.end - TAIL))["data"]
-    text = ANSI.sub("", MOVES.sub(" ", str(data)))
-    return bool(MENU.search(text) or (ASKING.search(text) and CHOICES.search(text)))
+    data = str(term.chunk(max(0, term.end - TAIL))["data"])
+    cleared = list(CLEARED.finditer(data))
+    if cleared:
+        data = data[cleared[-1].end():]
+    text = ANSI.sub("", MOVES.sub(" ", data))
+    return bool(MENU.search(text) or TRUST.search(text) or (ASKING.search(text) and CHOICES.search(text)))
 
 
 class Waker:

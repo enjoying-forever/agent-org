@@ -533,7 +533,8 @@ function updatePane(p, r) {
   fill(p.head,
     runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'sub' }),
-    r.usage && h('span', { class: 'tok', title: usageText(r.usage) }, shortUsage(r.usage)),
+    r.usage && (totalTokens(r.usage) || r.usage.messages) > 0  // nothing used yet: no "0 msg"
+      ? h('span', { class: 'tok', title: usageText(r.usage) }, shortUsage(r.usage)) : null,
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
     r.online > 1 && h('span', { class: 'flag bad' }, `${r.online} sessions`),
     r.stuck && h('span', { class: 'flag bad', title: r.stuck.text }, r.stuck.describe),
@@ -725,9 +726,11 @@ function markOutput(p) {
 const ASKING = new RegExp(['do you want to', 'would you like to', 'do you trust',
   'trust (?:this|the) (?:folder|directory|files)', 'trust all', 'review (?:the )?hooks', 'allow (?:this|command|once|always)',
   '\\[y/n\\]', '\\(y/n\\)', 'press enter to (?:continue|confirm)', 'waiting for (?:your )?(?:approval|confirmation)'].join('|'), 'i');
-const CHOICES = /(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y\/n\]|\(y\/n\)|\(esc\)|enter to (?:confirm|select|continue)/im;
+const CHOICES = /(?:^|\s)[❯›>]?\s*1[.)]\s+\S|\[y\/n\]|\(y\/n\)|\(esc\)|enter\s+(?:to\s+)?(?:confirm|select|continue)|navigate/im;
 // a menu with a highlighted choice (an update, a folder to trust) waits for you whatever it asks
-const MENU = /[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc/i;
+const MENU = /[❯›]\s*\d[.)]\s+\S|enter\s+(?:to\s+)?(?:continue|confirm|select)\s*·\s*esc|(?:^|\s)[❯›>]\s*(?:yes|no)\b[\s\S]{0,80}(?:navigate|enter\s+(?:to\s+)?(?:confirm|select))/i;
+// whether to trust a folder is always a question for you (Antigravity's has no numbered choices)
+const TRUST = /do\s+you\s+trust|trust\s+(?:this|the)\s+(?:folder|directory|files|workspace|project)|trust\s+all|review\s+(?:the\s+)?hooks/i;
 const QUIET_MS = 2500;
 
 function screenText(term) {
@@ -744,7 +747,7 @@ function checkAsking(p) {
   clearTimeout(p.askTimer);
   p.askTimer = setTimeout(() => {
     const screen = p.term ? screenText(p.term) : '';
-    const asking = MENU.test(screen) || (ASKING.test(screen) && CHOICES.test(screen));
+    const asking = MENU.test(screen) || TRUST.test(screen) || (ASKING.test(screen) && CHOICES.test(screen));
     if (asking === Boolean(p.asking)) return;
     p.asking = asking;
     p.el.classList.toggle('asking', asking);

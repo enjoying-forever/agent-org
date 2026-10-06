@@ -367,3 +367,55 @@ def test_the_hub_keeps_an_agents_status_without_calls(hub):
         "working", f"#{task.id} Build the parser")
     worker.finish_task(task.id, "built")
     assert hub.store.get_status("worker-a").state == "idle"
+
+
+def test_a_cancelled_or_moved_task_leaves_its_agent_idle_and_free(hub):
+    worker = hub.session("worker-a")
+    lead = hub.session("tech-lead")
+    task = lead.assign_task("worker-a", "Build the parser")
+    worker.read_inbox()
+    worker.claim("src/parser.py")
+    lead.cancel_task(task.id, "not needed")
+    # seen: the page still showed it working on the cancelled task, holding its file
+    assert hub.store.get_status("worker-a").state == "idle" and hub.store.locks("worker-a") == []
+    assert "Your files are released (src/parser.py)" in worker.read_inbox()[-1].text
+    moved = lead.assign_task("worker-a", "Build the writer")
+    worker.read_inbox()
+    lead.reassign_task(moved.id, "worker-b", "worker-a is needed elsewhere")
+    assert hub.store.get_status("worker-a").state == "idle"
+
+
+def test_a_task_sent_back_shows_its_agent_working_again(hub):
+    worker = hub.session("worker-a")
+    lead = hub.session("tech-lead")
+    task = lead.assign_task("worker-a", "Build the parser")
+    worker.read_inbox()
+    worker.finish_task(task.id, "built")
+    assert hub.store.get_status("worker-a").state == "idle"
+    lead.review_task(task.id, accept=False, feedback="handle empty input")
+    worker.read_inbox()
+    assert (hub.store.get_status("worker-a").state, hub.store.get_status("worker-a").task) == (
+        "working", f"#{task.id} Build the parser")
+
+
+def test_whoever_gave_a_task_hears_when_someone_above_cancels_or_moves_it(hub):
+    lead, worker = hub.session("tech-lead"), hub.session("worker-a")
+    task = lead.assign_task("worker-a", "Build the parser")
+    worker.read_inbox()
+    hub.session("leader").cancel_task(task.id, "the plan changed")
+    [told] = lead.read_inbox()  # else it would go on planning with a task that is gone
+    assert told.kind == "notice" and f"cancelled task #{task.id}" in told.text and "the plan changed" in told.text
+    moved = lead.assign_task("worker-a", "Build the writer")
+    hub.session("leader").reassign_task(moved.id, "worker-b")
+    assert hub.store.unread_count("tech-lead", waking=True) == 0  # news, not a reason to wake it
+    assert f"moved task #{moved.id}" in lead.read_inbox()[0].text
+    lead.cancel_task(moved.id)
+    assert lead.read_inbox() == []  # its own cancel: nothing to tell it
+
+
+def test_an_owners_cancel_reads_right_to_whoever_gave_the_task(hub):
+    task = hub.session("tech-lead").assign_task("worker-a", "Build the parser")
+    hub.session("you").cancel_task(task.id, "not needed")
+    [told] = hub.session("tech-lead").read_inbox()
+    # seen as "you cancelled task #4 ... Reason: not needed Plan without it."
+    assert told.text.startswith(f"The owner cancelled task #{task.id}") and "Reason: not needed. Plan" in told.text

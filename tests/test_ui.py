@@ -513,7 +513,12 @@ def test_one_teammate_changed_moved_and_removed(server):
     assert server.request("/api/teammate", {"name": "worker-a", "changes": {"tier": "x"}})[0] == 400
     assert server.request("/api/teammate", {"name": "ghost", "changes": {"model": "x"}})[0] == 400
     assert roles()["leader"]["superior"] == "you"
-    # removing one: whoever reported to it reports to its superior
+    # removing one: not while it has unfinished work (nobody would ever do it)
+    task = server.app.me.assign_task("tech-lead", "Plan it")
+    code, body = server.request("/api/teammate-remove", {"name": "tech-lead"})
+    assert code == 400 and f"#{task.id}" in body["error"]
+    server.app.me.cancel_task(task.id)
+    # then whoever reported to it reports to its superior
     out = server.ok("/api/teammate-remove", {"name": "tech-lead"})
     assert out == {"removed": "tech-lead", "moved_to": "leader"}
     assert "tech-lead" not in roles() and roles()["worker-b"]["superior"] == "leader"

@@ -161,8 +161,9 @@ what they still owe.
    messages; long material goes in a file.
 9. **One writer per file.** An agent must hold a file's lease to edit it; editing a free
    file in its scope takes it, and a whole folder (`src/api/*`) can be reserved for a
-   task. Leases run out when their holder stops working, and closing its last task
-   releases an agent's files. (With git branches on, each
+   task. Leases run out when their holder stops working; closing, cancelling or moving
+   its last task releases an agent's files, and so does resting with no task. (With git
+   branches on, each
    agent edits its own copy instead: see below.)
 10. **Everyone sees the team.** Anyone can see every role's status, tasks and files.
     Messages stay private to the sender, the receiver and their superiors.
@@ -177,8 +178,10 @@ How the rules are kept:
 
 - When an agent finishes a turn, a hook hands it any new messages, or reminds it of
   what the law says it still owes - open tasks, results to review, blocked tasks it
-  gave, unanswered questions, files it holds - then waits and wakes it the moment a
-  message arrives. You never have to nudge an idle agent.
+  gave, unanswered questions - then waits and wakes it the moment a message arrives.
+  You never have to nudge an idle agent. What the hub can do itself costs no model call:
+  it keeps each agent's status (working on the task it read, idle or blocked once its
+  tasks close) and releases the files of an agent with no task left.
 - In the agent-org window an agent **starts with no first message**: its role, the law
   and where it left off are in its system prompt (Claude, Codex, Grok), so starting or
   restarting the team runs no model and re-reads nothing. When work arrives and no hook

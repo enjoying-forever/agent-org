@@ -259,7 +259,7 @@ class Tools:
         self.me.set_status("waiting", before.task if before else "")
         messages = self.me.wait_for_messages(timeout, stop=cancelled)
         if messages:
-            self.me.set_status("working", "")
+            self.me.back_to_work()
         return _fmt_messages(messages, f"No messages in {timeout} seconds. Call wait_for_messages again.")
 
     def _summon(self, args: dict[str, Any]) -> str:
@@ -323,6 +323,8 @@ class Tools:
 
     def _cancel(self, args: dict[str, Any]) -> str:
         task = self.me.cancel_task(int(args["task_id"]), args.get("reason") or "")
+        if task.message_id is None:  # it was still waiting for other tasks: its assignee never had it
+            return f"Task #{task.id} is cancelled before it started."
         return f"Task #{task.id} is cancelled; {task.assignee} has been told."
 
     def _claim(self, args: dict[str, Any]) -> str:

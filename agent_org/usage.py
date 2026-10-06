@@ -42,7 +42,7 @@ class Usage:
         return asdict(self)
 
 
-_cache: dict[Path, tuple[float, int, Usage]] = {}
+_cache: dict[Path, tuple[tuple[float, ...], Usage]] = {}
 
 
 _paths: dict[tuple[str, str, str], Path] = {}  # where a conversation's file was found (the search is slow)
@@ -81,19 +81,28 @@ def usage(harness: str, session_id: str | None) -> Usage | None:
     if path is None:
         return None
     try:
-        stat = path.stat()
+        version = _version(path)
     except OSError:
         return None
     cached = _cache.get(path)
-    if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
-        return cached[2]
+    if cached and cached[0] == version:
+        return cached[1]
     reader = {"claude": _claude, "codex": _codex, "grok": _grok, "antigravity": _antigravity}[harness]
     try:
         result = reader(path)
     except (OSError, ValueError, sqlite3.Error):
         return None
-    _cache[path] = (stat.st_mtime, stat.st_size, result)
+    _cache[path] = (version, result)
     return result
+
+
+def _version(path: Path) -> tuple[float, ...]:
+    """What changes when the file does. A database's new rows sit in its -wal file until they are
+    checkpointed into it (seen: an Antigravity agent's count stayed at 0 for its whole task)."""
+    stat = path.stat()
+    wal = path.with_name(path.name + "-wal")
+    extra = (wal.stat().st_mtime, wal.stat().st_size) if path.suffix == ".db" and wal.exists() else ()
+    return (stat.st_mtime, stat.st_size, *extra)
 
 
 def _claude(path: Path) -> Usage:

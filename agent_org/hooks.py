@@ -5,7 +5,8 @@ comes from AGENT_ORG_TEAM / AGENT_ORG_ROLE, which every start script sets; outsi
 agent-org tab each hook does nothing. Any failure lets the harness carry on.
 
 - stop       The agent is ending its turn. Once per turn, remind it of unfinished
-             duties (reporting to its superior, releasing its files). Then wait for new
+             duties (its tasks, reviews, answers it owes). With no task left, its
+             files are released for it. Then wait for new
              messages and hand them over, so an idle agent wakes up when mail arrives.
              In the agent-org window (AGENT_ORG_STOP_IDLE) a wait that runs out lets the
              agent rest; the window wakes it later (agent_org.waker).
@@ -95,25 +96,36 @@ def duties_left(me: RoleSession) -> list[str]:
             f"ask_help(..., reply_to={request.id}), or summon a consultant.")
     superior = me.superior
     last_word = me.store.last_message(sender=superior, recipient=me.name, kinds=("instruction", "reply"))
-    if superior and last_word:
+    if superior and last_word and not _news_only(me, last_word):
         answered = me.store.last_message(sender=me.name, recipient=superior)
         if answered is None or answered.id < last_word.id:
             left.append(
                 f"{superior}'s message #{last_word.id} has no answer from you. If it needs one, "
                 f"send it with send_message(to=\"{superior}\", reply_to={last_word.id}): "
                 f"{superior} only receives what you send, not what you write here.")
-    held = [lock.path for lock in me.store.locks(me.name)]
-    if held:
-        left.append(
-            f"You still hold the write lock on {', '.join(held)}. release_file each file you are "
-            "done with (or hand_over_file it), so others can work on it.")
     return left
 
 
+def _news_only(me: RoleSession, m: Message) -> bool:
+    """A task of yours cancelled or moved away: nothing to answer (seen: a reminder cost a model call)."""
+    task = me.store.get_task(m.task_id) if m.task_id is not None else None
+    return task is not None and (task.state == "cancelled" or me.name not in (task.assignee, task.assigner))
+
+
+def let_go_of_files(me: RoleSession) -> None:
+    """An agent resting with no task holds no files: they are released for it, which costs it nothing
+    (its next edit takes a file again). A consultant keeps what it was handed until it is dismissed."""
+    role = me.team.roles.get(me.name)
+    if role is not None and not role.is_consultant and not me.my_tasks():
+        me.release_all("it rests with no task")
+
+
 def deliver(me: RoleSession, messages: list[Message]) -> dict[str, Any]:
-    me.set_status("working", "")
-    return block("agent-org: new messages for you. Act on them (the sender is waiting for your "
-                 "reply), then end your turn; later messages are delivered the same way.\n\n"
+    me.back_to_work()
+    # (Not "the sender waits for your reply": that invites an 'ok' to a result, which wakes its sender
+    # for nothing - against the law's "no 'thanks' or 'ok' messages".)
+    return block("agent-org: new messages for you. Act on them, then end your turn; later messages are "
+                 "delivered the same way.\n\n"
                  + fmt_messages(messages))
 
 
@@ -140,6 +152,7 @@ def on_stop(me: RoleSession, payload: dict[str, Any], wait: float | None = None,
         if left:
             return block("Before you finish:\n" + "\n".join(f"- {x}" for x in left)
                          + "\nWhen these are done (or don't apply), end your turn again.")
+    let_go_of_files(me)
     before = me.store.get_status(me.name)
     me.set_status("waiting", before.task if before else "")
     messages = me.wait_for_messages(stop_wait() if wait is None else wait, poll)
@@ -279,8 +292,8 @@ def on_pre_edit(me: RoleSession, payload: dict[str, Any]):
         claimed.append(rel)
     if claimed:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext":
-                f"agent-org: you now hold the write lock on {', '.join(claimed)}; "
-                "release_file it when you are done."}}
+                f"agent-org: you now hold the write lock on {', '.join(claimed)}. It is released for "
+                "you when your task closes."}}
     return None
 
 

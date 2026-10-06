@@ -516,11 +516,14 @@ class RoleSession:
         for m in messages:
             if m.kind == "task" and m.task_id is not None:
                 task = self.store.get_task(m.task_id)
-                if task is not None and task.assignee == self.name and task.state == "open":
+                if task is None or task.assignee != self.name or task.state not in ("open", "working"):
+                    continue
+                if task.state == "open":
                     self.store.update_task(task.id, state="working", started_at=time.time())
-                    self.store.set_status(self.name, "working", f"#{task.id} {task.title}")  # no call for it
                     self.hub.event("task", self.name, f"started #{task.id}: {task.title}", task.id)
                     self.hub.sync_role(self.name)  # a new task starts from the latest main
+                # a new task, or one sent back to it: its status says so with no call for it
+                self.store.set_status(self.name, "working", f"#{task.id} {task.title}")
         return messages
 
     def wait_for_messages(
@@ -644,21 +647,26 @@ class RoleSession:
             self.hub.release_dependents(task)
         elif outcome in ("failed", "rejected"):
             self.hub.stall_dependents(task)
-        self.released = self._release_when_idle() if outcome != "blocked" else []
-        if not any(t.state in ("open", "working") for t in self.my_tasks()):  # its status, without a call
-            self.store.set_status(self.name, "blocked" if outcome == "blocked" else "idle",
-                                  f"#{task.id} {task.title}" if outcome == "blocked" else "")
+        self.released = self._settle()
         return task
 
-    def _release_when_idle(self) -> list[str]:
-        """With its last task closed, an agent has nothing to hold files for: they are released for it
-        (seen: an agent spent a call per file releasing them by hand). Blocked work keeps its files."""
-        if any(t.state in ("open", "working", "blocked") for t in self.my_tasks()):
-            return []
+    def _settle(self) -> list[str]:
+        """After one of its tasks closes (finished, cancelled or moved away): with nothing left to work
+        on, its status says idle - or blocked - with no call for it; with no task left at all, its files
+        are released (seen: an agent spent a call per file releasing them by hand). Returns those files."""
+        mine = self.my_tasks()
+        if not any(t.state in ("open", "working") for t in mine):
+            blocked = next((t for t in mine if t.state == "blocked"), None)
+            self.store.set_status(self.name, "blocked" if blocked else "idle",
+                                  f"#{blocked.id} {blocked.title}" if blocked else "")
+        return [] if mine else self.release_all("its tasks are finished")  # blocked work keeps its files
+
+    def release_all(self, why: str) -> list[str]:
+        """Let go of every lease this role holds (the hub doing it saves the agent a call per file)."""
         released = []
         for lock in self.store.locks(self.name):
             self.store.release(self.hub.lock_key(lock.path)[0])
-            self.hub.event("file", self.name, f"released {lock.path}: its tasks are finished")
+            self.hub.event("file", self.name, f"released {lock.path}: {why}")
             released.append(lock.path)
         return released
 
@@ -825,12 +833,18 @@ class RoleSession:
             raise HubError(f"task #{task_id} is already {task.state}")
         delivered = task.state != "waiting"
         task = self.store.update_task(task_id, state="cancelled", result=reason.strip())
-        why = f" Reason: {reason.strip()}" if reason.strip() else ""
+        self.hub.event("task", self.name, f"cancelled #{task.id}: {task.title}", task.id)
+        freed = self.hub.session(task.assignee)._settle() if team.is_member(task.assignee) else []
+        why = f" Reason: {_sentence(reason)}" if reason.strip() else ""
         if delivered:
             self.store.add_message(self.name, task.assignee, "instruction",
-                                   f"Task #{task.id} ({task.title}) is cancelled; stop working on it.{why}",
+                                   f"Task #{task.id} ({task.title}) is cancelled; stop working on it.{why}"
+                                   + (f" Your files are released ({', '.join(freed)})." if freed else ""),
                                    task.message_id, False, task.id)
-        self.hub.event("task", self.name, f"cancelled #{task.id}: {task.title}", task.id)
+        if task.assigner not in (self.name, team.owner) and team.is_member(task.assigner):
+            # cancelled from above: whoever gave it plans with it, so it hears (and is woken to re-plan)
+            self.hub.notice(task.assigner, f"{self._who()} cancelled task #{task.id} ({task.title}) that you gave to "
+                                           f"{task.assignee}.{why} Plan without it.", task.id)
         self.hub.stall_dependents(task)
         return task
 
@@ -887,16 +901,27 @@ class RoleSession:
             notes.append(f"Its whole history: task_details({task.id}).")
             task = self.hub.deliver_task(task, "\n".join(notes))
         if before in team.roles:
+            rest = self.hub.session(before)._settle()  # its status (and, with nothing left, its other files)
             self.store.add_message(self.name, before, "instruction",
                                    f"Task #{task.id} ({task.title}) was moved to {to}; stop working on it."
-                                   + (f" Reason: {why}" if why else "")
-                                   + (f" Your leases on {', '.join(moved + freed)} went with it." if moved or freed else ""),
+                                   + (f" Reason: {_sentence(why)}" if why else "")
+                                   + (f" Your leases on {', '.join(moved + freed)} went with it." if moved or freed else "")
+                                   + (f" Your other files are released ({', '.join(rest)})." if rest else ""),
                                    None, False, task.id)
+        if task.assigner not in (self.name, team.owner) and team.is_member(task.assigner):
+            # its result still comes back to whoever gave it: news, but nothing to do now (it does not wake)
+            self.hub.note(task.assigner, f"{self._who()} moved task #{task.id} ({task.title}), which you gave, from "
+                                         f"{before} to {to}" + (f": {_sentence(why)}" if why else "."))
         self.hub.event("task", self.name, f"moved #{task.id} from {before} to {to}" + (f": {why}" if why else ""),
                        task.id)
         return task
 
     # changing the team (hire, change, let go) - only below yourself
+
+    def _who(self) -> str:
+        """This role at the start of a sentence to others: the owner may be called 'you', which an agent
+        would take for itself."""
+        return "The owner" if self.is_owner else self.name
 
     def _may_change_team(self) -> Team:
         team = self.team
@@ -1079,6 +1104,11 @@ class RoleSession:
         self.store.set_notes(self.name, text.strip())
 
     # looking
+
+    def back_to_work(self) -> None:
+        """Mail woke it: its status says working - on its current task, if it has one."""
+        task = self.current_task()
+        self.store.set_status(self.name, "working", f"#{task.id} {task.title}" if task else "")
 
     def set_status(self, state: str, task: str = "") -> Status:
         self.team  # noqa: B018 - refuses a dismissed consultant
@@ -1306,6 +1336,12 @@ def describe_stuck(info: dict) -> str:
         fmt = "%H:%M" if until - time.time() < 20 * 3600 else "%b %d %H:%M"
         return f"out of its usage limit until {time.strftime(fmt, time.localtime(until))}"
     return f"stopped by an API error: {str(info.get('text', ''))[:120]}"
+
+
+def _sentence(text: str) -> str:
+    """`text` ending as a sentence, so what follows it does not run on."""
+    text = text.strip()
+    return text if not text or text[-1] in ".!?" else text + "."
 
 
 def _text(text: str) -> str:

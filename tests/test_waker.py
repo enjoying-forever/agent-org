@@ -126,12 +126,26 @@ def test_mail_nobody_takes_wakes_an_idle_agent(hub):
     # Codex's own menus, as its screen arrives (cursor moves eat letters): Enter would pick for you
     {"output": "rust this folder? Codex can read, edit,andrunfileshere.› 1. Trust and continue 2.Quitenter continue · esc quit"},
     {"output": "Updat available · 0.158.0 → 0.160.0› 1. Update now (runs `npm install -g @openai/codex`) 2.Skip"},
+    # Antigravity's: no numbers, no "to" (seen: the line's Enter trusted the folder)
+    {"output": "Accessing workspace:\r\nE:/project/test/temp/test1/agent-org-e2e\r\n\r\nDo you trust the contents of "
+               "this project?\r\nAntigravity CLI requires permission to read, edit, and execute files.\r\n\r\n"
+               "> Yes, I trust this folder\r\n  No, exit\r\n\r\n↑/↓ Navigate · enter Confirm\r\n"},
+    {"output": "\x1b[1mDo you trust the files in this folder?\x1b[0m\r\n\x1b[2C\x1b[36m> Yes\x1b[0m\r\n  No"},
+    {"output": "Update ready\r\n> Yes, restart now\r\n  No\r\n↑/↓ Navigate · enter Confirm"},
 ])
 def test_an_agent_that_is_busy_or_asking_is_left_alone(hub, term_kw):
     hub.session("leader").send("researcher", "look into X")
     now = later()
     term = FakeTerm(now, **term_kw)
     assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == [] and term.got == []
+
+
+def test_a_menu_the_screen_has_cleared_away_does_not_block_waking(hub):
+    hub.session("leader").send("researcher", "look into X")
+    now = later()
+    answered = "Do you trust the contents of this project?\r\n> Yes, I trust this folder\r\n  No, exit\x1b[2J\x1b[H"
+    term = FakeTerm(now, output=answered + "Antigravity CLI 1.2.17\r\n? for shortcuts\r\n> ")
+    assert waker.Waker().tick(hub, FakeHost(researcher=term), now) == ["researcher"]
 
 
 def test_a_question_only_written_in_an_answer_does_not_block_waking(hub):
