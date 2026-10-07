@@ -127,8 +127,9 @@ agent-org opens in a window of its own (Electron, kept light: one page, no GPU p
 work, about 130 MB in all), and runs each agent in a pseudo-terminal it owns (node-pty, Windows'
 ConPTY), shown with xterm.js. The agents get a
 fresh copy of your user environment, as a new terminal would, not the environment agent-org
-itself was started from. Your PowerShell profile is not run (each agent starts faster, and
-nothing in it changes the agent's settings); the agent gets agent-org's proxy, or Windows' own.
+itself was started from, plus agent-org's proxy (or Windows' own). In the window an agent's program
+runs directly, without PowerShell when it can (only DeepSeek's loop and Grok's setup step need it); in
+a Windows Terminal tab it runs from its start script, without your PowerShell profile.
 
 - `node dist/ui.js` opens the same page in your browser instead; press Enter in its terminal
   for another sign-in link.
@@ -460,7 +461,8 @@ How it fits together (in `src/`):
 - `launch.ts` - writes each role's start script (Claude Code: `--mcp-config`,
   `--settings`, `--append-system-prompt-file`; Codex: `-c` overrides; Grok: project
   MCP config and `--rules`; Antigravity: a user-level plugin with its MCP config and hooks),
-  resumes conversations (`sessions.ts`), stops agents, and keeps to the team's running limit.
+  plus `start.json` beside it for the window to run the program directly, resumes conversations
+  (`sessions.ts`), stops agents, and keeps to the team's running limit.
   `runtime.ts` says how agent-org runs its own programs (on the Node or Electron that runs it).
 - `cards.ts` - the role card: the law, the team, and where the agent left off.
 - `verify.ts` - the team's checks; `gitops.ts` - task diffs, branches and one commit per
