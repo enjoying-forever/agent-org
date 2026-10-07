@@ -55,8 +55,10 @@ task went leader -> worker -> file written -> reviewed -> reported back in about
 agents in the window's node-pty terminals, the tool server as Electron-as-Node, the waker's wake lines,
 the in-server pre-edit hook (lease taken and released), the Stop hook through org_hook.cmd, Stop and Quit
 from the page. Memory with GPU acceleration off: about 126 MB private over 4 processes (223 MB with it on).
+DeepSeek, without a model run (2026-10-08): its start shows the banner and the waiter's input line (both
+agent-org programs on Electron as Node), it counts as running, and Stop ends the waiter.
 Not run live yet: Codex (its new hook command needs the owner's one-time "Trust all"), Grok (installing
-its hooks rewrites ~/.grok/hooks), Antigravity (replaces the user-level plugin), DeepSeek.
+its hooks rewrites ~/.grok/hooks), Antigravity (replaces the user-level plugin), a DeepSeek model run.
 
 Hook speed (a hook process runs on every tool step of Codex, Grok and Antigravity; Claude's run inside its
 tool server): about 145 ms each, on Node or on Electron as Node, against 70 ms for an empty start. The
@@ -67,4 +69,9 @@ file (esbuild, tried earlier) would save little more.
 Before this branch becomes main:
 - Live runs on Codex (the new hook command needs the owner's one-time "Trust all"), Grok (agent-org
   rewrites ~/.grok/hooks/agent-org.json for the new command), Antigravity (it replaces the user-level
-  plugin) and DeepSeek. Each changes something of the owner's, so the owner starts those.
+  plugin) and a DeepSeek task. Each changes something of the owner's, so the owner starts those.
+
+Start-up (measured 2026-10-08): the server is up 185 ms after launch and the window is made at 240 ms; the
+page shows at about 1.4 s. Of that, about 1 s is Chromium starting a fresh page process on Windows: with a
+warm one the page is interactive in 190 ms. Letting the page's files be cached (for compiled scripts),
+GPU on or off: no difference, so neither was kept.
