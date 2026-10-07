@@ -15,10 +15,10 @@ import { SERVER_NAME } from './cards.ts';
 import type { Hub, RoleSession } from './hub.ts';
 import type { Terminal, TerminalHost } from './terminals.ts';
 
-export const EVERY = 2.0; // seconds between looks
+export const EVERY = 1.0; // seconds between looks (each costs about a millisecond)
 export const QUIET = 3.0; // seconds without output: the agent is at its prompt (an idle Claude redraws every ~13 s)
 export const READY = 6.0; // seconds after a start before its first line: the program is still drawing its screen
-export const UNREAD_FOR = 4.0; // a waiting Stop hook takes mail within a second: older mail has nobody taking it
+export const UNREAD_FOR = 2.5; // a waiting Stop hook takes mail within a second: older mail has nobody taking it
 export const AGAIN = 90.0; // seconds before the same terminal gets another line (doubling while the same mail waits)
 export const MOST = 1800.0; // the longest it waits before trying once more
 export const TYPED = 30.0; // seconds after you typed in a terminal before it gets a line (you may be mid-sentence)
