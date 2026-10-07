@@ -88,7 +88,8 @@ function fractions(store, key, n, first = 1) {
 function applyLayout() {
   const box = $('#panes');
   if (!S.state || !L.team) return;
-  const all = [...PANES.values()];
+  // in the order you arranged them (the page's order), not the order the panes were first made
+  const all = [...box.children].filter((el) => el.classList.contains('pane')).map((el) => PANES.get(el.dataset.role)).filter(Boolean);
   if (L.max && !PANES.has(L.max)) L.max = null;
   for (const p of all) {
     p.el.hidden = L.hidden.includes(p.name) && L.max !== p.name;
