@@ -512,10 +512,23 @@ function renderPanes() {
   order.forEach((r, i) => {
     let p = PANES.get(r.name);
     if (!p) { p = makePane(r.name); PANES.set(r.name, p); }
-    updatePane(p, r);
+    const key = paneKey(p, r); // most updates change one agent's numbers: the others are left as they are
+    if (p.key !== key) { p.key = key; updatePane(p, r); }
     if (box.children[i] !== p.el) box.insertBefore(p.el, box.children[i] || null);
   });
   applyLayout();
+}
+
+/** Everything a pane shows, as one string: the pane is redrawn only when it changed. */
+function paneKey(p, r) {
+  const st = S.state;
+  const live = Boolean(st.in_window && r.terminal);
+  const own = live ? null : [ // without a terminal it shows its task and its last messages
+    st.tasks.filter((t) => t.assignee === r.name && ['working', 'open', 'blocked'].includes(t.state)).map((t) => [t.id, t.state, t.title]),
+    S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-LOG_LINES).map((m) => [m.id, m.read]),
+  ];
+  return JSON.stringify([r, own, S.focus === r.name, p.outputting, p.asking, live, st.leader, st.launchable, st.project_root,
+    L.mode, L.max, mainPane()]);
 }
 
 function makePane(name) {
