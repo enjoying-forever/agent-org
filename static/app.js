@@ -459,7 +459,7 @@ function renderChart() {
     const count = r.unread || r.open_tasks;
     const row = h('button', {
         class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`
-          + `${PANES.get(r.name)?.asking ? ' asking' : ''}`,
+          + `${isAsking(r.name) ? ' asking' : ''}`,
         style: { paddingLeft: `${8 + depth * 14}px` },
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
@@ -510,6 +510,7 @@ function applyTeamMode() {
   $('#panes').hidden = tree; // the terminals keep running and reading: only not shown
   $('#tree-view').hidden = !tree;
   $('#layout-menu').hidden = tree || $('#team-mode').hidden;
+  termsMoved();
   if (tree) renderTree();
   else if (S.state) setTimeout(applyLayout, 0); // the panes have a size again
 }
@@ -542,7 +543,7 @@ function renderTree() {
 function treeNode(r) {
   const st = S.state;
   const s = r.status;
-  const asking = Boolean(r.online && (PANES.get(r.name)?.asking || r.terminal?.asking));
+  const asking = Boolean(r.online && (isAsking(r.name) || r.terminal?.asking));
   // its own status may lag: a call running (or one a moment ago) says it is at work
   const busy = r.actions?.some((a) => a.ended_at === null || (!s && Date.now() / 1000 - a.ended_at < 60));
   const [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you']
@@ -642,8 +643,9 @@ function paneKey(p, r) {
     st.tasks.filter((t) => t.assignee === r.name && ['working', 'open', 'blocked'].includes(t.state)).map((t) => [t.id, t.state, t.title]),
     S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-LOG_LINES).map((m) => [m.id, m.read]),
   ];
-  return JSON.stringify([{ ...r, actions: null }, own, S.focus === r.name, // its actions show in the Tree, not here p.outputting, p.asking, live, st.leader, st.launchable, st.project_root,
-    L.mode, L.max, mainPane()]);
+  // its actions show in the Tree, not here
+  return JSON.stringify([{ ...r, actions: null }, own, S.focus === r.name, p.outputting, p.asking, live, st.leader, st.launchable,
+    st.project_root, L.mode, L.max, mainPane()]);
 }
 
 function makePane(name) {
@@ -915,8 +917,7 @@ function checkAsking(p) {
 /** Agents whose terminal shows a question: they wait for you (a desktop notification while you are away). While
  * the window is hidden its terminals are not read (see termLoop): agent-org's own reading of them says. */
 function askingProblems() {
-  const asks = (p) => (document.hidden ? Boolean(findRole(p.name)?.terminal?.asking) : p.asking);
-  return [...PANES.values()].filter((p) => p.term && asks(p)).map((p) => ({
+  return [...PANES.values()].filter((p) => isAsking(p.name)).map((p) => ({
     kind: 'asking', role: p.name, action: 'show-pane', text: `${p.name} is asking something in its terminal: answer it there.`,
   }));
 }
@@ -1001,17 +1002,31 @@ function wakeTerms() {
   if (!S.termLoop) { S.termLoop = true; termLoop(); }
 }
 
-// While the window is hidden nobody sees the terminals: their output waits in agent-org (the last 400,000
-// characters of each) and is drawn when the window shows again, instead of costing work all the time.
-const untilShown = () => new Promise((r) => {
-  const shown = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', shown); r(); } };
-  document.addEventListener('visibilitychange', shown);
-});
-document.addEventListener('visibilitychange', () => { if (document.hidden) termPoll?.abort(); });
+// While nobody sees the terminals (the window hidden, the Tree showing, or another page) their output waits in
+// agent-org (the last 400,000 characters of each) and is drawn when they show again, instead of costing work
+// all the time. Whether one is asking something then comes from agent-org, which reads them anyway.
+const termsAway = () => document.hidden || Boolean(L.tree) || $('#view-team').hidden;
+let shownWaiters = [];
+const untilShown = () => new Promise((r) => shownWaiters.push(r));
+
+/** The terminals may have come into view, or gone out of it. */
+function termsMoved() {
+  if (termsAway()) { termPoll?.abort(); return; }
+  const waiting = shownWaiters;
+  shownWaiters = [];
+  for (const r of waiting) r();
+}
+document.addEventListener('visibilitychange', termsMoved);
+
+/** Whether `name`'s terminal asks the owner something, by what is on its screen when it is in view. */
+function isAsking(name) {
+  const p = PANES.get(name);
+  return Boolean(p?.term && (termsAway() ? findRole(name)?.terminal?.asking : p.asking));
+}
 
 async function termLoop() {
   while (S.mode === 'team' && !S.signedOut) {
-    if (document.hidden) { await untilShown(); continue; }
+    if (termsAway()) { await untilShown(); continue; }
     const wants = {};
     for (const p of PANES.values()) if (p.term) wants[p.name] = [p.termId, p.next];
     if (!Object.keys(wants).length) { await pause(1000); continue; }
@@ -1533,6 +1548,7 @@ function showView(v) {
   $('#layout-menu').hidden = S.mode !== 'team' || v !== 'team' || Boolean(L.tree);
   if (v === 'team' && S.state) { setTimeout(applyLayout, 0); renderTree(); } // once the view has its size again
   if (v === 'roles') { closeDrawer(); loadRoles(); }
+  termsMoved();
 }
 
 function showTab(t) {
