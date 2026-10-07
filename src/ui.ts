@@ -96,25 +96,49 @@ export function parseAgy(out: string): string[] {
   return out.split(/\r?\n/).filter((l) => l.includes('\t')).map((l) => l.split('\t')[0]);
 }
 
-/** Asks each installed harness which models it offers, once, in the background. */
+export const MODELS_FILE = 'models.json'; // in agent-org's home: what each program offered, and when it was asked
+export const MODELS_KEEP = 86_400; // seconds before the programs are asked again
+const ASK_AFTER = 30; // seconds after agent-org starts: its start costs no program runs
+
+/** Which models each installed harness offers, for the editors' suggestions. The programs are asked at most once
+ * a day, in the background and not while agent-org starts; what they said is kept in agent-org's home. */
 export class ModelCatalog {
   models: Record<string, string[]> = { claude: CLAUDE_MODELS, codex: [], grok: [], antigravity: [], deepseek: DEEPSEEK_MODELS };
+  private asked = 0;
 
   constructor(load = true) {
-    if (load) void this.load();
+    if (!load) return;
+    try {
+      const kept = JSON.parse(readFileSync(path.join(templates.homeDir(), MODELS_FILE), 'utf8'));
+      for (const [harness, list] of Object.entries(kept.models ?? {})) {
+        if (harness in this.models && Array.isArray(list)) this.models[harness] = list.map(String);
+      }
+      this.asked = Number(kept.at) || 0;
+    } catch {
+      // never asked yet
+    }
+    if (Date.now() / 1000 - this.asked > MODELS_KEEP) setTimeout(() => void this.load(), ASK_AFTER * 1000).unref();
   }
 
-  private async load(): Promise<void> {
+  async load(): Promise<void> {
     for (const [harness, command, parse] of [['codex', ['codex', 'debug', 'models'], parseCodex], ['grok', ['grok', 'models'], parseGrok],
       ['antigravity', ['agy', 'models'], parseAgy]] as [string, string[], (out: string) => string[]][]) {
       const exe = which(command[0]);
       if (exe === null) continue;
       try {
         const [code, out] = await doctor.proc.run(exe, command.slice(1), 30);
-        if (code === 0) this.models[harness] = parse(out);
+        const found = code === 0 ? parse(out) : [];
+        if (found.length) this.models[harness] = found;
       } catch {
-        // its models stay unknown: any name can still be typed
+        // its models stay as they were: any name can still be typed
       }
+    }
+    this.asked = Date.now() / 1000;
+    try {
+      mkdirSync(templates.homeDir(), { recursive: true });
+      writeFileSync(path.join(templates.homeDir(), MODELS_FILE), JSON.stringify({ at: this.asked, models: this.models }), 'utf8');
+    } catch {
+      // asked again next start
     }
   }
 }

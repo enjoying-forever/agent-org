@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import * as doctor from '../src/doctor.ts';
 import { lookup } from '../src/runtime.ts';
 import { parseYaml, Team } from '../src/team.ts';
 import * as templates from '../src/templates.ts';
@@ -544,4 +545,24 @@ test('a closed team needs opening again', async (t) => {
   const [status, data] = await server.request('/api/state');
   assert.ok(status === 412 && data.error === ui.NO_TEAM);
   await rejects(async () => server.app.state(), ui.ApiError, ui.NO_TEAM);
+});
+
+test("the programs' models are asked for at most once a day, and remembered", async (t) => {
+  const home = freshHome(t);
+  const ran: string[] = [];
+  const before = [doctor.proc.run, lookup.which];
+  doctor.proc.run = async (_exe, args) => {
+    ran.push(args.join(' '));
+    return [0, args[0] === 'debug' ? '{"models": [{"slug": "gpt-6-luna"}]}' : 'Available models:\n  * grok-5\n'];
+  };
+  lookup.which = (name) => (name === 'agy' ? null : name);
+  cleanup(t, () => { [doctor.proc.run, lookup.which] = before as [typeof doctor.proc.run, typeof lookup.which]; });
+  const first = new ui.ModelCatalog(); // nothing kept yet: asks later (not during the start), in the background
+  assert.deepEqual(ran, []);
+  await first.load();
+  assert.deepEqual(ran, ['debug models', 'models']);
+  assert.deepEqual([first.models.codex, first.models.grok], [['gpt-6-luna'], ['grok-5']]);
+  const next = new ui.ModelCatalog(); // the next start knows them at once, without asking
+  assert.deepEqual([next.models.codex, next.models.grok, next.models.claude.includes('sonnet')], [['gpt-6-luna'], ['grok-5'], true]);
+  assert.ok(existsSync(path.join(home, ui.MODELS_FILE)));
 });
