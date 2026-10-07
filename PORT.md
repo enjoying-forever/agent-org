@@ -59,9 +59,10 @@ Not run live yet: Codex (its new hook command needs the owner's one-time "Trust 
 its hooks rewrites ~/.grok/hooks), Antigravity (replaces the user-level plugin), DeepSeek.
 
 Hook speed (a hook process runs on every tool step of Codex, Grok and Antigravity; Claude's run inside its
-tool server): about 190 ms each, on Node or on Electron as Node, against 55-65 ms for an empty start.
-Bundling into one file (esbuild, tried) saves about 50 ms more; the rest is the work itself (the database,
-team.yaml). Not worth a bundler for now.
+tool server): about 145 ms each, on Node or on Electron as Node, against 70 ms for an empty start. The
+YAML library took 65 ms to load: it now loads only when a team.yaml must be read afresh (each one read is
+kept as JSON in ~/.agent-org/cache/teams, under the file's size and time of change). Bundling into one
+file (esbuild, tried earlier) would save little more.
 
 Before this branch becomes main:
 - Live runs on Codex (the new hook command needs the owner's one-time "Trust all"), Grok (agent-org

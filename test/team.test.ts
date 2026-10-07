@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { Team, TeamError } from '../src/team.ts';
-import { makeTeam, raises, team as example, tmpDir } from './helpers.ts';
+import { freshHome, makeTeam, raises, team as example, tmpDir, writeTeamFile } from './helpers.ts';
 
 const EXAMPLE = path.resolve(import.meta.dirname, '..', 'team.example.yaml');
 
@@ -98,4 +99,18 @@ test('a missing project_root is rejected', (t) => {
   const data = example() as Record<string, unknown>;
   delete data.project_root;
   raises(() => Team.fromDict(data, tmpDir(t)), TeamError, 'project_root');
+});
+
+test('a team.yaml read again comes from the kept copy, until the file changes', (t) => {
+  const home = freshHome(t);
+  const file = writeTeamFile(t);
+  assert.deepEqual(Object.keys(Team.load(file).roles).sort(), ['leader', 'researcher', 'tech-lead', 'worker-a', 'worker-b']);
+  const kept = readdirSync(path.join(home, 'cache', 'teams'));
+  assert.equal(kept.length, 1);
+  const cached = path.join(home, 'cache', 'teams', kept[0]);
+  assert.equal(JSON.parse(readFileSync(cached, 'utf8')).data.owner, 'you');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('researcher:', 'analyst:').replace('superior: researcher', 'superior: analyst'));
+  assert.ok('analyst' in Team.load(file).roles); // changed: read afresh
+  writeFileSync(cached, '{broken'); // a damaged copy is only read past
+  assert.ok('analyst' in Team.load(file).roles);
 });

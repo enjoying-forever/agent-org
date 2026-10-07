@@ -1,8 +1,10 @@
 /** The role tree: who reports to whom, and what each role is for. */
 
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
-import YAML from 'yaml';
 import { dict } from './dict.ts';
 
 export const HARNESSES = ['claude', 'codex', 'grok', 'antigravity', 'deepseek'] as const;
@@ -147,7 +149,7 @@ export class Team {
   static load(file: string): Team {
     let data: unknown;
     try {
-      data = parseYaml(readFileSync(file, 'utf8'));
+      data = readTeamFile(file);
     } catch (e) {
       throw new TeamError(`cannot read ${file}: ${(e as Error).message}`);
     }
@@ -283,15 +285,43 @@ export class Team {
   }
 }
 
+// The YAML library takes longer to load than a hook's whole work: it is loaded only when a team.yaml has to be
+// read afresh or written (see readTeamFile).
+let yamlLibrary: typeof import('yaml') | null = null;
+const yaml = (): typeof import('yaml') => (yamlLibrary ??= createRequire(import.meta.url)('yaml') as typeof import('yaml'));
+
 /** A team.yaml (YAML 1.2: in the yaml package's 1.1 mode a lone '.' - the usual project_root - reads as
  * NaN, which PyYAML never did). */
 export function parseYaml(text: string): unknown {
-  return YAML.parse(text, { uniqueKeys: false, merge: true });
+  return yaml().parse(text, { uniqueKeys: false, merge: true });
 }
 
 /** As PyYAML's safe_dump(sort_keys=False, allow_unicode=True, width=100) wrote team files. */
 export function dumpYaml(value: unknown): string {
-  return YAML.stringify(value, { lineWidth: 100, minContentWidth: 0, indent: 2 });
+  return yaml().stringify(value, { lineWidth: 100, minContentWidth: 0, indent: 2 });
+}
+
+/** A team.yaml's contents. Every hook and tool server reads it, and it seldom changes: what it said is kept as
+ * JSON in agent-org's home, under the file's size and time of change, and read from there while those match. */
+export function readTeamFile(file: string): unknown {
+  const st = statSync(file);
+  const version = `${st.size}|${st.mtimeMs}`;
+  const name = createHash('sha1').update(path.resolve(file).toLowerCase()).digest('hex');
+  const kept = path.join(process.env.AGENT_ORG_HOME || path.join(os.homedir(), '.agent-org'), 'cache', 'teams', `${name}.json`);
+  try {
+    const cached = JSON.parse(readFileSync(kept, 'utf8'));
+    if (cached.version === version) return cached.data;
+  } catch {
+    // not kept yet, or unreadable: read the file itself
+  }
+  const data = parseYaml(readFileSync(file, 'utf8'));
+  try {
+    mkdirSync(path.dirname(kept), { recursive: true });
+    writeFileSync(kept, JSON.stringify({ file: path.resolve(file), version, data }), 'utf8');
+  } catch {
+    // read afresh next time
+  }
+  return data;
 }
 
 export function isMapping(x: unknown): x is Record<string, unknown> {
