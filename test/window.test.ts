@@ -60,9 +60,13 @@ test('an agent hired by an agent starts in the window', async (t) => {
   cleanup(t, () => { terminals.TerminalHost.prototype.open = before; });
   app.inWindow = true;
   assert.equal(await post(app.window.launcher), 200);
-  const [[role, argv]] = opened as [string, string[]][];
-  assert.ok(role === 'worker-a' && argv.at(-1)?.endsWith('start.ps1'));
-  assert.ok(readFileSync(argv.at(-1) ?? '', 'utf8').includes('AGENT_ORG_STOP_IDLE')); // quiet: the window wakes it
+  const [[role, argv, , , , env]] = opened as [string, string[], string, string, string, Record<string, string> | undefined][];
+  assert.equal(role, 'worker-a');
+  if (argv.at(-1)?.endsWith('start.ps1')) { // run by its start script ...
+    assert.ok(readFileSync(argv.at(-1) ?? '', 'utf8').includes('AGENT_ORG_STOP_IDLE')); // quiet: the window wakes it
+  } else { // ... or, its program found, directly
+    assert.equal(env?.AGENT_ORG_STOP_IDLE, '1');
+  }
   assert.equal(launch.windowStart(server.teamFile, 'worker-a'), false); // and a test never reaches a real window
 });
 
