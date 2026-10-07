@@ -245,6 +245,10 @@ async function pickFolderWithPowerShell(title: string): Promise<string> {
   return out.trim().split(/\r?\n/).at(-1) ?? '';
 }
 
+/** What an agent's terminal runs after its program, when it started without PowerShell: the prompt its start
+ * script's PowerShell used to leave. */
+const AFTER = ['pwsh', '-NoLogo', '-NoProfile'];
+
 export const TEAMMATE_FIELDS = ['harness', 'model', 'effort', 'duties', 'instructions', 'write_scope', 'superior'];
 
 /** Everything the owner can do from the page, as plain methods returning JSON-able data. */
@@ -333,7 +337,7 @@ export class App {
     }
     const [title, color, cwd, argv] = launch.tabParts(tab);
     const direct = launch.directStart(tab); // the agent's program itself, without PowerShell, when it can be
-    this.terminals.open(launch.tabRole(tab), direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env);
+    this.terminals.open(launch.tabRole(tab), direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env, direct ? AFTER : null);
   }
 
   /** Start a role an agent just hired or summoned, in a terminal of this window. The agent's own tool server
@@ -358,7 +362,7 @@ export class App {
     }
     const [title, color, cwd, argv] = launch.tabParts(tab);
     const direct = launch.directStart(tab);
-    this.host(teamFile).open(role, direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env);
+    this.host(teamFile).open(role, direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env, direct ? AFTER : null);
     return { started: role };
   }
 

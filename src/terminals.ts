@@ -147,13 +147,16 @@ export class Terminal {
   lastInput = 0; // when the owner last typed text here (see typed)
   unsent = false; // the owner typed text and has not sent it (Enter) or cleared it (Ctrl+C)
   alive = true;
-  readonly exited: Promise<void>; // resolves when its program has ended
-  readonly proc: Pty;
+  readonly exited: Promise<void>; // resolves when its program (and what runs after it) has ended
+  proc: Pty;
   private buf = '';
   private start = 0; // where buf begins in the whole output
+  private closing = false;
 
+  /** `after`: what runs in the same terminal once the program ends - a shell to see and fix what happened (a
+   * sign-in the program asked for, say), as the PowerShell a start script ran in used to stay. */
   constructor(argv: string[], cwd: string, title = '', color = '', cols = 120, rows = 32, notify: () => void = () => {},
-    extraEnv: Env = {}) {
+    extraEnv: Env = {}, after: string[] | null = null) {
     const node = pty();
     if (node === null) throw new Error('terminals in the window need node-pty, which could not be loaded');
     this.title = title;
@@ -162,25 +165,45 @@ export class Terminal {
     this.rows = rows;
     const env = freshEnv();
     for (const [name, value] of Object.entries(extraEnv)) put(env, name, value);
-    const exe = which(argv[0], env.Path ?? env.PATH) ?? which(argv[0]) ?? argv[0];
-    this.proc = node.spawn(exe, argv.slice(1), { name: 'xterm-256color', cols, rows, cwd, env });
-    this.proc.onData((data) => {
-      this.buf += data;
-      this.lastOutput = Date.now() / 1000;
-      if (this.buf.length > KEEP) {
-        const cut = this.buf.length - KEEP;
-        this.buf = this.buf.slice(cut);
-        this.start += cut;
-      }
-      notify();
-    });
     let ended = (): void => {};
     this.exited = new Promise((resolve) => { ended = resolve; });
-    this.proc.onExit(() => {
-      this.alive = false;
-      ended();
-      notify();
-    });
+    const run = (args: string[], then: string[] | null): Pty => {
+      const exe = which(args[0], env.Path ?? env.PATH) ?? which(args[0]) ?? args[0];
+      const proc = node.spawn(exe, args.slice(1), { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd, env });
+      proc.onData((data) => this.output(data, notify));
+      proc.onExit(() => {
+        try {
+          proc.kill(); // ended by itself: free its pseudo-console too (node-pty keeps it open until killed)
+        } catch {
+          // already freed
+        }
+        if (then !== null && !this.closing) {
+          this.output(`\r\n\x1b[2m[agent-org] ${path.basename(args[0])} ended. A PowerShell prompt in its folder:\x1b[0m\r\n`, notify);
+          try {
+            this.proc = run(then, null);
+            return;
+          } catch {
+            // no shell to be had: the terminal ends
+          }
+        }
+        this.alive = false;
+        ended();
+        notify();
+      });
+      return proc;
+    };
+    this.proc = run(argv, after);
+  }
+
+  private output(data: string, notify: () => void): void {
+    this.buf += data;
+    this.lastOutput = Date.now() / 1000;
+    if (this.buf.length > KEEP) {
+      const cut = this.buf.length - KEEP;
+      this.buf = this.buf.slice(cut);
+      this.start += cut;
+    }
+    notify();
   }
 
   get end(): number {
@@ -225,6 +248,7 @@ export class Terminal {
   }
 
   close(): void {
+    this.closing = true; // nothing runs after it
     try {
       if (this.alive) this.proc.kill();
     } catch {
@@ -263,9 +287,9 @@ export class TerminalHost {
   };
 
   /** Start `argv` in a new terminal for `name`, closing the one it had. */
-  open(name: string, argv: string[], cwd: string, title = '', color = '', env: Env = {}): Terminal {
+  open(name: string, argv: string[], cwd: string, title = '', color = '', env: Env = {}, after: string[] | null = null): Terminal {
     const [cols, rows] = this.sizes.get(name) ?? [120, 32];
-    const term = new Terminal(argv, cwd, title || name, color, cols, rows, this.notify, env);
+    const term = new Terminal(argv, cwd, title || name, color, cols, rows, this.notify, env, after);
     const old = this.terms.get(name);
     this.terms.set(name, term);
     old?.close();

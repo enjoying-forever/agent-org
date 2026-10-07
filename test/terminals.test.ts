@@ -134,3 +134,19 @@ test("Windows' proxy setting is read", { skip: process.platform !== 'win32' && '
   const proxy = terminals.net.systemProxy(); // whatever this computer has: none, or a URL
   assert.ok(proxy === null || /^[a-z]+:\/\/\S+$/.test(proxy), String(proxy));
 });
+
+test('a program that ends leaves a prompt in its terminal, and closing ends both', { skip: needsPty }, async (t) => {
+  const host = new terminals.TerminalHost();
+  cleanup(t, () => host.closeAll());
+  const term = host.open('a', ['pwsh', '-NoLogo', '-NoProfile', '-Command', 'Write-Host first-part'], tmpDir(t), '', '', {},
+    ['pwsh', '-NoLogo', '-NoProfile']);
+  let out = await collect(host, 'a', 15, 'A PowerShell prompt');
+  assert.ok(out.includes('first-part') && out.includes('[agent-org] pwsh ended'), out);
+  assert.ok(term.alive); // the prompt runs on in the same terminal
+  await new Promise((r) => setTimeout(r, 1500));
+  term.write('Write-Host second-$((3*3))\r');
+  out = await collect(host, 'a', 15, 'second-9');
+  assert.ok(out.includes('second-9'));
+  await host.closeAll();
+  assert.ok(!term.alive); // closing it starts nothing more
+});
