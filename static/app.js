@@ -413,6 +413,8 @@ const ICON_PATHS = {
   max: 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
   restore: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
   close: 'M18 6 6 18M6 6l12 12',
+  fold: 'M7 14l5-5 5 5',
+  unfold: 'M7 10l5 5 5-5',
   main: 'M3 3h11v18H3zM18 3h3M18 9h3M18 15h3M18 21h3',
   sun: 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z',
 };
@@ -495,8 +497,9 @@ function focusPane(name) {
 }
 
 // ---------- the team as a tree ----------
-// For whoever would rather not watch every terminal: each agent as a card in the org chart, saying what it is
-// doing (its state and its own words for it), its task, and its last message. A card opens the agent's terminal.
+// For whoever would rather not watch every terminal: at the top, how the team is doing and what needs you; below,
+// each agent as a card in the org chart saying what it is doing right now (the command it runs, its own words
+// for it), its task and its last message. A card opens the agent's terminal.
 
 function setTeamMode(tree) {
   L.tree = tree;
@@ -507,8 +510,8 @@ function setTeamMode(tree) {
 function applyTeamMode() {
   const tree = Boolean(L.tree);
   for (const b of document.querySelectorAll('#team-mode button')) b.classList.toggle('active', (b.dataset.mode === 'tree') === tree);
-  $('#panes').hidden = tree; // the terminals keep running and reading: only not shown
-  $('#tree-view').hidden = !tree;
+  $('#panes').hidden = tree; // the terminals keep running: only not shown (nor read, see termsAway)
+  $('#tree-wrap').hidden = !tree;
   $('#layout-menu').hidden = tree || $('#team-mode').hidden;
   termsMoved();
   if (tree) renderTree();
@@ -520,23 +523,107 @@ function renderTree() {
   if (!st || !L.tree || $('#view-team').hidden) return;
   const box = $('#tree-view');
   const [left, scrollTop, first] = [box.scrollLeft, box.scrollTop, !$('#team-tree').childElementCount];
-  drawTree(false);
+  const looks = Object.fromEntries(st.roles.map((r) => [r.name, agentLook(r)]));
+  renderTreeBar(looks);
+  drawTree(looks, false);
   if (!fitTree()) { // too wide even drawn smaller: people with nobody under them go in a column
-    drawTree(true);
+    drawTree(looks, true);
     fitTree();
   }
   if (first) box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2; // you and the leader in view
   else [box.scrollLeft, box.scrollTop] = [left, scrollTop];
 }
 
-function drawTree(stacked) {
+/** How an agent is doing, as the tree shows it: its state (cls and label), the line saying what it does now,
+ * and whether that line is a call still running. */
+function agentLook(r) {
+  const s = r.status;
+  const asking = Boolean(r.online && (isAsking(r.name) || r.terminal?.asking));
+  const running = r.actions?.find((a) => a.ended_at === null);
+  // its own status may lag: a call running (or one a moment ago, before it said anything) says it is at work
+  const busy = running || r.actions?.some((a) => !s && Date.now() / 1000 - a.ended_at < 60);
+  let [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : r.stuck ? ['stuck', 'stuck']
+    : busy && s?.state !== 'working' ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'starting'];
+  if (cls === 'done') [cls, label] = ['idle', 'idle'];
+  let now = '';
+  let shown = null; // the action the line is
+  const latest = r.actions?.[0];
+  if (asking) now = 'Its terminal waits for your answer';
+  else if (r.stuck) now = r.stuck.describe;
+  else if (running) [now, shown] = [running.what, running];
+  else if (r.online && s?.task) now = s.task;
+  else if (r.online && latest && Date.now() / 1000 - latest.ended_at < 600) [now, shown] = [latest.what, latest]; // what it did last
+  else if (r.online) now = { waiting: 'for new messages', starting: 'its program is starting' }[label] || '';
+  return { cls, label, now, shown };
+}
+
+// ---------- the bar: the team at a glance, and what needs you ----------
+
+const NEED_ORDER = ['asking', 'question', 'review', 'stuck', 'limit', 'blocked', 'duplicate', 'stopped', 'stalled', 'loop'];
+
+function renderTreeBar(looks) {
+  const st = S.state;
+  const counts = {};
+  for (const r of st.roles) counts[looks[r.name].cls] = (counts[looks[r.name].cls] || 0) + 1;
+  const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'],
+    ['waiting', 'waiting'], ['idle', 'idle'], ['off', 'not running']].filter(([k]) => counts[k]);
+  const needs = [...st.problems, ...askingProblems().map((p) => ({ ...p, kind: 'asking' }))]
+    .sort((a, b) => NEED_ORDER.indexOf(a.kind) - NEED_ORDER.indexOf(b.kind));
+  const spent = st.roles.reduce((sum, r) => sum + totalTokens(r.usage), 0);
+  const open = L.needsOpen ?? true;
+  fill($('#tree-bar'),
+    h('div', { class: 'tb-team' },
+      shown.map(([k, word]) => h('span', { class: `tb-count state ${k}` }, h('b', {}, counts[k]), ` ${word}`)),
+      h('span', { class: 'grow' }),
+      spent ? h('span', { class: 'tb-spent', title: 'Tokens the team has used, over every conversation' }, `${fmtNum(spent)} tokens`) : null),
+    needs.length ? h('div', { class: 'tb-needs' },
+      h('button', { class: 'tb-needs-head', 'aria-expanded': String(open), onclick: () => { L.needsOpen = !open; saveLayout(); renderTreeBar(looks); } },
+        h('b', {}, needs.length === 1 ? 'One thing needs you' : `${needs.length} things need you`), h('span', { class: 'chev' }, open ? '▾' : '▸')),
+      open ? h('div', { class: 'tb-list' }, needs.slice(0, 8).map(needItem),
+        needs.length > 8 ? h('span', { class: 'muted small' }, `and ${needs.length - 8} more`) : null) : null)
+      : h('div', { class: 'tb-calm muted' }, 'Nothing needs you right now.'));
+}
+
+/** One thing that needs the owner, as a button that does what it asks. */
+function needItem(p) {
+  const r = findRole(p.role);
+  const go = {
+    asking: () => { setTeamMode(false); focusPane(p.role); },
+    answer: () => {
+      const m = S.messages.find((x) => x.id === p.message_id);
+      if (!L.side) { L.side = true; applyChrome(); saveLayout(); }
+      if (m) { jumpTo(m.id); replyTo(m); } else { showTab('messages'); setFilter('me'); }
+    },
+    review: () => openTask(p.task_id),
+    'open-task': () => openTask(p.task_id),
+    start: () => r && startRole(r),
+    restart: () => restartRole(p.role),
+    stop: () => stopRoles(p.role),
+    reassign: () => openDrawer(p.role),
+  }[p.kind === 'asking' ? 'asking' : p.action] || (() => openDrawer(p.role));
+  const verb = { asking: 'Answer it', answer: 'Reply', review: 'Review', 'open-task': 'Open task', start: 'Start', restart: 'Restart',
+    stop: 'Stop', reassign: 'Details' }[p.kind === 'asking' ? 'asking' : p.action] || 'Details';
+  return h('button', { class: `tb-need k-${p.kind}`, title: p.text, onclick: go },
+    h('span', { class: 'tb-text' }, p.kind === 'asking' ? `${p.role}'s terminal asks you something` : p.text),
+    h('span', { class: 'tb-go' }, verb));
+}
+
+// ---------- the chart ----------
+
+function drawTree(looks, stacked) {
   const st = S.state;
   const reached = new Set();
+  const collapsed = new Set(L.collapsed || []);
   const branch = (r) => {
     reached.add(r.name);
     const kids = rolesUnder(r.name);
+    if (kids.length && collapsed.has(r.name)) {
+      const below = subtreeOf(r.name);
+      for (const k of below) reached.add(k.name);
+      return h('li', {}, treeNode(r, looks, kids.length), h('ul', {}, h('li', {}, folded(r, below, looks))));
+    }
     const column = stacked && kids.length > 1 && kids.every((k) => !rolesUnder(k.name).length);
-    return h('li', {}, treeNode(r), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
+    return h('li', {}, treeNode(r, looks, kids.length), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
   };
   const top = rolesUnder(st.owner).map(branch);
   const lost = st.roles.filter((r) => !reached.has(r.name)).map(branch); // whoever reports to someone missing
@@ -551,13 +638,33 @@ function drawTree(stacked) {
   $('#team-tree').replaceChildren(h('li', {}, owner, top.length || lost.length ? h('ul', {}, top, lost) : null));
 }
 
+function toggleFold(name) {
+  const set = new Set(L.collapsed || []);
+  if (set.has(name)) set.delete(name);
+  else set.add(name);
+  L.collapsed = [...set];
+  saveLayout();
+  renderTree();
+}
+
+/** What a folded part of the team is doing, in one card. */
+function folded(r, below, looks) {
+  const by = {};
+  for (const k of below) by[looks[k.name].cls] = (by[looks[k.name].cls] || 0) + 1;
+  const needs = below.filter((k) => ['asking', 'stuck'].includes(looks[k.name].cls)).length;
+  return h('button', { class: `node folded${needs ? ' asking' : ''}`, title: `Show everyone under ${r.name}`, onclick: () => toggleFold(r.name) },
+    h('b', {}, `${plural(below.length, 'agent')} under ${r.name}`),
+    h('span', { class: 'tb-team' }, Object.entries(by).map(([k, n]) => h('span', { class: `tb-count state ${k}` }, h('b', {}, n),
+      ` ${{ off: 'not running', asking: 'asking you' }[k] || k}`))));
+}
+
 const TREE_MIN_ZOOM = 0.7; // smaller is hard to read: wider than that, the tree scrolls
 
 /** A team wider than the view is drawn smaller to fit it, down to TREE_MIN_ZOOM. False when even that is too wide. */
 function fitTree() {
   const tree = $('#team-tree');
   const box = $('#tree-view');
-  if (box.hidden || !box.clientWidth) return true;
+  if ($('#tree-wrap').hidden || !box.clientWidth) return true;
   tree.style.zoom = '';
   const room = box.clientWidth - 40; // its padding
   const wide = tree.scrollWidth;
@@ -570,43 +677,59 @@ new ResizeObserver(() => {
   if (w && w !== treeWidth) { treeWidth = w; renderTree(); } // a new width may need the other arrangement
 }).observe($('#tree-view'));
 
-function treeNode(r) {
+function treeNode(r, looks, reports) {
   const st = S.state;
-  const s = r.status;
-  const asking = Boolean(r.online && (isAsking(r.name) || r.terminal?.asking));
-  // its own status may lag: a call running (or one a moment ago) says it is at work
-  const busy = r.actions?.some((a) => a.ended_at === null || (!s && Date.now() / 1000 - a.ended_at < 60));
-  const [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you']
-    : busy && (!s || s.state !== 'working') ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'starting'];
-  const what = !r.online ? '' : asking ? 'Its terminal waits for your answer' : s?.task || '';
+  const look = looks[r.name];
+  const needs = st.problems.filter((p) => p.role === r.name && ['question', 'review', 'blocked', 'limit'].includes(p.kind));
   const task = st.tasks.find((t) => t.assignee === r.name && t.state === 'working')
     || st.tasks.find((t) => t.assignee === r.name && ['open', 'blocked'].includes(t.state));
-  const last = S.messages.findLast((m) => m.sender === r.name || m.recipient === r.name);
   const launchable = st.launchable.includes(r.harness);
-  const open = () => { setTeamMode(false); focusPane(r.name); };
-  const card = h('div', {
-    class: `node h-${r.harness}${r.tier ? ' consultant' : ''}${r.online ? '' : ' off'}${asking ? ' asking' : ''}`,
-    role: 'button', tabindex: '0', title: `Open ${r.name}'s terminal`,
-    onclick: open, onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); },
-  },
-  h('div', { class: 'name' }, runningDot(r), badge(r), h('span', { class: 'nm' }, r.name), h('span', { class: 'grow' }),
+  const open = () => focusPane(r.name); // the terminals come back with it
+  const tags = needs.length ? h('div', { class: 'needs' }, needs.map((p) => h('span', { class: `need k-${p.kind}`, title: p.text },
+    { question: 'asks you', review: 'awaits your review', blocked: 'blocked', limit: 'out of usage' }[p.kind]))) : null;
+  const head = h('div', { class: 'name' }, runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
+    h('span', { class: 'grow' }),
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
-    launchable && !r.online ? iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)) : null),
-  h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r)),
-  h('div', { class: 'doing' }, h('span', { class: `state ${cls}` }, label), what ? h('span', { class: 'what', title: what }, what) : null),
-  r.actions?.length ? h('div', { class: 'acts', title: 'What it did last, newest first' }, r.actions.map((a) => h('div', { // not ul/li: the tree's own lines are drawn on those
-    class: a.ended_at === null ? 'running' : '', title: `${a.what}\n${a.ended_at === null ? 'started' : 'done'} at ${fmtTime(a.ended_at ?? a.at)}`,
-  }, h('span', { class: 'what' }, a.what), h('span', { class: 'when', 'data-at': a.ended_at ?? a.at, 'data-running': a.ended_at === null ? '1' : '' }, actionAge(a))))) : null,
-  task ? h('div', { class: 'task', title: `#${task.id} ${task.title} (${task.state})` },
-    `${task.state === 'working' ? 'On' : task.state === 'blocked' ? 'Blocked on' : 'Next'} `, h('b', {}, `#${task.id} ${task.title}`)) : null,
-  last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${last.text.slice(0, 600)}` },
-    `${last.sender === r.name ? `→ ${last.recipient}` : `← ${last.sender}`}: ${last.text.replace(/\s+/g, ' ')}`) : null,
-  h('div', { class: 'facts' },
-    r.stuck ? h('span', { class: 'bad', title: r.stuck.text }, r.stuck.describe) : null,
+    reports ? iconBtn(L.collapsed?.includes(r.name) ? 'unfold' : 'fold',
+      L.collapsed?.includes(r.name) ? `Show the ${plural(reports, 'agent')} under ${r.name}` : `Fold the agents under ${r.name} into one card`,
+      () => toggleFold(r.name)) : null,
+    launchable && !r.online ? iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)) : null);
+  const model = h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r));
+  const facts = h('div', { class: 'facts' },
     r.online > 1 ? h('span', { class: 'bad' }, `${r.online} sessions`) : null,
     r.locks.length ? h('span', { title: r.locks.join('\n') }, `writing ${plural(r.locks.length, 'file')}`) : null,
-    r.open_tasks > (task ? 1 : 0) ? h('span', {}, plural(r.open_tasks, 'open task')) : null,
-    r.usage && totalTokens(r.usage) ? h('span', { title: usageText(r.usage) }, shortUsage(r.usage)) : null));
+    r.open_tasks > (task && r.online ? 1 : 0) ? h('span', {}, plural(r.open_tasks, 'open task')) : null,
+    r.usage && totalTokens(r.usage) ? h('span', { title: usageText(r.usage) }, shortUsage(r.usage)) : null);
+  let body;
+  if (!r.online) { // stopped: what it is and whether work waits for it
+    body = [model, facts.childElementCount ? facts : null];
+  } else {
+    const older = (r.actions || []).filter((a) => a !== look.shown).slice(0, 2);
+    const last = S.messages.findLast((m) => m.sender === r.name || m.recipient === r.name);
+    const since = task?.state === 'working' && task.started_at ? task.started_at : null;
+    body = [
+      model,
+      h('div', { class: `now ${look.cls}` },
+        h('span', { class: `state ${look.cls}` }, look.label),
+        look.now ? h('span', { class: `what${look.shown ? ' cmd' : ''}`, title: look.now }, look.now) : null,
+        look.shown ? h('span', { class: `when${look.shown.ended_at === null ? ' live' : ''}`, 'data-at': look.shown.ended_at ?? look.shown.at,
+          'data-running': look.shown.ended_at === null ? '1' : '' }, actionAge(look.shown)) : null),
+      task ? h('div', { class: 'task', title: `#${task.id} ${task.title} (${task.state})` },
+        `${task.state === 'working' ? 'On' : task.state === 'blocked' ? 'Blocked on' : 'Next'} `, h('b', {}, `#${task.id} ${task.title}`),
+        since ? h('span', { class: 'when', 'data-at': since, 'data-running': '1' }, shortSpan(Date.now() / 1000 - since, true)) : null) : null,
+      older.length ? h('div', { class: 'acts', title: 'What it did before, newest first' }, older.map((a) => h('div', {
+        title: `${a.what}\n${a.ended_at === null ? 'started' : 'done'} at ${fmtTime(a.ended_at ?? a.at)}`,
+      }, h('span', { class: 'what' }, a.what), h('span', { class: 'when', 'data-at': a.ended_at ?? a.at, 'data-running': a.ended_at === null ? '1' : '' }, actionAge(a))))) : null,
+      last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${last.text.slice(0, 600)}` },
+        `${last.sender === r.name ? `→ ${last.recipient}` : `← ${last.sender}`}: ${last.text.replace(/\s+/g, ' ')}`) : null,
+      facts.childElementCount ? facts : null,
+    ];
+  }
+  const card = h('div', {
+    class: `node h-${r.harness} st-${look.cls}${r.tier ? ' consultant' : ''}${r.online ? '' : ' off'}${S.focus === r.name ? ' focus' : ''}`,
+    role: 'button', tabindex: '0', title: `Open ${r.name}'s terminal`, 'data-role': r.name,
+    onclick: open, onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); },
+  }, head, tags, body);
   dropTarget(card, r.name);
   if (!r.tier) dragTeammate(card, r.name);
   return card;
@@ -621,13 +744,14 @@ function shortSpan(s, running) {
   if (s < 5 && !running) return 'now';
   if (s < 60) return `${Math.floor(s)}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m${running && s < 600 ? ` ${String(Math.floor(s % 60)).padStart(2, '0')}s` : ''}`;
-  return `${Math.floor(s / 3600)}h`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h${running ? ` ${Math.floor((s % 3600) / 60)}m` : ''}`;
+  return `${Math.floor(s / 86400)}d`;
 }
 
-// the ages tick on their own: the cards are rebuilt only when something changed
+// the times tick on their own: the cards are rebuilt only when something changed
 setInterval(() => {
-  if (!L.tree || document.hidden || $('#tree-view').hidden) return;
-  for (const el of document.querySelectorAll('#team-tree .acts .when')) {
+  if (!L.tree || document.hidden || $('#tree-wrap').hidden) return;
+  for (const el of document.querySelectorAll('#team-tree .when[data-at]')) {
     el.textContent = shortSpan(Date.now() / 1000 - Number(el.dataset.at), el.dataset.running === '1');
   }
 }, 1000);

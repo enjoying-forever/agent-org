@@ -70,18 +70,22 @@ agent carries on where it stopped.
   shows a summary instead: its program and model, what it does, and its recent messages.
   On the right, the team's messages. Dark or light with the button at the top.
 - **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
-  or the team as a tree, for when you would rather not watch them all: each agent a card under
-  whom it reports to, saying whether it runs, its state and what it says it is doing, its last
-  few actions as they happen (`$ npm test` running for 40s, *Editing src/app.ts* 12s ago - taken from
-  the hooks every tool call goes through, with secrets in commands hidden), an amber *asks you* when
-  its terminal waits for an answer, its task, its last message, and whether it is stuck, which
-  files it is writing and its usage. (Antigravity reports only its edits, DeepSeek nothing yet.)
-  Click a card for that agent's terminal; ▶
-  starts one that is not running. Roles dropped from **+** and teammates dragged onto a card
-  change the team, as in the team list. A team wider than the view is drawn smaller to fit, and
-  if that is not enough, agents with nobody under them go in a column below their manager. The
-  choice of view is remembered for each team; while the Tree (or any other page) shows, the
-  terminals are not read, and what they wrote meanwhile is drawn when they show again.
+  or the team as a tree, for when you would rather not watch them all. Above the tree, the team at a
+  glance (how many work, wait, ask you or are not running) and **what needs you**: a question for
+  you, a task waiting for your review, a terminal asking something, a stuck agent, one with work
+  that is not running - each with its button (*Reply*, *Review*, *Answer it*, *Start*, *Restart*).
+  Below, each agent is a card under whom it reports to. Its highlighted line says what it does
+  right now: the command it runs with how long it has been running (`$ npm test` 1m 20s), or
+  what it says it is doing, or what it did last. Then its task and for how long, its earlier
+  actions, its last message, the files it writes and its usage; a ring shows it at work (green),
+  asking you (amber) or stuck (red). Actions come from the hooks every tool call goes through, with
+  secrets in commands hidden (Antigravity reports only its edits). Stopped agents get a small card
+  with ▶. Click a card for that agent's terminal. A manager's ▴ folds everyone under it into one
+  card saying how they are doing. Roles dropped from **+** and teammates dragged onto a card change
+  the team, as in the team list. A team wider than the view is drawn smaller to fit, and if that is
+  not enough, agents with nobody under them go in a column below their manager. While the Tree (or
+  any other page) shows, the terminals are not read; what they wrote meanwhile is drawn when they
+  show again. The choice of view, and what is folded, is remembered for each team.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
   buttons) and the terminal below; hover the title for its status, model, usage, tasks and files.
   Claude agents start without your personal Claude Code mods (their status lines, such as a

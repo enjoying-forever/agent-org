@@ -529,24 +529,65 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .node .name > :not(.nm) { flex-shrink: 0; }
 .node .name .nm { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node .model { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-wrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tree-view { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 24px 20px 40px; }
+
+/* the bar above the chart: the team at a glance, and what needs you */
+.tree-bar { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 20px 12px; border-bottom: 1px solid var(--edge); }
+.tb-team { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: 13px; }
+.tb-count.state { color: var(--muted); font-weight: 500; font-size: 13px; }
+.tb-count b { color: var(--ink); font-weight: 650; }
+.tb-spent { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.tb-calm { font-size: 12.5px; }
+.tb-needs { display: flex; flex-direction: column; gap: 6px; }
+.tb-needs-head { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0;
+  color: var(--signal); font: inherit; font-size: 13px; cursor: pointer; }
+.tb-needs-head .chev { color: var(--faint); font-size: 11px; }
+.tb-list { display: flex; flex-direction: column; gap: 4px; max-height: 32vh; overflow-y: auto; }
+.tb-need { --kind: var(--idle); display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; font-size: 13px;
+  color: var(--ink); background: var(--sheet); border: 1px solid var(--edge); border-left: 3px solid var(--kind); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
+.tb-need:hover { background: var(--sheet-2); }
+.tb-need:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tb-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-go { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--accent-ink); }
+.k-asking, .k-question { --kind: var(--signal); }
+.k-review { --kind: var(--done); }
+.k-stuck, .k-limit, .k-duplicate, .k-blocked { --kind: var(--danger); }
+.k-stopped { --kind: var(--waiting); }
 .tree-view .node { width: 270px; max-width: none; gap: 5px; padding: 10px 12px 11px; font: inherit; color: var(--ink); cursor: pointer;
   transition: background-color 0.12s, border-color 0.12s; }
 .tree-view .node:hover { background: var(--sheet-2); }
 .tree-view .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tree-view .node.owner { width: auto; min-width: 150px; }
 .tree-view .node.off { opacity: 0.72; }
-.tree-view .node.asking { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
+.tree-view .node.st-working { border-color: color-mix(in srgb, var(--working) 45%, var(--edge)); }
+.tree-view .node.st-asking, .tree-view .node.folded.asking { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
+.tree-view .node.st-stuck { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+.tree-view .node.folded { width: 270px; align-items: flex-start; gap: 6px; border-style: dashed; border-top-style: dashed; font-size: 13px; }
+.tree-view .node.folded .tb-team { gap: 2px 12px; font-size: 12px; }
+.tree-view .node.folded .tb-count.state { font-size: 12px; }
 .tree-view .node.drop-here { box-shadow: var(--glow); }
 .node .name .grow { flex: 1; }
 .node .name .icon-btn { width: 22px; height: 22px; padding: 3px; margin: -3px -4px -3px 0; }
-.node .doing { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: 12.5px; }
-.node .doing .state { flex-shrink: 0; }
-.node .doing .what { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
-.node .acts { margin: 1px 0 1px; padding: 5px 0 0; border-top: 1px solid var(--edge); display: flex; flex-direction: column; gap: 2px;
+/* what it does right now: the line that matters most on a card */
+.node .now { --tint: var(--idle); display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 3px -4px 1px; padding: 6px 8px;
+  border-radius: 6px; font-size: 13px; background: color-mix(in srgb, var(--tint) 9%, var(--well)); }
+.node .now.working { --tint: var(--working); }
+.node .now.asking { --tint: var(--signal); }
+.node .now.stuck, .node .now.blocked { --tint: var(--danger); }
+.node .now.waiting { --tint: var(--waiting); }
+.node .now .state { flex-shrink: 0; font-size: 12px; }
+.node .now .what { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.node .now .what.cmd { font-family: var(--font-code); font-size: 12px; }
+.node .now .when { flex-shrink: 0; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.node .now .when.live { color: var(--working); font-weight: 600; }
+.node .task .when { margin-left: 6px; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.node .needs { display: flex; flex-wrap: wrap; gap: 4px; }
+.node .need { flex-shrink: 0; font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
+  color: var(--kind); background: color-mix(in srgb, var(--kind) 14%, transparent); }
+.node .acts { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px;
   font-family: var(--font-code); font-size: 11.5px; line-height: 1.4; }
 .node .acts > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--faint); }
-.node .acts > :first-child { color: var(--ink); }
 .node .acts .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node .acts .when { flex-shrink: 0; font-family: var(--font-ui); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .node .acts > .running .when { color: var(--working); font-weight: 600; }
@@ -558,6 +599,7 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .node .facts .bad { color: var(--danger); }
 .state.asking { --state: var(--signal); }
 .state.off { --state: var(--idle); font-weight: 500; }
+.state.stuck { --state: var(--danger); }
 .team-mode button { padding: 3px 11px; }
 
 /* ---------- welcome page ---------- */

@@ -147,7 +147,7 @@ const messageJson = (m: Message): Json => ({ id: m.id, sent_at: m.sent_at, sende
   text: m.text, reply_to: m.reply_to, read: m.read_at !== null, urgent: m.urgent, task_id: m.task_id });
 const lockJson = (l: Lock): Json => ({ path: l.path, owner: l.owner, claimed_at: l.claimed_at });
 const taskJson = (t: Task): Json => ({ id: t.id, assigner: t.assigner, assignee: t.assignee, title: t.title, details: t.details,
-  state: t.state, result: t.result, parent_id: t.parent_id, created_at: t.created_at, updated_at: t.updated_at,
+  state: t.state, result: t.result, parent_id: t.parent_id, created_at: t.created_at, updated_at: t.updated_at, started_at: t.started_at,
   done_when: t.done_when, priority: t.priority, after: [...t.depends_on], revisions: t.revisions, checks: t.checks, commit_id: t.commit_id });
 
 export const recentFile = (): string => path.join(templates.homeDir(), 'recent.json');
