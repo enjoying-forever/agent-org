@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { HubError, LockConflict, PermissionDenied } from '../src/hub.ts';
 import { Store } from '../src/store.ts';
-import { makeHub, raises } from './helpers.ts';
+import { makeHub, raises, team } from './helpers.ts';
 
 // messaging: who may talk to whom
 
@@ -166,11 +166,11 @@ test('presence counts live sessions', (t) => {
   store.checkIn(1, 'worker-a');
   store.checkIn(2, 'worker-a');
   store.checkIn(3, 'leader');
-  assert.deepEqual(store.online(), { 'worker-a': 2, leader: 1 });
+  assert.deepEqual({ ...store.online() }, { 'worker-a': 2, leader: 1 });
   store.checkOut(2);
-  assert.deepEqual(store.online(), { 'worker-a': 1, leader: 1 });
+  assert.deepEqual({ ...store.online() }, { 'worker-a': 1, leader: 1 });
   (store as unknown as { db: { exec: (sql: string) => void } }).db.exec('UPDATE presence SET last_seen = last_seen - 60 WHERE pid = 3'); // a crashed session
-  assert.deepEqual(store.online(), { 'worker-a': 1 });
+  assert.deepEqual({ ...store.online() }, { 'worker-a': 1 });
 });
 
 test('unnoticed messages are reported once', (t) => {
@@ -257,4 +257,18 @@ test('racing claims from separate processes have exactly one winner', async (t) 
 test('"owner" reaches the owner whatever their name', (t) => {
   const { hub } = makeHub(t);
   assert.equal(hub.session('leader').send('owner', 'done').recipient, hub.team.owner);
+});
+
+test('names that JavaScript objects already have are names like any other', (t) => {
+  const config = team();
+  (config.roles as Record<string, unknown>).constructor = { superior: 'leader', harness: 'codex', write_scope: [] };
+  const { hub } = makeHub(t, config);
+  const leader = hub.session('leader');
+  assert.equal(leader.send('constructor', 'hi').recipient, 'constructor'); // a real role of that name
+  assert.equal(hub.session('constructor').readInbox().length, 1);
+  assert.equal(hub.store.online().constructor, undefined); // not running: nothing inherited answers for it
+  for (const ghost of ['toString', 'valueOf', '__proto__', 'hasOwnProperty']) {
+    raises(() => leader.send(ghost, 'hi'), HubError, 'is not in this team');
+  }
+  raises(() => leader.assignTask('toString', 'x'), HubError, 'not a role in this team');
 });

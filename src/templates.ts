@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import os from 'node:os';
 import path from 'node:path';
 import { dumpYaml, isMapping, parseYaml } from './team.ts';
+import { dict } from './dict.ts';
 
 type Spec = Record<string, unknown>;
 
@@ -19,7 +20,8 @@ export const CONSULTANTS: Spec = {
 const LEADER_DUTIES = 'Understand what the owner wants, plan it in PLAN.md, split the work into tasks for '
   + 'your team, review what comes back, and report the result to the owner.';
 
-export const TEMPLATES: Record<string, { title: string; summary: string; roles: Record<string, Spec>; consultants?: Spec }> = {
+interface Template { title: string; summary: string; roles: Record<string, Spec>; consultants?: Spec }
+export const TEMPLATES: Record<string, Template> = dict<Template>({
   solo: {
     title: 'Solo',
     summary: 'One Claude agent that does everything itself. The simplest way to start.',
@@ -57,7 +59,7 @@ export const TEMPLATES: Record<string, { title: string; summary: string; roles: 
     },
     consultants: CONSULTANTS,
   },
-};
+});
 
 const MINE = 'my:'; // ids of the teams the owner saved
 const KEEP_OUT = new Set(['owner', 'project_root', 'database']); // these belong to one project, not a saved team
@@ -99,7 +101,7 @@ export function setDefault(template: string): void {
 }
 
 function saved(): Record<string, Spec> {
-  const found: Record<string, Spec> = {};
+  const found = dict<Spec>();
   let files: string[] = [];
   try {
     files = readdirSync(teamsDir()).filter((f) => f.endsWith('.yaml')).sort();

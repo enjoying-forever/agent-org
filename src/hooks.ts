@@ -24,6 +24,7 @@ import * as safety from './safety.ts';
 import * as sessions from './sessions.ts';
 import { type Message, now } from './store.ts';
 import * as usage from './usage.ts';
+import { dict } from './dict.ts';
 
 export const STOP_WAIT = 1800; // seconds a Stop hook waits for messages before letting the agent go round again
 const EDIT_TOOLS = new Set(['edit', 'write', 'multiedit', 'notebookedit', 'apply_patch', 'search_replace',
@@ -321,13 +322,13 @@ function onSession(): HookOut {
   return null; // rememberSession already did the work
 }
 
-export const HANDLERS: Record<string, (me: RoleSession, payload: Payload) => HookOut | Promise<HookOut>> = {
+export const HANDLERS: Record<string, (me: RoleSession, payload: Payload) => HookOut | Promise<HookOut>> = dict({
   stop: (me, payload) => onStop(me, payload),
   'post-tool': onPostTool,
   'pre-edit': onPreEdit,
   session: onSession,
   invocation: onPostTool,
-};
+});
 
 /** Antigravity's hooks speak a different dialect: translate our answer, and always answer. A pre-tool answer
  * must carry a decision: an edit the lease allows is "allow"; a shell command that passed our guard is "ask", so

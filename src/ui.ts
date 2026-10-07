@@ -34,23 +34,24 @@ import * as usage from './usage.ts';
 import * as wake from './wake.ts';
 import * as waker from './waker.ts';
 import * as watchdog from './watchdog.ts';
+import { dict } from './dict.ts';
 
 export const STATIC = path.join(CODE_DIR, '..', 'static');
-const CONTENT_TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
+const CONTENT_TYPES: Record<string, string> = dict({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' });
 export const MAX_BODY = 1_000_000;
 export const NO_TEAM = 'no_team'; // error the page answers by showing the welcome screen
 export const WATCH_EVERY = 30; // seconds between watchdog patrols
 export const AUTOSTART_GAP = 600; // seconds before the same agent is started automatically again
 
 // Effort levels each harness accepts (suggestions in the editor; any text is allowed).
-export const EFFORTS: Record<string, string[]> = {
+export const EFFORTS: Record<string, string[]> = dict({
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
   grok: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   antigravity: ['low', 'medium', 'high'],
   deepseek: [...launch.DSH_EFFORTS],
-};
+});
 const DEEPSEEK_MODELS = ['deepseek-flash', 'deepseek-v4-pro']; // what its API accepts
 // No Haiku: it has no auto mode, so a Haiku agent stops to ask you before every edit and command.
 const CLAUDE_MODELS = ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1'];

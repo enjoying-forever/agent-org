@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
+import { dict } from './dict.ts';
 
 export const HARNESSES = ['claude', 'codex', 'grok', 'antigravity', 'deepseek'] as const;
 const ROLE_KEYS = new Set(['superior', 'harness', 'model', 'effort', 'duties', 'instructions', 'write_scope']);
@@ -129,8 +130,8 @@ export class Team {
     this.owner = owner;
     this.project_root = projectRoot;
     this.database = database;
-    this.roles = roles;
-    this.tiers = tiers;
+    this.roles = dict(roles);
+    this.tiers = dict(tiers);
     this.checks = checks;
     this.settings = settings;
     this.children = new Map([[owner, []], ...Object.keys(roles).map((n) => [n, []] as [string, string[]])]);

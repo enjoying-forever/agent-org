@@ -13,6 +13,7 @@ import { createRequire } from 'node:module';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { registryValues, which } from './runtime.ts';
+import { dict } from './dict.ts';
 
 type Pty = import('@lydell/node-pty').IPty;
 type PtyModule = typeof import('@lydell/node-pty');
@@ -343,6 +344,6 @@ export class TerminalHost {
   }
 
   listing(): Record<string, { id: number; alive: boolean; title: string; color: string }> {
-    return Object.fromEntries(this.items().map(([n, t]) => [n, { id: t.id, alive: t.alive, title: t.title, color: t.color }]));
+    return dict(this.items().map(([n, t]) => [n, { id: t.id, alive: t.alive, title: t.title, color: t.color }] as const));
   }
 }

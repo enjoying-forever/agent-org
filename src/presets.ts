@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from 'node:path';
 import { dumpYaml, HARNESSES, isMapping, NAME_RE, parseYaml } from './team.ts';
 import { homeDir, KeyError } from './templates.ts';
+import { dict } from './dict.ts';
 
 export { KeyError };
 
@@ -21,7 +22,7 @@ const MINE = 'my:';
 const FIELDS = new Set(['harness', 'model', 'effort', 'duties', 'instructions', 'write_scope']); // what a team role gets
 const MAX_TEXT = 8000;
 
-export const BUILT_IN: Record<string, Spec> = {
+export const BUILT_IN: Record<string, Spec> = dict({
   planner: {
     title: 'Planner / leader', icon: '🧭', tags: ['lead', 'planning'],
     description: 'Turns your goal into a plan, hands out tasks and checks every result.',
@@ -87,7 +88,7 @@ export const BUILT_IN: Record<string, Spec> = {
     instructions: 'Keep each change as small as the task allows, and run what you changed before you finish.',
     write_scope: ['*'],
   },
-};
+});
 
 export class RoleError extends Error {
   override name = 'RoleError';
@@ -165,7 +166,7 @@ export function clean(spec: unknown): Spec {
 }
 
 function saved(): Record<string, Spec> {
-  const found: Record<string, Spec> = {};
+  const found = dict<Spec>();
   let files: string[] = [];
   try {
     files = readdirSync(rolesDir()).filter((f) => f.endsWith('.yaml')).sort();

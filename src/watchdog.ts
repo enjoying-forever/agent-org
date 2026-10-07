@@ -18,6 +18,7 @@
 import { describeStuck, HUB, type Hub } from './hub.ts';
 import { now as clockNow, type Task } from './store.ts';
 import * as usage from './usage.ts';
+import { dict } from './dict.ts';
 
 export const STALL = 20 * 60; // seconds without progress before a working task is nudged
 export const HELP_WAIT = 15 * 60; // seconds a question may wait before it is passed up
@@ -52,7 +53,7 @@ export function minutes(seconds: number): string {
 
 /** Agents whose conversation ended on an API error (a usage limit, most often). */
 export function stuckAgents(hub: Hub): Record<string, usage.Stuck> {
-  const found: Record<string, usage.Stuck> = {};
+  const found = dict<usage.Stuck>();
   const activity = hub.store.activity();
   for (const [name, role] of Object.entries(hub.team.roles)) {
     const record = hub.store.getSession(name);

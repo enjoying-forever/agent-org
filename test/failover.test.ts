@@ -202,7 +202,7 @@ test('an agent that worked since is not stuck', (t) => {
   workingTask(hub);
   stuckAs(t, hub, { 'worker-a': { kind: 'error', text: 'API Error: 529', at: now() - 600, until: null } });
   hub.store.touch('worker-a');
-  assert.deepEqual(watchdog.stuckAgents(hub), {});
+  assert.deepEqual({ ...watchdog.stuckAgents(hub) }, {});
 });
 
 test('the stop hook keeps mail for later when out of usage', async (t) => {

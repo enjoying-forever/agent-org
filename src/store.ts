@@ -12,6 +12,7 @@ import path from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { fnmatchcase } from './fnmatch.ts';
 import { CONSULTANT_PREFIX } from './team.ts';
+import { dict } from './dict.ts';
 
 export const LEASE = 3600; // seconds a file lock lasts without the holder doing anything (renewed by its activity)
 
@@ -389,7 +390,7 @@ export class Store {
   unreadCounts(waking = false): Record<string, number> {
     const rows = this.all(`SELECT recipient, COUNT(*) AS n FROM messages WHERE read_at IS NULL${waking ? " AND kind != 'note'" : ''}`
       + ' GROUP BY recipient');
-    return Object.fromEntries(rows.map((r) => [r.recipient as string, Number(r.n)]));
+    return dict(rows.map((r) => [r.recipient as string, Number(r.n)] as const));
   }
 
   /** Each recipient's oldest unread message that wakes it: when it was sent, and its id (which tells one
@@ -397,7 +398,7 @@ export class Store {
   unreadSince(): Record<string, [number, number]> {
     const rows = this.all("SELECT recipient, MIN(sent_at) AS since, MIN(id) AS first FROM messages WHERE read_at IS NULL"
       + " AND kind != 'note' GROUP BY recipient");
-    return Object.fromEntries(rows.map((r) => [r.recipient as string, [Number(r.since), Number(r.first)]]));
+    return dict(rows.map((r) => [r.recipient as string, [Number(r.since), Number(r.first)] as [number, number]] as const));
   }
 
   /** Up to `limit` of the newest messages with an id above `after`, oldest first. */
@@ -521,7 +522,7 @@ export class Store {
   }
 
   statuses(): Record<string, Status> {
-    return Object.fromEntries(this.all('SELECT * FROM status').map((r) => [r.role as string, toStatus(r)]));
+    return dict(this.all('SELECT * FROM status').map((r) => [r.role as string, toStatus(r)] as const));
   }
 
   /** Note that `role` just did something (a tool call): the watchdog's sign of progress. */
@@ -530,7 +531,7 @@ export class Store {
   }
 
   activity(): Record<string, number> {
-    return Object.fromEntries(this.all('SELECT role, at FROM activity').map((r) => [r.role as string, Number(r.at)]));
+    return dict(this.all('SELECT role, at FROM activity').map((r) => [r.role as string, Number(r.at)] as const));
   }
 
   // locks: leases on files or patterns, renewed while their holder is active
@@ -656,8 +657,8 @@ export class Store {
 
   /** Roles with a live session, and how many sessions each has. */
   online(within = 30): Record<string, number> {
-    return Object.fromEntries(this.all('SELECT role, COUNT(*) AS n FROM presence WHERE last_seen > ? GROUP BY role', now() - within)
-      .map((r) => [r.role as string, Number(r.n)]));
+    return dict(this.all('SELECT role, COUNT(*) AS n FROM presence WHERE last_seen > ? GROUP BY role', now() - within)
+      .map((r) => [r.role as string, Number(r.n)] as const));
   }
 
   /** (hub connection pid, harness pid) of each live session of `role`. */

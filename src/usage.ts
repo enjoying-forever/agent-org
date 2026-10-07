@@ -19,6 +19,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import * as sessions from './sessions.ts';
+import { dict } from './dict.ts';
 
 export interface Usage {
   tokens_in: number; // fresh input tokens (including what was written to the cache)
@@ -46,18 +47,18 @@ export function sessionFile(harness: string, sessionId: string | null | undefine
 
 function findFile(harness: string, sessionId: string): string | null {
   const h = sessions.home();
-  const patterns: Record<string, [string, string]> = {
+  const patterns: Record<string, [string, string]> = dict({
     claude: [path.join(h, '.claude', 'projects'), `*/${sessionId}.jsonl`],
     codex: [path.join(h, '.codex', 'sessions'), `*/*/*/rollout-*-${sessionId}.jsonl`],
     grok: [path.join(h, '.grok', 'sessions'), `*/${sessionId}/summary.json`],
     antigravity: [path.join(h, '.gemini', 'antigravity-cli', 'conversations'), `${sessionId}.db`],
-  };
+  });
   const spec = patterns[harness];
   if (spec === undefined) return null;
   return sessions.glob(spec[0], spec[1])[0] ?? null;
 }
 
-const READERS: Record<string, (file: string) => Usage> = { claude: readClaude, codex: readCodex, grok: readGrok, antigravity: readAntigravity };
+const READERS: Record<string, (file: string) => Usage> = dict({ claude: readClaude, codex: readCodex, grok: readGrok, antigravity: readAntigravity });
 
 /** The conversation's usage so far, or null if its file can't be found. Cached per file version. */
 export function usage(harness: string, sessionId: string | null | undefined): Usage | null {

@@ -32,13 +32,14 @@ import {
 } from './store.ts';
 import { dumpYaml, HARNESSES, isMapping, NAME_RE, parseYaml, pyList, Role, Team, TeamError } from './team.ts';
 import * as verify from './verify.ts';
+import { dict } from './dict.ts';
 
 export const STATES = ['idle', 'working', 'waiting', 'blocked', 'done'] as const;
 export const OUTCOMES = ['done', 'blocked', 'failed', 'rejected'] as const;
 export const PRIORITIES: Record<number, string> = { 1: 'urgent', 2: 'normal', 3: 'low' };
 export const MAX_TEXT = 20_000; // characters per message; longer material belongs in a file
 export const MAX_REVISIONS = 3; // send-backs per task before the assigner must decide differently
-export const BROADCAST: Record<string, string> = { '@team': 'your direct subordinates', '@all': 'everyone below you' };
+export const BROADCAST: Record<string, string> = dict({ '@team': 'your direct subordinates', '@all': 'everyone below you' });
 export const HUB = 'hub'; // sender name of the hub's own notices (reminders, escalations)
 
 // The message law, as every agent and the owner read it.
@@ -371,9 +372,9 @@ export class Hub {
   stuck(): Record<string, StuckInfo> {
     try {
       const found = JSON.parse(this.store.getSetting('stuck') || '{}');
-      return isMapping(found) ? (found as Record<string, StuckInfo>) : {};
+      return dict(isMapping(found) ? (found as Record<string, StuckInfo>) : {});
     } catch {
-      return {};
+      return dict();
     }
   }
 
@@ -1158,11 +1159,11 @@ export class RoleSession {
     const team = this.team;
     const statuses = this.store.statuses();
     const online = this.store.online();
-    const locks: Record<string, number> = {};
+    const locks = dict<number>();
     for (const lock of this.store.locks()) locks[lock.owner] = (locks[lock.owner] ?? 0) + 1;
-    const tasks: Record<string, Task[]> = {};
+    const tasks = dict<Task[]>();
     for (const task of this.store.tasks({ openOnly: true })) (tasks[task.assignee] ??= []).push(task);
-    const stuck = Object.fromEntries(Object.entries(this.hub.stuck()).map(([n, info]) => [n, describeStuck(info)]));
+    const stuck = dict(Object.entries(this.hub.stuck()).map(([n, info]) => [n, describeStuck(info)] as const));
     const rows: Snapshot[] = [];
     const walk = (name: string, depth: number): void => {
       for (const child of team.subordinatesOf(name)) {

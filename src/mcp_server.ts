@@ -15,6 +15,7 @@ import { BROADCAST, Hub, HubError, OUTCOMES, type RoleSession } from './hub.ts';
 import * as presets from './presets.ts';
 import type { Lock, Message } from './store.ts';
 import { HARNESSES, TeamError, type Role } from './team.ts';
+import { dict } from './dict.ts';
 
 export const FALLBACK_PROTOCOL = '2025-06-18';
 export const DEFAULT_WAIT = 1800; // seconds; launchers raise each harness's tool timeout above this
@@ -59,14 +60,14 @@ function fmtLock(lock: Lock): string {
 }
 
 /** Names models reach for instead of a tool's own (seen: assign_task(description=...) lost the details). */
-const ARG_ALIASES: Record<string, string[]> = {
+const ARG_ALIASES: Record<string, string[]> = dict({
   description: ['details', 'summary', 'text'], body: ['text', 'details'], content: ['text', 'details'],
   message: ['text'], msg: ['text'], instructions: ['details'], task: ['title', 'task_id'],
   recipient: ['to'], assignee: ['to'], role: ['to', 'name'], id: ['task_id'], task_number: ['task_id'],
   summary: ['result', 'text'], status: ['state', 'outcome'], comment: ['feedback', 'reason'],
   acceptance: ['done_when'], acceptance_criteria: ['done_when'], done_criteria: ['done_when'],
   file: ['path'], file_path: ['path'],
-};
+});
 
 /** The tool catalogue, bound to one role. */
 export class Tools {
@@ -258,7 +259,7 @@ export class Tools {
 
   private types(name: string): Record<string, string> {
     const spec = this.specs.find((s) => s.name === name);
-    return Object.fromEntries(Object.entries(spec?.inputSchema.properties ?? {}).map(([k, v]) => [k, String(v.type ?? '')]));
+    return dict(Object.entries(spec?.inputSchema.properties ?? {}).map(([k, v]) => [k, String(v.type ?? '')] as const));
   }
 
   private add(name: string, description: string, props: Record<string, Record<string, unknown>>, required: string[], handler: Handler): void {

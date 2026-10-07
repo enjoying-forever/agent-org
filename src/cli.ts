@@ -13,8 +13,9 @@ import { Hub, HubError, type RoleSession, type RoleView } from './hub.ts';
 import { tabOpener } from './launch.ts';
 import type { Lock, Message } from './store.ts';
 import { TeamError } from './team.ts';
+import { dict } from './dict.ts';
 
-const COMMANDS: Record<string, [string, string]> = { // name: [arguments, what it does]
+const COMMANDS: Record<string, [string, string]> = dict({ // name: [arguments, what it does]
   tree: ['', 'show the role tree'],
   send: ['TO TEXT [--reply-to ID]', 'message your superior or anyone below you'],
   help: ['TEXT [--reply-to ID]', 'ask your direct superior for help'],
@@ -29,7 +30,7 @@ const COMMANDS: Record<string, [string, string]> = { // name: [arguments, what i
   summon: ['HELP_ID TIER [--brief TEXT]', 'attach a consultant to the sender of a help request you received'],
   dismiss: ['NAME', 'dismiss a consultant working for you or below you'],
   'can-write': ['PATH', 'exit 0 if you hold the lock on PATH, else 1'],
-};
+});
 
 export class UsageError extends Error {}
 

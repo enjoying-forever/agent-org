@@ -25,12 +25,13 @@ import type { Role, Team } from './team.ts';
 import * as templates from './templates.ts';
 import { networkEnv } from './terminals.ts';
 import { DSH_USAGE } from './usage.ts';
+import { dict } from './dict.ts';
 
 export { HOOK_TOOL };
 export const WINDOW = 'agent-org';
 export const WAIT_LIMIT = 3600; // seconds a single wait_for_messages call may take; harness tool timeouts are set to this
-export const TAB_COLORS: Record<string, string> = { claude: '#D97757', codex: '#10A37F', grok: '#8B8B8B', antigravity: '#4285F4',
-  deepseek: '#4D6BFE', owner: '#F2C94C' };
+export const TAB_COLORS: Record<string, string> = dict({ claude: '#D97757', codex: '#10A37F', grok: '#8B8B8B', antigravity: '#4285F4',
+  deepseek: '#4D6BFE', owner: '#F2C94C' });
 
 export interface Launch {
   role: string;
@@ -552,8 +553,8 @@ export const deepseekLaunch: Builder = (hub, teamFile, role, out, resume = null)
   return launch(role, 'deepseek', command, [], env, { script });
 };
 
-export const BUILDERS: Record<string, Builder> = { claude: claudeLaunch, codex: codexLaunch, grok: grokLaunch,
-  antigravity: antigravityLaunch, deepseek: deepseekLaunch };
+export const BUILDERS: Record<string, Builder> = dict({ claude: claudeLaunch, codex: codexLaunch, grok: grokLaunch,
+  antigravity: antigravityLaunch, deepseek: deepseekLaunch });
 
 /** A TOML value for `codex -c key=value`. JSON strings are valid TOML basic strings. */
 export function toml(value: unknown): string {
