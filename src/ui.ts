@@ -623,7 +623,7 @@ export class App {
     const online = store.online();
     const openTasks = store.tasks({ openOnly: true });
     const stuck = this.hub.stuck();
-    const terms = this.inWindow ? this.terminals.listing() : {};
+    const terms = this.inWindow ? this.termListing() : {};
     const roles = [team.leader, ...team.subtreeOf(team.leader)].map((name) => {
       const r = team.roles[name];
       const s = statuses[name];
@@ -659,6 +659,15 @@ export class App {
       launchable: Object.keys(launch.BUILDERS),
       in_window: this.inWindow,
     };
+  }
+
+  /** The open team's terminals, each with whether its program is asking the owner something (a menu, a
+   * permission or trust question) once it has gone quiet - so a page that is not showing the terminals (its
+   * window hidden) can still tell the owner. */
+  private termListing(): Record<string, { id: number; alive: boolean; title: string; color: string; asking: boolean }> {
+    const now = Date.now() / 1000;
+    return Object.fromEntries(this.terminals.items().map(([name, t]) => [name, { id: t.id, alive: t.alive, title: t.title, color: t.color,
+      asking: t.alive && now - t.lastOutput >= waker.QUIET && waker.asking(t) }]));
   }
 
   /** Everything the role has used: every conversation it has had (a fresh start keeps the count), in whichever

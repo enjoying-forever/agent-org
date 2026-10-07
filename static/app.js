@@ -162,7 +162,7 @@ async function poll() {
     await refresh();
   }
   if (S.signedOut) return; // not signed in: stop asking; the sign-in link reloads the page
-  setTimeout(poll, S.mode === 'home' ? 5000 : 1500);
+  setTimeout(poll, S.mode === 'home' || document.hidden ? 5000 : 1500); // hidden: nobody is looking
 }
 
 function setConn(ok, why) {
@@ -783,9 +783,11 @@ function checkAsking(p) {
   }, QUIET_MS);
 }
 
-/** Agents whose terminal shows a question: they wait for you (a desktop notification while you are away). */
+/** Agents whose terminal shows a question: they wait for you (a desktop notification while you are away). While
+ * the window is hidden its terminals are not read (see termLoop): agent-org's own reading of them says. */
 function askingProblems() {
-  return [...PANES.values()].filter((p) => p.asking && p.term).map((p) => ({
+  const asks = (p) => (document.hidden ? Boolean(findRole(p.name)?.terminal?.asking) : p.asking);
+  return [...PANES.values()].filter((p) => p.term && asks(p)).map((p) => ({
     kind: 'asking', role: p.name, action: 'show-pane', text: `${p.name} is asking something in its terminal: answer it there.`,
   }));
 }
@@ -870,8 +872,17 @@ function wakeTerms() {
   if (!S.termLoop) { S.termLoop = true; termLoop(); }
 }
 
+// While the window is hidden nobody sees the terminals: their output waits in agent-org (the last 400,000
+// characters of each) and is drawn when the window shows again, instead of costing work all the time.
+const untilShown = () => new Promise((r) => {
+  const shown = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', shown); r(); } };
+  document.addEventListener('visibilitychange', shown);
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) termPoll?.abort(); });
+
 async function termLoop() {
   while (S.mode === 'team' && !S.signedOut) {
+    if (document.hidden) { await untilShown(); continue; }
     const wants = {};
     for (const p of PANES.values()) if (p.term) wants[p.name] = [p.termId, p.next];
     if (!Object.keys(wants).length) { await pause(1000); continue; }

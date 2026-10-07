@@ -95,3 +95,19 @@ test('without a window, showing it opens a signed-in page in the browser', async
   assert.equal(server.app.window.show(), 'browser');
   assert.match(opened[0], new RegExp(`^http://127\\.0\\.0\\.1:${server.port}/\\?code=[\\w-]+$`));
 });
+
+test("the state says which agent's terminal is asking the owner something", async (t) => {
+  const server = await startServer(t);
+  server.app.inWindow = true;
+  const now = Date.now() / 1000;
+  const fake = (output: string, quietFor: number) => ({ id: 1, alive: true, title: 't', color: '', lastOutput: now - quietFor,
+    end: output.length, chunk: (from: number) => ({ data: output.slice(from) }), close() {} });
+  const terms = (server.app.terminals as unknown as { terms: Map<string, unknown> }).terms;
+  terms.set('leader', fake('Do you want to make this edit?\n❯ 1. Yes\n  2. No (esc)\n', 10));
+  terms.set('tech-lead', fake('Do you want to make this edit?\n❯ 1. Yes\n', 0.5)); // still drawing: not yet
+  terms.set('worker-a', fake('All done. Would you like anything else?\n> ', 10)); // a question in its answer only
+  terms.set('worker-b', fake('Do you trust the files in this folder?\n> Yes\n', 10));
+  const roles = Object.fromEntries((await server.ok('/api/state')).roles.map((r: any) => [r.name, r.terminal?.asking]));
+  assert.deepEqual(roles, { leader: true, 'tech-lead': false, researcher: undefined, 'worker-a': false, 'worker-b': true });
+  terms.clear();
+});
