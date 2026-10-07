@@ -89,7 +89,7 @@ const isFile = (p: string): boolean => {
 /** The conversation `role` would resume, if its harness still has one. Prefers the id on record; otherwise
  * searches the harness's saved conversations for this role's kickoff (a team from before ids were kept, or Codex
  * before its hooks were trusted) and records what it finds. */
-export function resumableSession(hub: Hub, role: string): string | null {
+export function resumableSession(hub: Hub, role: string, search = true): string | null {
   const spec = hub.team.roles[role];
   if (spec.harness === 'deepseek') { // its runs keep their conversation's id in the launch folder
     const kept = path.join(path.dirname(hub.team.database), 'launch', role, DSH_SESSION);
@@ -106,6 +106,7 @@ export function resumableSession(hub: Hub, role: string): string | null {
       return own;
     }
   }
+  if (!search) return null; // the saved conversations are searched when the role starts (it takes a while)
   const database = hub.team.database;
   const since = isFile(database) ? sessions.born(database) - 60 : 0; // not another team's (see find)
   const found = sessions.find(spec.harness, hub.rootOf(role), role, since);

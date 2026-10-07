@@ -633,7 +633,7 @@ export class App {
     const sid = record && record.harness === harness ? record.session_id : null;
     const cached = this.resumable.get(role);
     if (cached && cached[0] === sid && Date.now() / 1000 - cached[2] < (sid ? 30 : 300)) return cached[1];
-    const found = launch.resumableSession(this.hub, role) !== null;
+    const found = launch.resumableSession(this.hub, role, false) !== null; // the conversation on record (a search: 0.4 s)
     this.resumable.set(role, [sid, found, Date.now() / 1000]);
     return found;
   }
