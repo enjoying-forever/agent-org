@@ -362,14 +362,21 @@ export function installAntigravityPlugin(): void {
   const marker = path.join(folder, '.installed');
   const agy = which('agy');
   if (agy === null || inTest()) return; // a test never changes the real Antigravity
+  if (pluginChecked === wanted) return; // already checked by this agent-org (asking agy takes a quarter second)
   const listed = run(agy, ['plugin', 'list']).out;
   const installed = listed.includes('"agent-org"');
-  if (installed && isFile(marker) && readFileSync(marker, 'utf8') === wanted) return;
+  if (installed && isFile(marker) && readFileSync(marker, 'utf8') === wanted) {
+    pluginChecked = wanted;
+    return;
+  }
   if (installed) run(agy, ['plugin', 'uninstall', 'agent-org']); // an older copy: replace it
   const done = run(agy, ['plugin', 'install', folder]);
   if (!done.ok) throw new HubError(`could not install agent-org's Antigravity plugin: ${done.out.trim().slice(0, 200)}`);
   writeFileSync(marker, wanted, 'utf8');
+  pluginChecked = wanted;
 }
+
+let pluginChecked = ''; // the plugin this process found (or made) installed
 
 export function antigravityKickoff(role: string, resume: boolean): string {
   const where = ` In Antigravity call them with call_mcp_tool, ServerName agent-org_${SERVER_NAME} (my_role: Arguments {}); `
