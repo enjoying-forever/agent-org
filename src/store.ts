@@ -164,6 +164,7 @@ const INDEXES = `
 CREATE INDEX IF NOT EXISTS messages_unread ON messages(recipient) WHERE read_at IS NULL;
 CREATE INDEX IF NOT EXISTS messages_task ON messages(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS messages_sent ON messages(sent_at);
+CREATE INDEX IF NOT EXISTS messages_kind ON messages(recipient, kind, id);
 `;
 
 const UPGRADES: Record<string, Record<string, string>> = {
