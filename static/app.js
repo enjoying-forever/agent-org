@@ -154,16 +154,55 @@ async function refresh() {
   }
 }
 
-async function poll() {
+async function update() {
   if (S.mode === 'home') {
     try {
-      if ((await api('/api/home')).open) await refresh();  // a team was opened elsewhere
+      if ((await api('/api/home')).open) await refresh(); // a team was opened elsewhere
     } catch { /* retried next time */ }
   } else {
     await refresh();
   }
+}
+
+// Updates come when agent-org says something changed (see liveLoop), one at a time: a change during an update
+// brings one more. While the window is hidden, at most one every 5 s: nobody is looking.
+const U = { running: false, again: false, last: 0 };
+function nudge() {
+  if (U.running) { U.again = true; return; }
+  U.running = true;
+  const wait = document.hidden ? Math.max(0, U.last + 5000 - Date.now()) : 0;
+  setTimeout(async () => {
+    try { await update(); } finally {
+      Object.assign(U, { running: false, last: Date.now() });
+      if (U.again) { U.again = false; nudge(); }
+    }
+  }, wait);
+}
+
+/** agent-org's live stream: a line each time what the page shows may have changed. */
+async function liveLoop() {
+  while (!S.signedOut) {
+    try {
+      const r = await fetch('/api/live', { headers: PAGE_HEADERS, credentials: 'same-origin' });
+      if (!r.ok || !r.body) throw new Error(String(r.status));
+      S.live = true;
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) break;
+        nudge();
+      }
+    } catch { /* agent-org restarting, or not signed in yet: try again */ }
+    S.live = false;
+    await pause(2000);
+  }
+}
+
+/** The safety net under the live stream (and all there is without it). */
+function poll() {
   if (S.signedOut) return; // not signed in: stop asking; the sign-in link reloads the page
-  setTimeout(poll, S.mode === 'home' || document.hidden ? 5000 : 1500); // hidden: nobody is looking
+  nudge();
+  setTimeout(poll, S.live ? 15000 : S.mode === 'home' || document.hidden ? 5000 : 1500);
 }
 
 function setConn(ok, why) {
@@ -1702,6 +1741,7 @@ function showView(v) {
   $('#layout-menu').hidden = S.mode !== 'team' || v !== 'team' || Boolean(L.tree);
   if (v === 'team' && S.state) { setTimeout(applyLayout, 0); renderTree(); } // once the view has its size again
   if (v === 'roles') { closeDrawer(); loadRoles(); }
+  if (v === 'board' && S.boardStale && S.state) renderBoard();
   termsMoved();
 }
 
@@ -1773,3 +1813,4 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#dra
 // ---------- start ----------
 
 poll(); // without a session the first request answers 403 and the sign-in note shows
+liveLoop();

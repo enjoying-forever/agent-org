@@ -1,6 +1,7 @@
 // The owner's page: its API, the welcome page, the team editor and the Role Market.
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { test } from 'node:test';
 import * as doctor from '../src/doctor.ts';
@@ -9,6 +10,7 @@ import { parseYaml, Team } from '../src/team.ts';
 import * as templates from '../src/templates.ts';
 import * as ui from '../src/ui.ts';
 import * as sessions from '../src/sessions.ts';
+import { Store } from '../src/store.ts';
 import * as usage from '../src/usage.ts';
 import * as watchdog from '../src/watchdog.ts';
 import { cleanup, freshHome, raises, rejects, TEAM, tmpDir } from './helpers.ts';
@@ -573,4 +575,31 @@ test('one message by id, for a link to one older than the page keeps', async (t)
   assert.equal((await server.ok(`/api/message?id=${sent.id}`)).message.text, 'an old question');
   assert.equal((await server.request('/api/message?id=999'))[0], 404);
   assert.equal((await server.request('/api/message?id=x'))[0], 400);
+});
+
+test("the page's live stream says when something changed, and only then", async (t) => {
+  const server = await startServer(t);
+  const lines: string[] = [];
+  const res = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port: server.port, path: '/api/live', agent: false,
+      headers: { Host: `127.0.0.1:${server.port}`, 'X-Org-Token': 'secret' } }, resolve);
+    req.on('error', reject);
+  });
+  cleanup(t, () => res.destroy());
+  assert.equal(res.statusCode, 200);
+  res.setEncoding('utf8').on('data', (c: string) => lines.push(...c.split('\n').filter((l) => l)));
+  const until = async (n: number): Promise<void> => {
+    for (let i = 0; i < 40 && lines.length < n; i++) await new Promise((r) => setTimeout(r, 50));
+  };
+  await until(1);
+  await new Promise((r) => setTimeout(r, 700));
+  const settled = lines.length; // the first line, and one for the key it starts from
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(lines.length, settled); // nothing changed: nothing said
+  const agent = new Store(server.hub.team.database); // as an agent's own process writes
+  cleanup(t, () => agent.close());
+  agent.setStatus('worker-a', 'working', 'on it');
+  await until(settled + 1);
+  assert.equal(lines.length, settled + 1);
+  assert.equal((await server.request('/api/live', undefined, { token: null }))[0], 403); // only for the signed-in page
 });

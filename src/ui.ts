@@ -705,9 +705,36 @@ export class App {
    * permission or trust question) once it has gone quiet - so a page that is not showing the terminals (its
    * window hidden) can still tell the owner. */
   private termListing(): Record<string, { id: number; alive: boolean; title: string; color: string; asking: boolean }> {
-    const now = Date.now() / 1000;
     return Object.fromEntries(this.terminals.items().map(([name, t]) => [name, { id: t.id, alive: t.alive, title: t.title, color: t.color,
-      asking: t.alive && now - t.lastOutput >= waker.QUIET && waker.asking(t) }]));
+      asking: this.termAsking(t) }]));
+  }
+
+  private readonly askingSeen = new Map<number, [number, boolean]>(); // terminal id -> [its output's end, asking]
+
+  /** Whether a terminal, gone quiet, asks the owner something; looked at again only when it printed more. */
+  private termAsking(t: terminals.Terminal): boolean {
+    if (!t.alive || Date.now() / 1000 - t.lastOutput < waker.QUIET) return false;
+    const seen = this.askingSeen.get(t.id);
+    if (seen !== undefined && seen[0] === t.end) return seen[1];
+    const asking = waker.asking(t);
+    if (this.askingSeen.size > 200) this.askingSeen.clear();
+    this.askingSeen.set(t.id, [t.end, asking]);
+    return asking;
+  }
+
+  /** Changes whenever what the page shows may have: the hub's database (written by any agent), team.yaml, or the
+   * window's terminals (one starting or ending, or going quiet with a question). Cheap: the page's live stream
+   * asks for it four times a second, and fetches the state only when it changed. */
+  liveKey(): string {
+    if (this.hubOrNull === null || this.teamFile === null) return 'no team';
+    let edited = 0;
+    try {
+      edited = statSync(this.teamFile).mtimeMs;
+    } catch {
+      // gone: the state says so
+    }
+    const terms = this.inWindow ? this.terminals.items().map(([n, t]) => `${n}:${t.id}:${t.alive ? 1 : 0}:${this.termAsking(t) ? 1 : 0}`).join(',') : '';
+    return `${this.teamFile}|${this.hub.store.dataVersion()}|${edited}|${terms}`;
   }
 
   /** Everything the role has used: every conversation it has had (a fresh start keeps the count), in whichever
@@ -1127,6 +1154,7 @@ export const POST_ROUTES: Record<string, Route> = {
 export const COOKIE = 'agent_org_session';
 export const CODE_TTL = 120; // seconds a sign-in link works (and it works once)
 export const PAGE_HEADER = 'X-Agent-Org'; // the page sends it; a form or a plain link from another site cannot
+const LIVE_EVERY_MS = 250; // how often the live stream looks for a change
 export const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
     + "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
@@ -1235,7 +1263,40 @@ function handler(app: App, access: Access, port: () => number): http.RequestList
     await call(req, res, where, (signal) => route(app, arg, signal));
   };
 
+  // The page's live stream: a line whenever something it shows may have changed, so it asks for the state at once
+  // (and only then) instead of every second or two. The stream itself costs a database question 4 times a second.
+  const live = new Set<http.ServerResponse>();
+  let liveKey = '';
+  let liveTimer: NodeJS.Timeout | null = null;
+  const liveTick = (): void => {
+    let key: string;
+    try {
+      key = app.liveKey();
+    } catch {
+      key = 'unknown';
+    }
+    if (key === liveKey) return;
+    liveKey = key;
+    for (const r of live) r.write('changed\n');
+  };
+  const openLive = (req: http.IncomingMessage, res: http.ServerResponse): void => {
+    if (!sameSite(req)) return json(req, res, 403, { error: 'requests must come from the agent-org page' });
+    if (!signedIn(req)) return json(req, res, 403, { error: 'not signed in' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
+    res.write('changed\n'); // the page catches up first
+    live.add(res);
+    liveTimer ??= setInterval(liveTick, LIVE_EVERY_MS).unref();
+    res.on('close', () => {
+      live.delete(res);
+      if (!live.size && liveTimer !== null) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+      }
+    });
+  };
+
   const get = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> => {
+    if (url.pathname === '/api/live') return openLive(req, res);
     if (url.pathname.startsWith('/api/')) return api(req, res, GET_ROUTES, url.pathname, url.searchParams);
     const code = url.searchParams.get('code') ?? '';
     if (url.pathname === '/' && code) { // a sign-in link: trade the one-time code for the session cookie

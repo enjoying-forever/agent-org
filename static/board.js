@@ -20,6 +20,8 @@ function renderBoard() {
   const tasks = S.state.tasks;
   const open = tasks.filter((t) => !['accepted', 'failed', 'rejected', 'cancelled'].includes(t.state));
   $('#board-count').textContent = open.length ? `(${open.length})` : '';
+  S.boardStale = $('#view-board').hidden; // drawn when it shows
+  if (S.boardStale) return;
   const sel = $('#board-role');
   const keep = sel.value;
   sel.replaceChildren(h('option', { value: '' }, 'Everyone'),

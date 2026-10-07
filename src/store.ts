@@ -602,6 +602,11 @@ export class Store {
     return out;
   }
 
+  /** A number that changes whenever another connection (an agent's tool server or hook) has changed the database. */
+  dataVersion(): number {
+    return Number(this.get('PRAGMA data_version')?.data_version ?? 0);
+  }
+
   activity(): Record<string, number> {
     return dict(this.all('SELECT role, at FROM activity').map((r) => [r.role as string, Number(r.at)] as const));
   }
