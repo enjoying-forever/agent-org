@@ -41,9 +41,15 @@ page's JSON); functions and methods are camelCase. Tests use `node:test` in `tes
 Found while porting:
 - The `yaml` package's YAML 1.1 mode reads a lone `.` as NaN: team files are parsed as YAML 1.2.
 - Time zones come from Intl (every JavaScript engine has them): no tzdata package.
-- Agent-org's own programs (tool server, hooks, DeepSeek's waiter) run on the Node that runs agent-org:
-  inside the app that is Electron with ELECTRON_RUN_AS_NODE=1. Hook commands are plain command lines run
-  by several shells, so inside the app they go through ~/.agent-org/bin/org_hook.cmd, which sets it.
+- Agent-org's own programs (tool server, DeepSeek's waiter) run on the Node that runs agent-org: inside
+  the app that is Electron with ELECTRON_RUN_AS_NODE=1. Hook commands are plain command lines run by
+  several shells: inside the app they name the computer's own node.exe (installing needs one), else
+  ~/.agent-org/bin/org_hook.cmd, which sets ELECTRON_RUN_AS_NODE (and costs a cmd.exe: 55 ms a hook).
+- In the window an agent whose start is one program runs it directly (start.json beside start.ps1; an
+  npm .cmd shim resolved to its .exe or node + script), not in PowerShell (35 MB an agent); when it
+  ends, a PowerShell prompt follows in the same terminal, as the start script's used to stay.
+- npm installs a .ps1 shim beside each .cmd, and PowerShell prefers it: so a start script's multi-line
+  argument (Grok's --rules) arrives whole. Through a .cmd alone, cmd.exe would cut it at the first line.
 - Windows Terminal's wt.exe is an app execution alias: stat fails on it, lstat sees a link. `which`
   takes such a link as found (the Python setup check had the same need).
 - node-pty ends a terminal asynchronously: TerminalHost.closeAll returns a promise for the programs' end.
