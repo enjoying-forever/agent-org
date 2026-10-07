@@ -79,7 +79,7 @@ function dropTarget(el, superior) {
   });
 }
 
-/** A teammate in the team list can be dragged onto another one. */
+/** A teammate in the sidebar can be dragged onto another one. */
 function dragTeammate(el, name) {
   el.draggable = true;
   el.addEventListener('dragstart', (e) => {

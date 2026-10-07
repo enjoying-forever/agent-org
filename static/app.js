@@ -250,7 +250,8 @@ function enterTeam() {
   $('#view-home').hidden = true;
   $('#view-roles').hidden = true;
   $('#market-btn').hidden = true;
-  for (const id of ['#views', '#conn', '#switch-btn', '#save-template', '#stop-all', '#launch-all']) $(id).hidden = false;
+  for (const id of ['#sidebar', '#views', '#conn', '#switch-btn', '#save-template', '#stop-all', '#launch-all', '#rail-toggle']) $(id).hidden = false;
+  document.body.dataset.mode = 'team';
   showView('team');
 }
 
@@ -261,10 +262,12 @@ function enterHome() {
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
-  for (const id of ['#view-team', '#view-board', '#view-roles', '#views', '#conn', '#switch-btn', '#save-template',
+  for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#switch-btn', '#save-template',
     '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
+  document.body.dataset.mode = 'home';
+  $('#bar-title').textContent = '';
   $('#market-btn').hidden = false;
   $('#project').textContent = '';
   $('#view-home').hidden = false;
@@ -418,7 +421,7 @@ function renderGuide() {
   const running = st.roles.some((r) => r.online || r.resumes); // launched now, or before (a conversation to resume)
   const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
   const steps = [
-    { done: true, text: 'Check the team: click a teammate in the team list to change its program, its model or whom it reports to.' },
+    { done: true, text: 'Check the team: click a teammate in the sidebar to change its program, its model or whom it reports to.' },
     { done: running, text: `Click "Launch team". ${st.in_window ? 'Each agent starts in its own terminal on this page' : 'Each agent opens in its own terminal tab'}. The first time, `
       + 'say yes when Claude or Codex asks to trust the folder, and choose "Trust all and continue" when '
       + 'Codex asks to review hooks.' },
@@ -502,20 +505,21 @@ function renderChart() {
     const row = h('button', {
         class: `rail-item${S.focus === r.name ? ' focus' : ''}${L.hidden?.includes(r.name) ? ' closed' : ''}`
           + `${isAsking(r.name) ? ' asking' : ''}`,
-        style: { paddingLeft: `${8 + depth * 14}px` },
+        style: { paddingLeft: `${10 + depth * 14}px` },
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
       },
-      runningDot(r), h('span', { class: 'nm' }, r.name), badge(r),
-      count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null);
+      h('span', { class: 'ri-top' }, runningDot(r), h('span', { class: 'nm' }, r.name), badge(r),
+        count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null),
+      h('span', { class: `ri-sub${r.online ? '' : ' off'}` }, r.online ? agentLook(r).now || agentLook(r).label : 'not running')); // what it does, as a thread's preview
     if (!r.tier) dragTeammate(row, r.name);
     dropTarget(row, r.name);
     return h('li', {}, row, kids.length ? h('ul', {}, kids.map((k) => item(k, depth + 1))) : null);
   };
   const ownerRow = h('button', {
     class: 'rail-item owner', title: 'Messages to you', onclick: () => { showTab('messages'); setFilter('me'); },
-  }, h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)')),
-  st.owner_unread ? h('span', { class: 'pill hot' }, st.owner_unread) : null);
+  }, h('span', { class: 'ri-top' }, h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)')),
+    st.owner_unread ? h('span', { class: 'pill hot' }, st.owner_unread) : null));
   dropTarget(ownerRow, st.owner);
   const owner = h('li', {}, ownerRow);
   $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
@@ -816,7 +820,7 @@ function renderPanes() {
   for (const [name, p] of PANES) if (!names.has(name)) { dropPane(p); PANES.delete(name); }
   box.querySelector(':scope > .empty')?.remove();
   if (!order.length) {
-    box.append(h('div', { class: 'empty' }, 'No roles yet. Add one with + in the team list.'));
+    box.append(h('div', { class: 'empty' }, 'No roles yet. Add one with + next to Agents in the sidebar.'));
     return;
   }
   order.forEach((r, i) => {
@@ -1304,6 +1308,7 @@ applyTheme(chosenTheme() || (LIGHT_SYSTEM.matches ? 'light' : 'dark'));
 LIGHT_SYSTEM.addEventListener('change', () => { if (!chosenTheme()) applyTheme(LIGHT_SYSTEM.matches ? 'light' : 'dark'); });
 
 $('#rail-checks').addEventListener('click', () => $('#checks-btn').click());
+$('#sb-new').addEventListener('click', () => $('#new-task-btn').click());
 $('#rail-add').addEventListener('click', (e) => togglePalette(e));
 
 /** The session at a glance: green running, grey stopped, red when two sessions share the role. */
@@ -1602,7 +1607,7 @@ function renderRecipients() {
   const task = S.compose === 'task';
   sel.replaceChildren(
     ...S.state.roles.filter((r) => !(task && r.tier)).map((r) =>
-      h('option', { value: r.name }, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader ? ' (leader)' : ''}`)),
+      h('option', { value: r.name }, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader && r.name !== 'leader' ? ' (leader)' : ''}`)),
     !task && h('option', { value: '@all' }, 'To everyone'));
   sel.value = [...sel.options].some((o) => o.value === keep) ? keep : S.state.leader;
 }
@@ -1629,7 +1634,9 @@ function setCompose(mode) {
   $('#composer-hint').textContent = task
     ? 'They must close it with a result: done or blocked.'
     : 'Every message wakes its receiver: say it once, say it all.';
-  $('#send-btn').textContent = task ? 'Give task' : 'Send';
+  $('#composer').title = $('#composer-hint').textContent;
+  $('#send-btn').title = task ? 'Give the task (Ctrl+Enter)' : 'Send (Ctrl+Enter)';
+  $('#send-btn').setAttribute('aria-label', task ? 'Give the task' : 'Send');
   if (task) clearReply();
   if (S.state) renderRecipients();
 }
@@ -1763,7 +1770,8 @@ function showView(v) {
   $('#view-board').hidden = v !== 'board';
   $('#view-roles').hidden = v !== 'roles';
   $('#launch-all').hidden = S.mode !== 'team';
-  for (const id of ['#rail-toggle', '#side-toggle', '#team-mode']) $(id).hidden = S.mode !== 'team' || v !== 'team';
+  for (const id of ['#side-toggle', '#team-mode']) $(id).hidden = S.mode !== 'team' || v !== 'team';
+  $('#bar-title').textContent = S.mode === 'team' ? { team: 'Team', board: 'Board', roles: 'Role Market' }[v] : '';
   $('#layout-menu').hidden = S.mode !== 'team' || v !== 'team' || Boolean(L.tree);
   if (v === 'team' && S.state) { setTimeout(applyLayout, 0); renderTree(); } // once the view has its size again
   if (v === 'roles') { closeDrawer(); loadRoles(); }

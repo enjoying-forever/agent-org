@@ -63,14 +63,18 @@ agent carries on where it stopped.
 
 ## What you see
 
-- **Team:** on the left, the team as a tree (who reports to whom, who is running, unread
-  messages and open tasks). In the middle, one pane per agent: its **live terminal** - click
-  in it and type, exactly as in its own console - with buttons to give it a task, start,
-  restart or stop it, and its details (notes, files, usage). An agent that is not running
-  shows a summary instead: its program and model, what it does, and its recent messages.
-  On the right, the team's messages. It looks like the Codex app: neutral grays, black-and-white
-  pill buttons, one plain sans, and the window's own buttons in its top bar. Light or dark follows
-  Windows until you choose with the button at the top.
+- **Laid out like the Codex app:** a sidebar on the left, the whole height of the window, with
+  **New task**, the pages (Team, Board, Roles) and the **Agents** as its list of threads - each with
+  whether it runs, its unread messages and, below its name, what it is doing right now. Click one
+  for its terminal; Ctrl+Alt+B or the button at the top left hides the sidebar, and its edge drags
+  wider. In the middle, the page; on the right, the team's messages, with a message box like the
+  Codex composer (Message or Task, to whom, urgent, and a round send button). Neutral grays,
+  black-and-white pill buttons, one plain sans, and the window's own buttons in its top bar. Light
+  or dark follows Windows until you choose with the button at the top.
+- **Team:** one pane per agent: its **live terminal** - click in it and type, exactly as in its own
+  console - with buttons to give it a task, start, restart or stop it, and its details (notes,
+  files, usage). An agent that is not running shows a summary instead: its program and model, what
+  it does, and its recent messages.
 - **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
   or the team as a tree, for when you would rather not watch them all. Above the tree, the team at a
   glance (how many work, wait, ask you or are not running) and **what needs you**: a question for
@@ -84,7 +88,7 @@ agent carries on where it stopped.
   secrets in commands hidden (Antigravity reports only its edits). Stopped agents get a small card
   with ▶. Click a card for that agent's terminal. A manager's ▴ folds everyone under it into one
   card saying how they are doing. Roles dropped from **+** and teammates dragged onto a card change
-  the team, as in the team list. A team wider than the view is drawn smaller to fit, and if that is
+  the team, as in the sidebar. A team wider than the view is drawn smaller to fit, and if that is
   not enough, agents with nobody under them go in a column below their manager. While the Tree (or
   any other page) shows, the terminals are not read; what they wrote meanwhile is drawn when they
   show again. The choice of view, and what is folded, is remembered for each team.
@@ -95,16 +99,16 @@ agent carries on where it stopped.
 - **Arranging the workspace:** the page never scrolls; the panes tile the space. The grid
   button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
-  and the edges of the team list and the messages, or hide either with the buttons at the
+  and the edges of the sidebar and the messages, or hide either with the buttons at the
   top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
-  agent keeps running; click it in the team list to bring the pane back). What waits for you
+  agent keeps running; click it in the sidebar to bring the pane back). What waits for you
   shows where it is: a stuck agent or a second session in its pane's title, unread messages
   as a count, and an agent whose terminal is asking something (a permission, "trust this
   folder?") as an amber outline on its pane until you answer. While the window is in the
   background, an agent that gets stuck or runs out of usage brings a desktop notification. Drag a
   pane by its title onto another to swap them. The arrangement is remembered for each team, and the
   window comes back where and as big as it was.
-- **Changing the team right there:** the **+** in the team list opens your roles: drag one onto
+- **Changing the team right there:** the **+** next to Agents in the sidebar opens your roles: drag one onto
   a teammate (in the list or onto its pane) and it joins the team under them. Drag a teammate
   onto another to change whom it reports to. Click a teammate's badge (C, X, G, A) for its card:
   program, model, reasoning effort, whom it reports to, duties, instructions and files, *Save*
@@ -131,7 +135,7 @@ agent carries on where it stopped.
 - **Files:** who is writing which file right now, and for which task.
 - **Usage:** each agent's tokens so far, over every conversation it has had (a fresh start
   keeps the count), in its pane's title - hover it for new, cached and output tokens and
-  the model - and the team's total at the bottom of the team list. Read from each program's
+  the model - and the team's total at the bottom of the sidebar. Read from each program's
   own records: Claude Code's and Codex's session files, Antigravity's conversation
   database, DeepSeek's run events, and Grok's turn records (a Grok turn is counted when it
   ends). For Codex the title also shows how much of your subscription limit is used.
@@ -329,7 +333,7 @@ tester, researcher, Gemini coder) and your own.
 - **Add to team** places a role in the open team: choose its name and whom it reports to.
 - **Build a new team from roles:** under *Create a new team*, choose *Build my own from the
   Role Market*, add roles, and set whom each reports to - the first one leads.
-- The **+** in the team list offers the market: drag a role onto a teammate. Managers can hire
+- The **+** next to Agents in the sidebar offers the market: drag a role onto a teammate. Managers can hire
   from it too: `hire_agent(name, preset="reviewer")`.
 
 Your roles are kept in `~/.agent-org/roles/`.

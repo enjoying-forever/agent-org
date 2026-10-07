@@ -169,7 +169,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 /* ---------- title bar ---------- */
 .bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   padding: 0 14px;
@@ -232,13 +232,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 /* ---------- team view: rail, agent panes, messages ---------- */
 .team-view {
   flex: 1; min-height: 0; display: grid; padding: 0 10px 10px;
-  grid-template-columns: var(--rail-w, 236px) 10px minmax(0, 1fr) 10px var(--side-w, 400px);
+  grid-template-columns: minmax(0, 1fr) 10px var(--side-w, 400px);
   grid-template-rows: minmax(0, 1fr);
 }
-.team-view.no-rail { grid-template-columns: 0 0 minmax(0, 1fr) 10px var(--side-w, 400px); }
-.team-view.no-side { grid-template-columns: var(--rail-w, 236px) 10px minmax(0, 1fr) 0 0; }
-.team-view.no-rail.no-side { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
-.team-view.no-rail .rail, .team-view.no-rail .rail-gutter,
+.team-view.no-side { grid-template-columns: minmax(0, 1fr) 0 0; }
 .team-view.no-side .side, .team-view.no-side .side-gutter { display: none; }
 .rail, .side {
   display: flex; flex-direction: column; min-height: 0; min-width: 0;
@@ -831,11 +828,9 @@ button.taskc { text-align: left; cursor: pointer; }
 .pane-head .icon-btn { width: 24px; height: 24px; }
 .pane-head .icon-btn svg { width: 13px; height: 13px; }
 /* fixed columns, so hiding the team list or the messages never moves the panes into their place */
-.team-view > .rail { grid-column: 1; }
-.team-view > .rail-gutter { grid-column: 2; }
-.team-view > .chart-pane { grid-column: 3; }
-.team-view > .side-gutter { grid-column: 4; }
-.team-view > .side { grid-column: 5; }
+.team-view > .chart-pane { grid-column: 1; }
+.team-view > .side-gutter { grid-column: 2; }
+.team-view > .side { grid-column: 3; }
 .team-view > * { grid-row: 1; }
 
 /* a terminal writing: its program badge lights up */
@@ -908,3 +903,65 @@ body.adding-role .rail-item:not(.drop-here), body.adding-role .pane:not(.drop-he
 
 /* an agent's tokens so far, in its pane's title (hover: the breakdown) */
 .pane-head .tok { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---------- the frame, as the Codex app's: a full-height sidebar, then the work ---------- */
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--rail-w, 260px) minmax(0, 1fr); }
+.app.no-rail, .app:has(> .sidebar[hidden]) { grid-template-columns: 0 minmax(0, 1fr); }
+.app > .sidebar { grid-column: 1; grid-row: 1; }
+.app > .main { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.app.no-rail > .sidebar { display: none; }
+
+.rail.sidebar { position: relative; border-radius: 0; background: var(--sheet); border-right: 1px solid var(--edge);
+  padding: 0 8px 6px; gap: 1px; overflow: visible; }
+.sb-head { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 8px; flex-shrink: 0; -webkit-app-region: drag; }
+.sb-head #project { font-size: 14px; font-weight: 600; color: var(--ink); border: 0; padding: 0; max-width: none; flex: 1; }
+.sb-row { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 8px;
+  padding: 6px 10px; font-size: 14px; font-weight: 400; color: var(--ink); text-align: left; flex-shrink: 0; }
+.sb-row:hover { background: var(--sheet-2); }
+.sb-row svg { width: 16px; height: 16px; color: var(--muted); flex-shrink: 0; }
+.sb-row .count { margin-left: auto; }
+.sidebar .views { flex-direction: column; align-items: stretch; background: none; padding: 0; gap: 1px; border-radius: 0; margin-bottom: 6px; }
+.sidebar .views button.sb-row { border-radius: 8px; padding: 6px 10px; font-size: 14px; font-weight: 400; color: var(--ink); }
+.sidebar .views button.sb-row.active { background: var(--sheet-2); box-shadow: none; font-weight: 500; }
+.sidebar .views button.sb-row.active svg { color: var(--ink); }
+.sidebar .rail-head { padding: 12px 6px 4px 10px; font-size: 12.5px; font-weight: 500; color: var(--faint); }
+.sidebar .rail-tree { padding: 0 0 8px; }
+.sidebar .rail-item { flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 8px; border-radius: 8px; }
+.sidebar .rail-item.focus { background: var(--sheet-2); font-weight: 400; }
+.sidebar .rail-item.focus .nm { font-weight: 600; }
+.ri-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ri-top .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.ri-sub { font-size: 12px; line-height: 1.35; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 15px; }
+.rail-item.focus .ri-sub { color: var(--muted); }
+.sidebar .rail-foot { border-top: 0; padding: 6px 4px 2px 10px; }
+.rail-gutter { position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; z-index: 6; }
+
+/* the header of the work: what you look at, and what you can do with it */
+.bar { padding-left: 10px; gap: 12px; }
+.brand { gap: 8px; }
+body[data-mode="team"] .brand-mark { display: none; }
+.brand-mark { display: inline-flex; align-items: center; gap: 10px; }
+.bar-title { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.bar-title:empty { display: none; }
+#more-menu > summary::after { display: none; }
+.bar-right { gap: 4px; }
+.bar-right > #launch-all { margin-left: 6px; }
+
+/* the composer, as Codex's: the text, then small pickers and a round send button */
+.composer { gap: 6px; padding: 12px 12px 10px 14px; }
+.composer-bar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.composer-bar .grow { flex: 1; }
+.composer .hint { display: none; }
+.composer .seg { background: transparent; box-shadow: inset 0 0 0 1px var(--edge); }
+.pill-select { width: auto; min-width: 0; max-width: 62%; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; background: transparent; border-color: var(--edge); }
+.composer .urgent { font-size: 12.5px; color: var(--muted); padding: 3px 9px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--edge); gap: 5px; cursor: pointer; }
+.composer .urgent:has(input:checked) { color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent); }
+button.primary.send { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: 50%; flex-shrink: 0; }
+button.primary.send svg { width: 16px; height: 16px; }
+
+/* the messages pane, flush at the right as Codex's review pane, on the same background as the work */
+.team-view { padding: 0 0 0 10px; }
+.team-view > .chart-pane { padding-bottom: 10px; }
+.team-view > .side { border-radius: 0; background: var(--paper); border-left: 1px solid var(--edge); }
+.team-view > .side-gutter { margin-right: -5px; z-index: 5; }
+.side .tabs { padding: 4px 10px 0; }

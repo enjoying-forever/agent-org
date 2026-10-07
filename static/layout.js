@@ -19,7 +19,7 @@ function loadLayout(team) {
   const narrow = innerWidth < 1100;
   Object.assign(L, {
     team, mode: 'grid', tree: false, hidden: [], max: null, main: null, order: [], cols: {}, rows: {},
-    rail: !narrow, side: !narrow, railW: 236, sideW: 400, ...saved,
+    rail: !narrow, side: !narrow, railW: 260, sideW: 400, ...saved,
   });
   L.max = null; // full screen never survives a reload
   applyChrome();
@@ -32,12 +32,12 @@ function saveLayout() {
   try { localStorage.setItem(`agent-org-layout:${team}`, JSON.stringify(keep)); } catch { /* not remembered */ }
 }
 
-/** Show or hide the team list and the messages panel, at their widths. */
+/** Show or hide the sidebar and the messages panel, at their widths. */
 function applyChrome() {
   const view = $('#view-team');
-  view.classList.toggle('no-rail', !L.rail);
+  $('#app').classList.toggle('no-rail', !L.rail); // the sidebar is the whole app's
+  $('#app').style.setProperty('--rail-w', `${L.railW}px`);
   view.classList.toggle('no-side', !L.side);
-  view.style.setProperty('--rail-w', `${L.railW}px`);
   view.style.setProperty('--side-w', `${L.sideW}px`);
   $('#rail-toggle').classList.toggle('on', L.rail);
   $('#side-toggle').classList.toggle('on', L.side);
@@ -113,7 +113,7 @@ function applyLayout() {
   fitAllTerms(); // at once: the browser's own resize notice can come late
   const empty = box.querySelector(':scope > .empty');
   if (!visible.length && all.length && !empty) {
-    box.append(h('div', { class: 'empty' }, 'Every pane is closed. Click an agent in the team list, or ',
+    box.append(h('div', { class: 'empty' }, 'Every pane is closed. Click an agent in the sidebar, or ',
       h('button', { class: 'link', onclick: showAllPanes }, 'show them all'), '.'));
   } else if (visible.length && empty) {
     empty.remove();
@@ -204,7 +204,7 @@ function dragTrack(e, axis, i, list, avail, total, key) {
   document.addEventListener('pointerup', up);
 }
 
-/** Dragging the edge of the team list or the messages panel. */
+/** Dragging the edge of the sidebar or the messages panel. */
 function dragEdge(e) {
   const edge = e.currentTarget.dataset.edge;
   e.preventDefault();
@@ -297,7 +297,7 @@ function hidePane(name) {
   saveLayout();
   renderChart();
   renderPanes();
-  toast(`${name}'s pane is closed; it keeps running. Click it in the team list to bring it back.`);
+  toast(`${name}'s pane is closed; it keeps running. Click it in the sidebar to bring it back.`);
 }
 
 function showPane(name) {
@@ -391,7 +391,7 @@ const SHORTCUTS = [
   ['Ctrl+Alt+1 … 9', 'Go to pane 1 to 9'],
   ['Ctrl+Alt+← / →', 'Previous / next pane'],
   ['Ctrl+Alt+Enter', 'Full screen for this pane, or back'],
-  ['Ctrl+Alt+B', 'Show or hide the team list'],
+  ['Ctrl+Alt+B', 'Show or hide the sidebar'],
   ['Ctrl+Alt+M', 'Show or hide the messages'],
   ['Ctrl+Alt+= / - / 0', 'Bigger, smaller or normal text in the terminals (or Ctrl+wheel over one)'],
   ['Ctrl+C / Ctrl+V', 'In a terminal: copy the selection (without one, Ctrl+C interrupts) / paste'],
