@@ -9,7 +9,7 @@
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { fnmatchcase } from './fnmatch.ts';
 import { CONSULTANT_PREFIX } from './team.ts';
 import { dict } from './dict.ts';
@@ -159,6 +159,13 @@ CREATE TABLE IF NOT EXISTS consultants (
 `;
 
 // Columns added since the first version: added to older databases on open.
+// What the frequent questions need as the history grows (100,000 messages: 5-70 ms each without them).
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS messages_unread ON messages(recipient) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS messages_task ON messages(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS messages_sent ON messages(sent_at);
+`;
+
 const UPGRADES: Record<string, Record<string, string>> = {
   messages: { urgent: 'INTEGER NOT NULL DEFAULT 0', task_id: 'INTEGER' },
   presence: { ppid: 'INTEGER' },
@@ -298,6 +305,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec(SCHEMA);
     this.upgrade();
+    this.db.exec(INDEXES); // after the upgrade: some of their columns came with it
   }
 
   /** Bring a database made by an earlier version up to date, keeping its contents. */
@@ -314,16 +322,30 @@ export class Store {
     if (this.db.isOpen) this.db.close();
   }
 
+  private readonly statements = new Map<string, StatementSync>();
+
+  /** A prepared statement, kept: the same few queries run many times a second (a waiting agent asks for its mail
+   * twice a second, the page for everyone's state every second or two). */
+  private statement(sql: string): StatementSync {
+    let st = this.statements.get(sql);
+    if (st === undefined) {
+      if (this.statements.size > 500) this.statements.clear(); // queries with lists of ? are many: never grow without end
+      st = this.db.prepare(sql);
+      this.statements.set(sql, st);
+    }
+    return st;
+  }
+
   private all(sql: string, ...args: SQLInputValue[]): Row[] {
-    return this.db.prepare(sql).all(...args) as Row[];
+    return this.statement(sql).all(...args) as Row[];
   }
 
   private get(sql: string, ...args: SQLInputValue[]): Row | undefined {
-    return this.db.prepare(sql).get(...args) as Row | undefined;
+    return this.statement(sql).get(...args) as Row | undefined;
   }
 
   private run(sql: string, ...args: SQLInputValue[]): { changes: number; lastInsertRowid: number } {
-    const r = this.db.prepare(sql).run(...args);
+    const r = this.statement(sql).run(...args);
     return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
   }
 
@@ -388,7 +410,7 @@ export class Store {
   }
 
   unreadCounts(waking = false): Record<string, number> {
-    const rows = this.all(`SELECT recipient, COUNT(*) AS n FROM messages WHERE read_at IS NULL${waking ? " AND kind != 'note'" : ''}`
+    const rows = this.all(`SELECT recipient, COUNT(*) AS n FROM messages INDEXED BY messages_unread WHERE read_at IS NULL${waking ? " AND kind != 'note'" : ''}`
       + ' GROUP BY recipient');
     return dict(rows.map((r) => [r.recipient as string, Number(r.n)] as const));
   }
