@@ -7,7 +7,7 @@
  * - Antigravity: ~/.gemini/antigravity-cli/conversations/<session id>.db
  */
 
-import { closeSync, globSync, openSync, readSync, statSync } from 'node:fs';
+import { closeSync, globSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -45,7 +45,7 @@ export function exists(harness: string, sessionId: string | null | undefined): b
   if (!sessionId || !UUID_RE.test(sessionId)) return false;
   const h = home();
   if (harness === 'claude') return glob(path.join(h, '.claude', 'projects'), `*/${sessionId}.jsonl`).length > 0;
-  if (harness === 'codex') return glob(path.join(h, '.codex', 'sessions'), `*/*/*/rollout-*-${sessionId}.jsonl`).length > 0;
+  if (harness === 'codex') return codexFile(sessionId) !== null;
   if (harness === 'grok') return glob(path.join(h, '.grok', 'sessions'), `*/${sessionId}`).some(isDir);
   if (harness === 'antigravity') return glob(path.join(h, '.gemini', 'antigravity-cli', 'conversations'), `${sessionId}.*`).length > 0;
   return false;
@@ -80,15 +80,56 @@ type Meta = Record<string, unknown>;
 
 /** The first record (session_meta) of a Codex conversation, or null if it is not on disk yet. */
 export function codexMeta(sessionId: string): Meta | null {
-  for (const file of glob(path.join(home(), '.codex', 'sessions'), `*/*/*/rollout-*-${sessionId}.jsonl`)) {
+  const file = codexFile(sessionId);
+  if (file === null) return null;
+  try {
+    const meta = JSON.parse(firstLine(file)).payload;
+    return typeof meta === 'object' && meta !== null && !Array.isArray(meta) ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The file of Codex conversation `sessionId`, or null if it is not on disk (yet). Codex files it under the day it
+ * began; the days are read newest first, and as Codex's ids (UUID v7) carry when they began, none before that.
+ * (Globbing every day took 33 ms of each Codex hook's 86.) */
+export function codexFile(sessionId: string): string | null {
+  const root = path.join(home(), '.codex', 'sessions');
+  const suffix = `-${sessionId}.jsonl`;
+  const began = uuidTime(sessionId);
+  const day = (t: Date): string => `${t.getFullYear()}/${String(t.getMonth() + 1).padStart(2, '0')}/${String(t.getDate()).padStart(2, '0')}`;
+  const from = began === null ? '' : day(new Date(began - 86_400_000)); // a day early: a clock or time zone may differ
+  const numbered = (dir: string): string[] => {
     try {
-      const meta = JSON.parse(firstLine(file)).payload;
-      return typeof meta === 'object' && meta !== null && !Array.isArray(meta) ? meta : null;
+      return readdirSync(dir).filter((n) => /^\d+$/.test(n)).sort().reverse();
     } catch {
-      return null;
+      return [];
+    }
+  };
+  for (const y of numbered(root)) {
+    if (y < from.slice(0, 4)) break;
+    for (const m of numbered(path.join(root, y))) {
+      if (`${y}/${m}` < from.slice(0, 7)) break;
+      for (const d of numbered(path.join(root, y, m))) {
+        if (`${y}/${m}/${d}` < from) break;
+        let names: string[];
+        try {
+          names = readdirSync(path.join(root, y, m, d));
+        } catch {
+          continue;
+        }
+        const name = names.find((n) => n.startsWith('rollout-') && n.endsWith(suffix));
+        if (name !== undefined) return path.join(root, y, m, d, name);
+      }
     }
   }
   return null;
+}
+
+/** When a UUID v7 was made (ms since 1970), or null for another kind of id. */
+export function uuidTime(id: string): number | null {
+  const m = /^([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-/i.exec(id);
+  return m ? parseInt(m[1] + m[2], 16) : null;
 }
 
 /** A conversation Codex runs on the agent's behalf (its auto-review, a sub-agent), not the agent itself. */

@@ -51,6 +51,24 @@ test('session files are found per harness', (t) => {
   assert.ok(!sessions.exists('claude', '../../etc')); // only ids, never paths
 });
 
+test("a Codex conversation is looked for only from the day its id says it began", (t) => {
+  const home = fakeHome(t);
+  const day = (y: string, m: string, d: string): string => path.join(home, '.codex', 'sessions', y, m, d);
+  const v7 = '01a0e74d-bd00-7fe3-9ca4-856641211825'; // begun 2026-09-28 (local time)
+  assert.equal(sessions.codexFile(v7), null);
+  write(path.join(day('2026', '09', '20'), `rollout-2026-09-20T10-00-00-${v7}.jsonl`), '{}'); // before it began: not read
+  assert.equal(sessions.codexFile(v7), null);
+  const file = path.join(day('2026', '09', '28'), `rollout-2026-09-28T17-17-06-${v7}.jsonl`);
+  write(file, '{}');
+  write(path.join(day('2026', '10', '02'), 'rollout-2026-10-02T09-00-00-01a0f000-0000-7000-8000-000000000000.jsonl'), '{}');
+  assert.equal(sessions.codexFile(v7), file);
+  const older = '3f2c1a8e-1111-4a2b-9c3d-123456789abc'; // not a v7 id: every day is read
+  const olderFile = path.join(day('2025', '01', '05'), `rollout-2025-01-05T08-00-00-${older}.jsonl`);
+  write(olderFile, '{}');
+  assert.equal(sessions.codexFile(older), olderFile);
+  assert.equal(sessions.uuidTime(v7), Date.UTC(2026, 8, 28, 9, 17, 6, 688));
+});
+
 test('the first launch starts a new conversation with a known id', (t) => {
   const { hub, file } = setup(t);
   assert.ok(launch.roleTab(hub, file, 'leader'));

@@ -46,10 +46,10 @@ export function sessionFile(harness: string, sessionId: string | null | undefine
 }
 
 function findFile(harness: string, sessionId: string): string | null {
+  if (harness === 'codex') return sessions.codexFile(sessionId);
   const h = sessions.home();
   const patterns: Record<string, [string, string]> = dict({
     claude: [path.join(h, '.claude', 'projects'), `*/${sessionId}.jsonl`],
-    codex: [path.join(h, '.codex', 'sessions'), `*/*/*/rollout-*-${sessionId}.jsonl`],
     grok: [path.join(h, '.grok', 'sessions'), `*/${sessionId}/summary.json`],
     antigravity: [path.join(h, '.gemini', 'antigravity-cli', 'conversations'), `${sessionId}.db`],
   });
