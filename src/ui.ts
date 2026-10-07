@@ -721,6 +721,13 @@ export class App {
     return { task: taskJson(task), thread: thread.map(messageJson), dependents: this.hub.store.dependents(taskId).map(taskJson) };
   }
 
+  /** One message, by id (the owner may read every one): for a link to one older than the page keeps. */
+  message(id: number): Json {
+    const m = this.hub.store.getMessage(id);
+    if (m === null) throw new ApiError(`There is no message #${id}.`, 404);
+    return { message: messageJson(m) };
+  }
+
   search(words: string): Json {
     return { messages: this.me.search(words, 60).map(messageJson) };
   }
@@ -1072,6 +1079,7 @@ export const GET_ROUTES: Record<string, Route> = {
   '/api/events': (app, query: Query) => app.events(int(q(query, 'after', '0'), 'after')),
   '/api/task': (app, query: Query) => app.taskDetails(int(query.get('id'), 'id')),
   '/api/search': (app, query: Query) => app.search(q(query, 'q')),
+  '/api/message': (app, query: Query) => app.message(int(query.get('id'), 'id')),
   '/api/task-changes': (app, query: Query) => app.taskChanges(int(query.get('id'), 'id')),
   '/api/roles': (app) => app.roles(),
   '/api/role-export': (app, query: Query) => app.roleExport(q(query, 'id')),

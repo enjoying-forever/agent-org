@@ -1115,6 +1115,7 @@ function visible(m) {
 
 function renderFeed(scroll) {
   if ($('#search').value.trim()) return; // showing search results
+  S.jumped = false;
   const feed = $('#feed');
   const shown = S.messages.filter(visible);
   const empty = S.messages.length
@@ -1130,7 +1131,7 @@ function renderFeed(scroll) {
 /** New messages, added at the end of the conversation as it is shown (filters and all). */
 function appendFeed(list) {
   const feed = $('#feed');
-  if ($('#search').value.trim()) return; // showing search results
+  if ($('#search').value.trim() || S.jumped) return; // showing search results, or one older message
   if (!feed.dataset.list) { renderFeed(); return; } // it showed none yet: the whole list
   const fresh = list.filter(visible);
   if (!fresh.length) return;
@@ -1209,6 +1210,24 @@ function jumpTo(id) {
   if (el) {
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.animate([{ outline: '2px solid var(--accent)' }, { outline: '2px solid transparent' }], 1600);
+    return;
+  }
+  showOlder(id); // older than the conversation shows
+}
+
+/** A message older than the conversation shows, on its own, until you go back (new messages wait meanwhile). */
+async function showOlder(id) {
+  try {
+    const { message } = await api(`/api/message?id=${id}`);
+    S.jumped = true;
+    const feed = $('#feed');
+    feed.dataset.list = '';
+    feed.replaceChildren(
+      h('div', { class: 'muted small' }, `Message #${id}, from before the messages shown here. `,
+        h('button', { class: 'link', onclick: () => { S.jumped = false; renderFeed('bottom'); } }, 'Back to the conversation')),
+      messageEl(message));
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 

@@ -566,3 +566,11 @@ test("the programs' models are asked for at most once a day, and remembered", as
   assert.deepEqual([next.models.codex, next.models.grok, next.models.claude.includes('sonnet')], [['gpt-6-luna'], ['grok-5'], true]);
   assert.ok(existsSync(path.join(home, ui.MODELS_FILE)));
 });
+
+test('one message by id, for a link to one older than the page keeps', async (t) => {
+  const server = await startServer(t);
+  const [sent] = (await server.ok('/api/send', { to: 'leader', text: 'an old question' })).sent;
+  assert.equal((await server.ok(`/api/message?id=${sent.id}`)).message.text, 'an old question');
+  assert.equal((await server.request('/api/message?id=999'))[0], 404);
+  assert.equal((await server.request('/api/message?id=x'))[0], 400);
+});
