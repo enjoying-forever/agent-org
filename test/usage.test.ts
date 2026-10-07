@@ -175,3 +175,23 @@ test('DeepSeek runs keep their usage by conversation', async (t) => {
   assert.deepEqual([u.tokens_in, u.tokens_cached, u.tokens_out, u.messages], [7020, 1600, 40, 4]);
   assert.deepEqual(Object.keys(JSON.parse(read(kept, 'utf8'))).sort(), ['session-a', 'session-b']);
 });
+
+test('a growing conversation log is read a piece at a time, and a replaced one afresh', (t) => {
+  const dir = tmpDir(t);
+  const before = sessions.where.home;
+  sessions.where.home = () => dir;
+  cleanup(t, () => { sessions.where.home = before; usage.clearCaches(); });
+  const sid = '22222222-3333-4444-8555-666666666666';
+  const file = path.join(dir, '.claude', 'projects', 'E--x', `${sid}.jsonl`);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const answer = (id: string, n: number): string => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: n, output_tokens: 1 } } });
+  writeFileSync(file, `${answer('a', 10)}\n${answer('a', 10)}\n`); // one reply, written twice
+  assert.deepEqual([usage.usage('claude', sid)?.tokens_in, usage.usage('claude', sid)?.messages], [10, 1]);
+  const half = answer('b', 20);
+  appendFileSync(file, half.slice(0, 30)); // the program is still writing this line
+  assert.equal(usage.usage('claude', sid)?.tokens_in, 10);
+  appendFileSync(file, `${half.slice(30)}\n${answer('c', 5)}\n`);
+  assert.deepEqual([usage.usage('claude', sid)?.tokens_in, usage.usage('claude', sid)?.messages], [35, 3]);
+  writeFileSync(file, `${answer('z', 7)}\n`); // replaced by a shorter one: counted afresh
+  assert.deepEqual([usage.usage('claude', sid)?.tokens_in, usage.usage('claude', sid)?.messages], [7, 1]);
+});

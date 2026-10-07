@@ -86,6 +86,7 @@ export function usage(harness: string, sessionId: string | null | undefined): Us
 /** Forget what was read (tests change files within one clock tick). */
 export function clearCaches(): void {
   cache.clear();
+  grown.clear();
   paths.clear();
   stuckCache.clear();
 }
@@ -104,60 +105,94 @@ function version(file: string): string {
   return `${st.mtimeMs}|${st.size}${extra}`;
 }
 
-/** Each line of a text file. */
-function lines(file: string): string[] {
-  return readFileSync(file, 'utf8').split('\n');
-}
-
 type Json = Record<string, unknown>;
 const obj = (x: unknown): Json => (typeof x === 'object' && x !== null && !Array.isArray(x) ? (x as Json) : {});
 const int = (x: unknown): number => Math.trunc(Number(x) || 0);
 
+// A conversation log only grows while its agent works (a long one: 60 MB, about 250 ms to read whole), and the page
+// asks for every agent's usage every second or two. So each log is read a piece at a time: where the last read
+// stopped, and what it had counted, are kept; a log that shrank or whose start changed was replaced: read anew.
+interface Grown<S> { head: string; offset: number; state: S }
+const grown = new Map<string, Grown<unknown>>();
+const HEAD_BYTES = 256;
+
+function readGrowing<S>(file: string, start: () => S, take: (state: S, line: string) => void): S {
+  const fd = openSync(file, 'r');
+  try {
+    const size = statSync(file).size;
+    const headBuf = Buffer.alloc(Math.min(HEAD_BYTES, size));
+    readSync(fd, headBuf, 0, headBuf.length, 0);
+    const head = headBuf.toString('latin1');
+    let kept = grown.get(file) as Grown<S> | undefined;
+    const n = Math.min(head.length, kept?.head.length ?? 0);
+    if (kept === undefined || size < kept.offset || head.slice(0, n) !== kept.head.slice(0, n)) {
+      kept = { head, offset: 0, state: start() };
+    }
+    if (size > kept.offset) {
+      const added = Buffer.alloc(size - kept.offset);
+      const got = readSync(fd, added, 0, added.length, kept.offset);
+      const end = added.subarray(0, got).lastIndexOf(0x0a) + 1; // whole lines only: the last one may be half written
+      if (end > 0) {
+        for (const line of added.subarray(0, end).toString('utf8').split('\n')) take(kept.state, line);
+        kept.offset += end;
+      }
+    }
+    kept.head = head;
+    grown.set(file, kept as Grown<unknown>);
+    return kept.state;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+interface ClaudeCount { u: Usage; seen: Set<unknown> }
+
 function readClaude(file: string): Usage {
-  const u = emptyUsage();
-  const seen = new Set<unknown>();
-  for (const line of lines(file)) {
-    if (!line.includes('"usage"')) continue;
+  const count = readGrowing<ClaudeCount>(file, () => ({ u: emptyUsage(), seen: new Set() }), ({ u, seen }, line) => {
+    if (!line.includes('"usage"')) return;
     let message: Json;
     try {
       message = obj(JSON.parse(line).message);
     } catch {
-      continue;
+      return;
     }
     const t = message.usage;
-    if (typeof t !== 'object' || t === null) continue;
+    if (typeof t !== 'object' || t === null) return;
     const key = message.id || seen.size;
-    if (seen.has(key)) continue; // one reply is written in several records with the same usage
+    if (seen.has(key)) return; // one reply is written in several records with the same usage
     seen.add(key);
     const counts = obj(t);
     u.tokens_in += int(counts.input_tokens) + int(counts.cache_creation_input_tokens);
     u.tokens_cached += int(counts.cache_read_input_tokens);
     u.tokens_out += int(counts.output_tokens);
     u.model = (message.model as string) || u.model;
-  }
-  u.messages = seen.size;
-  return u;
+  });
+  return { ...count.u, messages: count.seen.size, limits: [...count.u.limits] };
 }
 
+interface CodexCount { last: Json | null; messages: number; model: string }
+
 function readCodex(file: string): Usage {
-  const u = emptyUsage();
-  let last: Json | null = null;
-  for (const line of lines(file)) {
-    if (!line.includes('"token_count"') && !line.includes('"turn_context"')) continue;
+  const count = readGrowing<CodexCount>(file, () => ({ last: null, messages: 0, model: '' }), (c, line) => {
+    if (!line.includes('"token_count"') && !line.includes('"turn_context"')) return;
     let record: Json;
     try {
       record = obj(JSON.parse(line));
     } catch {
-      continue;
+      return;
     }
     const payload = obj(record.payload);
     if (payload.type === 'token_count') {
-      last = payload;
-      u.messages += 1;
+      c.last = payload;
+      c.messages += 1;
     } else if (record.type === 'turn_context') {
-      u.model = (payload.model as string) || u.model;
+      c.model = (payload.model as string) || c.model;
     }
-  }
+  });
+  const u = emptyUsage();
+  u.messages = count.messages;
+  u.model = count.model;
+  const last = count.last;
   if (last) {
     const total = obj(obj(last.info).total_token_usage);
     const cached = int(total.cached_input_tokens);
@@ -183,6 +218,11 @@ export const GROK_UPDATES = 'updates.jsonl';
 /** Grok writes each finished turn's usage into the conversation's updates.jsonl (a turn_completed update: its
  * input includes what was read from the cache, its output the reasoning). A turn still running is counted when it
  * ends. Without any yet, the number of messages. */
+/** Each line of a text file. */
+function lines(file: string): string[] {
+  return readFileSync(file, 'utf8').split('\n');
+}
+
 function readGrok(file: string): Usage {
   const summary = obj(JSON.parse(readFileSync(file, 'utf8')));
   const u = emptyUsage();
