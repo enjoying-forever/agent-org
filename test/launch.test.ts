@@ -404,6 +404,28 @@ test('runview shows a DeepSeek run and keeps its session', async (t) => {
   assert.equal(read(sid), 'session-abc');
 });
 
+test("a DeepSeek run's tool calls show on the owner's page", async (t) => {
+  const dir = tmpDir(t);
+  mkdirSync(path.join(dir, 'project'));
+  const file = path.join(dir, 'team.yaml');
+  writeFileSync(file, dumpYaml(team()), 'utf8');
+  await view([
+    { type: 'session', sessionId: 'session-abc' },
+    { type: 'tool_call', tool: 'org__read_inbox', input: {} },
+    { type: 'tool_result', status: 'completed', result: '1 new message' },
+    { type: 'tool_call', tool: 'run_shell_command', input: { command: 'pytest -q' } },
+    { type: 'tool_result', status: 'completed', result: '3 passed' },
+    { type: 'tool_call', tool: 'read_file', input: { path: 'README.md' } }, // the run ends before it does
+  ], ['--team', file, '--role', 'worker-a']);
+  const hub = Hub.open(file);
+  cleanup(t, () => hub.close());
+  const actions = hub.store.recentActions()['worker-a'];
+  assert.deepEqual(actions.map((a) => a.what), ['Reading README.md', '$ pytest -q', 'read inbox']);
+  assert.ok(actions.every((a) => a.ended_at !== null)); // the run is over: nothing of it still runs
+  assert.equal(await view([{ type: 'tool_call', tool: 'x', input: {} }], ['--team', path.join(dir, 'missing.yaml'), '--role', 'worker-a']),
+    '● x()\n'); // no hub to tell: the run shows as before
+});
+
 test('runview shows an Antigravity run as it streams', async () => {
   const step = (kw: object): object => ({ event: 'step_update', step_update: kw });
   const text = await view([

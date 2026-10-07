@@ -229,10 +229,12 @@ export function describeAction(payload: Payload, root: string): string | null {
     const full = path.resolve(cwd, p);
     return relativeTo(full, root) ?? full.replace(/\\/g, '/');
   };
+  // an org tool, as each program names them (cards.SERVER_NAME; not imported: a hook loads little): its name says it
+  const org = /^(?:mcp__org__|mcp_org_|org__|org\.)(\w+)$/.exec(tool);
   let line: string;
-  if (parts.length > 2 && parts[1] === 'org') { // an org tool (cards.SERVER_NAME; not imported: a hook loads little): its name says it
+  if (org) {
     const to = first('to', 'assignee', 'role', 'name');
-    line = `${name.replace(/_/g, ' ')}${to ? ` → ${to}` : ''}`;
+    line = `${org[1].toLowerCase().replace(/_/g, ' ')}${to ? ` → ${to}` : ''}`;
   } else if (isShell(tool)) {
     line = `$ ${text(safety.commandOf(raw)) || name}`;
   } else if (EDIT_TOOLS.has(name)) {

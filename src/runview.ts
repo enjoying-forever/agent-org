@@ -76,6 +76,8 @@ export class View {
   midLine = false; // text is being streamed: the next line must start on a new one
   lastText = '';
   used: Record<string, number> = {}; // this run's token counts (DeepSeek reports them per step)
+  /** Told of each tool call as it starts (with its name and input) and as it ends (without). */
+  onTool: (name?: string, input?: unknown) => void = () => {};
   private readonly out: Writable;
 
   constructor(out: Writable) {
@@ -109,7 +111,9 @@ export class View {
       for (const t of String(e.text ?? '').trim().split(/\r?\n/)) if (t.trim()) this.line(`${DIM}✻ ${t}${RESET}`);
     } else if (kind === 'tool_call') {
       this.line(callLine(String(e.tool ?? '?'), e.input));
+      this.onTool(String(e.tool ?? '?'), e.input);
     } else if (kind === 'tool_result') {
+      this.onTool();
       const ok = e.status == null || ['completed', 'ok', 'success'].includes(e.status);
       for (const t of resultLines(e.result ?? e.error ?? '', ok, String(e.status ?? ''))) this.line(t);
     } else if (kind === 'text' || kind === 'final') {
@@ -162,7 +166,9 @@ export class View {
       const info = step.tool_info ?? {};
       if (state === 'ACTIVE') {
         this.line(callLine(String(step.tool_name || info.name || '?'), info.parameters));
+        this.onTool(String(step.tool_name || info.name || '?'), info.parameters);
       } else if (['DONE', 'ERROR', 'FAILED', 'CANCELLED'].includes(state)) {
+        this.onTool();
         for (const t of resultLines(info.output || info.error || 'done', state === 'DONE', state.toLowerCase())) this.line(t);
       }
     }
@@ -218,6 +224,8 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
   const sessionFile = option(argv, '--session-file');
   const usageFile = option(argv, '--usage-file');
   const view = new View(out);
+  const record = await recorder(option(argv, '--team'), option(argv, '--role'));
+  if (record !== null) view.onTool = record.tool;
   for await (const raw of createInterface({ input, crlfDelay: Infinity })) {
     const line = raw.trim();
     if (!line) continue;
@@ -235,7 +243,46 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
     if (usageFile && view.session && (view.used.steps ?? 0) !== steps) keepUsage(usageFile, view.session, view.used);
   }
   if (view.midLine) out.write('\n');
+  record?.end();
   return 0;
+}
+
+/** What a run does, noted in its team's hub as the hooks note other agents' tool calls, for the owner's page.
+ * Null without a team and role, or if the hub cannot be opened: the run shows as before. */
+async function recorder(teamFile: string | undefined, role: string | undefined): Promise<{ tool: View['onTool']; end(): void } | null> {
+  if (!teamFile || !role) return null;
+  try {
+    const [{ Hub }, { describeAction }] = await Promise.all([import('./hub.ts'), import('./hooks.ts')]);
+    const hub = Hub.open(teamFile);
+    const root = hub.rootOf(role);
+    const running: string[] = []; // calls started and not ended, oldest first
+    const safely = (f: () => void): void => {
+      try {
+        f();
+      } catch {
+        // only the page misses it
+      }
+    };
+    return {
+      tool: (name, input) => safely(() => {
+        if (name === undefined) {
+          const what = running.shift();
+          if (what !== undefined) hub.store.noteAction(role, what, false);
+          return;
+        }
+        const what = describeAction({ tool_name: name, tool_input: input ?? {} }, root);
+        if (what === null) return;
+        running.push(what);
+        hub.store.noteAction(role, what, true);
+      }),
+      end: () => safely(() => {
+        hub.store.endActions(role); // the run is over: nothing of it still runs
+        hub.close();
+      }),
+    };
+  } catch {
+    return null;
+  }
 }
 
 if (process.argv[1] && import.meta.filename === (await import('node:path')).resolve(process.argv[1])) {

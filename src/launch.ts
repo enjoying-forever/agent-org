@@ -533,7 +533,8 @@ export const deepseekLaunch: Builder = (hub, teamFile, role, out, resume = null)
   }
   const line = (args: string[]): string => args.map(ps).join(' ');
   const dsh = line([command, ...base, '--profile', 'headless', '--patch', patchFile, '--json']);
-  const viewer = line([process.execPath, entry('runview'), '--session-file', sessionFile, '--usage-file', path.join(out, DSH_USAGE)]);
+  const viewer = line([process.execPath, entry('runview'), '--session-file', sessionFile, '--usage-file', path.join(out, DSH_USAGE),
+    '--team', teamFile, '--role', role]); // its tool calls show on the owner's page
   const waiter = line([process.execPath, entry('wake'), '--team', teamFile, '--role', role, '--stop', path.join(out, STOP_MARKER), '--input']);
   const spec = hub.team.roles[role];
   const shownModel = [spec.model || 'deepseek-flash', spec.effort && `${spec.effort} effort`].filter((x) => x).join(', ');
