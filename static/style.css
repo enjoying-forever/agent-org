@@ -965,3 +965,10 @@ button.primary.send svg { width: 16px; height: 16px; }
 .team-view > .side { border-radius: 0; background: var(--paper); border-left: 1px solid var(--edge); }
 .team-view > .side-gutter { margin-right: -5px; z-index: 5; }
 .side .tabs { padding: 4px 10px 0; }
+
+/* an agent's count comes before its name, in a slot of its own: the names line up whether there is one or not */
+.ri-count { width: 22px; flex-shrink: 0; display: flex; justify-content: center; }
+.ri-count:empty { visibility: hidden; }
+.ri-count .pill { min-width: 18px; padding: 0 5px; line-height: 16px; font-size: 11px; }
+.ri-dot { width: 7px; flex-shrink: 0; } /* where an agent's running dot is: you have none */
+.ri-sub { padding-left: 45px; } /* under the name */
