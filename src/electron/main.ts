@@ -6,13 +6,19 @@
  * in the background, or stop them; starting agent-org again brings a hidden window back.
  */
 
-import { app, BrowserWindow, dialog, Menu, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, session, shell } from 'electron';
 import path from 'node:path';
 import { TeamError } from '../team.ts';
 import * as ui from '../ui.ts';
 
 const MIN_WIDTH = 900;
 const MIN_HEIGHT = 600;
+const BAR_HEIGHT = 52; // the page's title bar, which the window's own buttons sit in (as in the Claude app)
+
+/** The colors of the window's own parts, matching the page's paper and ink. */
+function chrome(dark: boolean): { color: string; symbolColor: string; height: number } {
+  return dark ? { color: '#262624', symbolColor: '#f5f4ef', height: BAR_HEIGHT } : { color: '#faf9f5', symbolColor: '#1f1e1d', height: BAR_HEIGHT };
+}
 
 function argument(name: string): string | undefined {
   const argv = process.argv.slice(app.isPackaged ? 1 : 2);
@@ -61,7 +67,8 @@ async function start(): Promise<void> {
   const geometry = ui.windowGeometry(state, screens);
   const win = new BrowserWindow({
     title: 'agent-org', width: geometry.width, height: geometry.height, x: geometry.x, y: geometry.y,
-    minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT, backgroundColor: '#0B0C0F', show: false, autoHideMenuBar: true,
+    minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT, backgroundColor: chrome(nativeTheme.shouldUseDarkColors).color, show: false, autoHideMenuBar: true,
+    titleBarStyle: 'hidden', titleBarOverlay: chrome(nativeTheme.shouldUseDarkColors), // no separate title bar: the page's is it
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   });
   if (geometry.maximized) win.maximize();
@@ -107,6 +114,10 @@ async function start(): Promise<void> {
     },
     hide: () => win.hide(),
     quit,
+    theme: (dark) => {
+      win.setTitleBarOverlay(chrome(dark));
+      win.setBackgroundColor(chrome(dark).color);
+    },
   };
   control.openUrl = external;
   served.app.pickFolderWith = async (title) => {

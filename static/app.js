@@ -234,7 +234,7 @@ function applyState(state) {
   renderRoleFilter();
   renderInboxBadge();
   if (S.selected) renderDrawer();
-  if (first) renderFeed('bottom');
+  if (first) { renderFeed('bottom'); tellWindowTheme(); }
 }
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
@@ -270,6 +270,7 @@ function enterHome() {
   $('#view-home').hidden = false;
   document.title = 'agent-org';
   renderHome();
+  tellWindowTheme();
 }
 
 async function renderHome() {
@@ -697,7 +698,7 @@ function folded(r, below, looks) {
       ` ${{ off: 'not running', asking: 'asking you' }[k] || k}`))));
 }
 
-const TREE_MIN_ZOOM = 0.7; // smaller is hard to read: wider than that, the tree scrolls
+const TREE_MIN_ZOOM = 0.85; // smaller is hard to read: wider than that, the tree scrolls
 
 /** A team wider than the view is drawn smaller to fit it, down to TREE_MIN_ZOOM. False when even that is too wide. */
 function fitTree() {
@@ -927,7 +928,7 @@ function renderSummary(p, r) {
         h('div', { class: 'line', title: st.project_root }, `~/${folder}`,
           r.write_scope.length ? `  writes ${r.write_scope.join(', ')}` : '  read-only'))),
     h('div', { class: 'pane-now' },
-      r.online ? h('span', { class: `state ${s ? s.state : ''}` }, s ? s.state : 'starting')
+      r.online ? h('span', { class: `state ${s ? s.state : 'idle'}` }, s ? s.state : 'idle')
         : h('span', { class: 'state idle' }, 'not running'),
       r.online && s && s.task ? `  ${s.task}` : where),
     task && h('div', { class: 'pane-task' }, `${task.state === 'working' ? 'on' : 'next'} `, h('b', {}, `#${task.id} ${task.title}`)),
@@ -971,11 +972,24 @@ function logLine(m, me) {
 
 // ---------- live terminals (xterm.js) ----------
 
+// The 16 terminal colors, warm like the page; on paper, "white" and "yellow" are dark enough to read
+const ANSI_DARK = {
+  black: '#3a3935', red: '#e8735f', green: '#6dbf87', yellow: '#e2b350', blue: '#7fa9e0', magenta: '#c79be8', cyan: '#5fc2c0', white: '#d6d3c7',
+  brightBlack: '#77746b', brightRed: '#f2917f', brightGreen: '#8fd6a5', brightYellow: '#f0c977', brightBlue: '#a2c1ef',
+  brightMagenta: '#dab8f2', brightCyan: '#86d8d4', brightWhite: '#f5f4ef',
+};
+const ANSI_LIGHT = {
+  black: '#1f1e1d', red: '#c4442f', green: '#2f8a55', yellow: '#9a6512', blue: '#3d6fbf', magenta: '#8a4fbf', cyan: '#147d7a', white: '#6f6c64',
+  brightBlack: '#8f8c83', brightRed: '#d65a43', brightGreen: '#3a9e64', brightYellow: '#b07a1c', brightBlue: '#5585d1',
+  brightMagenta: '#9d66cf', brightCyan: '#1f918d', brightWhite: '#3d3b36',
+};
+
 function termTheme() {
   const css = getComputedStyle(document.documentElement);
   const v = (name) => css.getPropertyValue(name).trim();
+  const light = document.documentElement.dataset.theme === 'light';
   return { background: v('--term'), foreground: v('--ink'), cursor: v('--accent'), cursorAccent: v('--term'),
-    selectionBackground: 'rgba(59, 130, 246, 0.35)' };
+    selectionBackground: light ? 'rgba(201, 100, 66, 0.22)' : 'rgba(217, 119, 87, 0.32)', ...(light ? ANSI_LIGHT : ANSI_DARK) };
 }
 
 function openTerm(p) {
@@ -1268,6 +1282,12 @@ function applyTheme(theme) {
   $('#theme-btn').replaceChildren(icon(theme === 'light' ? 'moon' : 'sun'));
   $('#theme-btn').title = theme === 'light' ? 'Switch to dark' : 'Switch to light';
   retheme();
+  tellWindowTheme();
+}
+
+/** The window's own buttons and background follow the page (once signed in: before, a request would sign out). */
+function tellWindowTheme() {
+  if (S.state || S.mode === 'home') api('/api/window', { action: 'theme', dark: document.documentElement.dataset.theme !== 'light' }).catch(() => {});
 }
 
 $('#theme-btn').addEventListener('click', () => {
@@ -1275,7 +1295,13 @@ $('#theme-btn').addEventListener('click', () => {
   try { localStorage.setItem('agent-org-theme', next); } catch { /* remembered for this visit only */ }
   applyTheme(next);
 });
-try { applyTheme(localStorage.getItem('agent-org-theme') || 'dark'); } catch { applyTheme('dark'); }
+// As the system is set, until you choose (as the Claude app does)
+const LIGHT_SYSTEM = matchMedia('(prefers-color-scheme: light)');
+const chosenTheme = () => {
+  try { return localStorage.getItem('agent-org-theme'); } catch { return null; }
+};
+applyTheme(chosenTheme() || (LIGHT_SYSTEM.matches ? 'light' : 'dark'));
+LIGHT_SYSTEM.addEventListener('change', () => { if (!chosenTheme()) applyTheme(LIGHT_SYSTEM.matches ? 'light' : 'dark'); });
 
 $('#rail-checks').addEventListener('click', () => $('#checks-btn').click());
 $('#rail-add').addEventListener('click', (e) => togglePalette(e));

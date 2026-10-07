@@ -196,6 +196,8 @@ export interface Shell {
   show(): void;
   hide(): void;
   quit(): void;
+  /** The page went light or dark: the window's own parts (its buttons, what shows before the page) follow. */
+  theme?(dark: boolean): void;
 }
 
 /** agent-org's window: hidden while its agents run in the background, shown again when the owner starts
@@ -523,7 +525,8 @@ export class App {
     if (action === 'hide') this.window.hide();
     else if (action === 'quit') this.window.quit();
     else if (action === 'show') this.window.show();
-    else throw new ApiError('action must be hide, quit or show');
+    else if (action === 'theme') this.window.shell?.theme?.(body.dark === true); // nothing to do without a window
+    else throw new ApiError('action must be hide, quit, show or theme');
     return {};
   }
 
