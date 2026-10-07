@@ -55,6 +55,9 @@ task went leader -> worker -> file written -> reviewed -> reported back in about
 agents in the window's node-pty terminals, the tool server as Electron-as-Node, the waker's wake lines,
 the in-server pre-edit hook (lease taken and released), the Stop hook through org_hook.cmd, Stop and Quit
 from the page. Memory with GPU acceleration off: about 126 MB private over 4 processes (223 MB with it on).
+Closing the window with an agent running (2026-10-08): the page asks; "keep running" hides the window
+with the agent still at work, a second start brings it back, and "stop them and quit" ends the agent and
+the app.
 DeepSeek, without a model run (2026-10-08): its start shows the banner and the waiter's input line (both
 agent-org programs on Electron as Node), it counts as running, and Stop ends the waiter.
 Not run live yet: Codex (its new hook command needs the owner's one-time "Trust all"), Grok (installing
