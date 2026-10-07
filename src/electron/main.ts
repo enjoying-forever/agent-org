@@ -41,12 +41,20 @@ async function start(): Promise<void> {
   ui.writeInstance(served.port, control.launcher); // how an agent's tool server reaches this window
   const origin = new URL(served.base).origin;
 
-  // The page may read and write the clipboard (copy and paste in the terminals); nothing else.
+  // The page may read and write the clipboard (copy and paste in the terminals) and show desktop notifications
+  // (a message or a question for the owner while the window is away); nothing else.
+  const ALLOWED = ['clipboard-read', 'clipboard-sanitized-write', 'notifications'];
+  const ours = (url: string): boolean => {
+    try {
+      return new URL(url).origin === origin; // a check may be given 'http://127.0.0.1:8765/', a request the page's URL
+    } catch {
+      return false;
+    }
+  };
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
-    callback(new URL(contents.getURL()).origin === origin && ['clipboard-read', 'clipboard-sanitized-write'].includes(permission));
+    callback(ours(contents.getURL()) && ALLOWED.includes(permission));
   });
-  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
-    requestingOrigin === origin && ['clipboard-read', 'clipboard-sanitized-write'].includes(permission));
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => ours(requestingOrigin) && ALLOWED.includes(permission));
 
   const state = ui.loadWindowState();
   const screens = screen.getAllDisplays().map((d) => [d.bounds.x, d.bounds.y, d.bounds.width, d.bounds.height] as [number, number, number, number]);
