@@ -16,6 +16,8 @@ export const RESUMABLE = ['claude', 'codex', 'grok', 'antigravity']; // harnesse
 export const CAN_CHOOSE_ID = ['claude', 'grok']; // these accept an id for a new conversation; Codex picks its own
 const SCAN_BYTES = 400_000; // how far into a conversation file to look for the role's first prompt
 const SCAN_DAYS = 45; // how old a Codex conversation may be to still be found by searching
+const LINE_PIECE = 64 * 1024; // a Codex conversation's first line is some 20 kB
+const DAY_MS = 86_400_000;
 
 /** The user's home folder (tests point it elsewhere). */
 export const where = {
@@ -59,16 +61,32 @@ function isDir(p: string): boolean {
   }
 }
 
-/** The first line of a file, read without loading the rest. */
+/** The first line of a file (up to `limit` bytes), read a piece at a time without loading the rest. */
 export function firstLine(file: string, limit = 1_000_000): string {
-  return readHead(file, limit).split('\n', 1)[0];
+  const fd = openSync(file, 'r');
+  try {
+    const pieces: Buffer[] = [];
+    let size = 0;
+    while (size < limit) {
+      const buf = Buffer.alloc(Math.min(LINE_PIECE, limit - size));
+      const n = readSync(fd, buf, 0, buf.length, size);
+      if (n === 0) break;
+      const end = buf.subarray(0, n).indexOf(10);
+      pieces.push(buf.subarray(0, end >= 0 ? end : n));
+      size += n;
+      if (end >= 0) break;
+    }
+    return Buffer.concat(pieces).toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Up to `bytes` from the start of a file, as text. */
 export function readHead(file: string, bytes: number): string {
   const fd = openSync(file, 'r');
   try {
-    const buf = Buffer.alloc(bytes);
+    const buf = Buffer.allocUnsafe(bytes);
     const n = readSync(fd, buf, 0, bytes, 0);
     return buf.subarray(0, n).toString('utf8');
   } finally {
@@ -94,11 +112,20 @@ export function codexMeta(sessionId: string): Meta | null {
  * began; the days are read newest first, and as Codex's ids (UUID v7) carry when they began, none before that.
  * (Globbing every day took 33 ms of each Codex hook's 86.) */
 export function codexFile(sessionId: string): string | null {
-  const root = path.join(home(), '.codex', 'sessions');
   const suffix = `-${sessionId}.jsonl`;
-  const began = uuidTime(sessionId);
-  const day = (t: Date): string => `${t.getFullYear()}/${String(t.getMonth() + 1).padStart(2, '0')}/${String(t.getDate()).padStart(2, '0')}`;
-  const from = began === null ? '' : day(new Date(began - 86_400_000)); // a day early: a clock or time zone may differ
+  for (const [dir, names] of codexDays(uuidTime(sessionId) ?? 0)) {
+    const name = names.find((n) => n.startsWith('rollout-') && n.endsWith(suffix));
+    if (name !== undefined) return path.join(dir, name);
+  }
+  return null;
+}
+
+/** [folder, file names] of each day in ~/.codex/sessions/<yyyy>/<mm>/<dd>, newest first, back to the day of
+ * `since` (ms since 1970; a day earlier, as a clock or time zone may differ). */
+function* codexDays(since: number): Generator<[string, string[]]> {
+  const root = path.join(home(), '.codex', 'sessions');
+  const t = new Date(since - DAY_MS);
+  const from = since ? `${t.getFullYear()}/${String(t.getMonth() + 1).padStart(2, '0')}/${String(t.getDate()).padStart(2, '0')}` : '';
   const numbered = (dir: string): string[] => {
     try {
       return readdirSync(dir).filter((n) => /^\d+$/.test(n)).sort().reverse();
@@ -107,23 +134,20 @@ export function codexFile(sessionId: string): string | null {
     }
   };
   for (const y of numbered(root)) {
-    if (y < from.slice(0, 4)) break;
+    if (y < from.slice(0, 4)) return;
     for (const m of numbered(path.join(root, y))) {
       if (`${y}/${m}` < from.slice(0, 7)) break;
       for (const d of numbered(path.join(root, y, m))) {
         if (`${y}/${m}/${d}` < from) break;
-        let names: string[];
+        const dir = path.join(root, y, m, d);
         try {
-          names = readdirSync(path.join(root, y, m, d));
+          yield [dir, readdirSync(dir)];
         } catch {
-          continue;
+          // gone meanwhile
         }
-        const name = names.find((n) => n.startsWith('rollout-') && n.endsWith(suffix));
-        if (name !== undefined) return path.join(root, y, m, d, name);
       }
     }
   }
-  return null;
 }
 
 /** When a UUID v7 was made (ms since 1970), or null for another kind of id. */
@@ -179,25 +203,42 @@ export function find(harness: string, projectRoot: string, role: string, since =
   const wanted = markers(role);
   // Antigravity keeps every project's conversations together: also require this project's path.
   const places = harness === 'antigravity' ? [projectRoot, projectRoot.replace(/\\/g, '\\\\'), projectRoot.replace(/\\/g, '/')] : [];
-  let best: [number, string] | null = null;
-  for (const [file, sessionId] of candidates(harness, projectRoot)) {
-    let head: string;
-    let mtime: number;
+  const found: [number, string, string][] = []; // [last change (ms), file, conversation id]
+  for (const [file, sessionId] of candidates(harness, projectRoot, since)) {
     try {
-      mtime = statSync(file).mtimeMs / 1000;
-      if (best && mtime <= best[0]) continue;
       if (since && born(file) < since) continue;
+      found.push([statSync(file).mtimeMs, file, sessionId]);
+    } catch {
+      continue;
+    }
+  }
+  // Newest first, so the first that matches is the one; a fresh team (most of a harness's conversations older
+  // than it) reads none.
+  found.sort((a, b) => b[0] - a[0]);
+  const cutoff = Date.now() - SCAN_DAYS * DAY_MS;
+  for (const [mtime, file, known] of found) {
+    if (harness === 'codex' && mtime < cutoff) break;
+    let sessionId = known;
+    let head: string;
+    try {
+      if (harness === 'codex') { // its id and folder are in its first record: only this project's are read further
+        const meta: Meta = JSON.parse(firstLine(file)).payload ?? {};
+        if (isSubSession(meta)) continue; // an auto-review quotes the agent's history, kickoff included
+        if (String(meta.cwd ?? '').toLowerCase() !== projectRoot.toLowerCase() || !meta.id) continue;
+        sessionId = String(meta.id);
+      }
       head = readHead(file, SCAN_BYTES);
     } catch {
       continue;
     }
-    if (wanted.some((m) => head.includes(m)) && (!places.length || places.some((p) => head.includes(p)))) best = [mtime, sessionId];
+    if (wanted.some((m) => head.includes(m)) && (!places.length || places.some((p) => head.includes(p)))) return sessionId;
   }
-  return best ? best[1] : null;
+  return null;
 }
 
-/** [file to search, conversation id] for each conversation `harness` had in the project. */
-function* candidates(harness: string, projectRoot: string): Generator<[string, string]> {
+/** [file to search, conversation id ('' for Codex: it is inside the file)] for each conversation `harness` had in
+ * the project, or for Codex, of any project since `since` (seconds since 1970). */
+function* candidates(harness: string, projectRoot: string, since: number): Generator<[string, string]> {
   const h = home();
   if (harness === 'claude') {
     for (const file of glob(path.join(h, '.claude', 'projects', projectRoot.replace(/[^A-Za-z0-9]/g, '-')), '*.jsonl')) {
@@ -212,17 +253,8 @@ function* candidates(harness: string, projectRoot: string): Generator<[string, s
       yield [file, path.basename(file).replace(/\.[^.]*$/, '')];
     }
   } else if (harness === 'codex') {
-    const cutoff = Date.now() / 1000 - SCAN_DAYS * 86400;
-    for (const file of glob(path.join(h, '.codex', 'sessions'), '*/*/*/rollout-*.jsonl')) {
-      let meta: Meta;
-      try {
-        if (statSync(file).mtimeMs / 1000 < cutoff) continue;
-        meta = JSON.parse(firstLine(file)).payload ?? {};
-      } catch {
-        continue;
-      }
-      if (isSubSession(meta)) continue; // an auto-review quotes the agent's history, kickoff included
-      if (String(meta.cwd ?? '').toLowerCase() === projectRoot.toLowerCase() && meta.id) yield [file, String(meta.id)];
+    for (const [dir, names] of codexDays(since * 1000)) {
+      for (const name of names) if (name.startsWith('rollout-') && name.endsWith('.jsonl')) yield [path.join(dir, name), ''];
     }
   }
 }

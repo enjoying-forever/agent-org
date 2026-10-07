@@ -210,7 +210,11 @@ test('Codex auto-review is never taken for the agent', (t) => {
   // the user a worker without any org tools.
   const { hub, file, home } = setup(t);
   const project = path.join(path.dirname(file), 'project');
-  const codex = (sid: string, meta: object): void => write(path.join(codexDay(home), `rollout-2026-09-28T17-28-05-${sid}.jsonl`),
+  // filed under today, the day they began: a search looks only from the day the team's hub was made
+  const now = new Date();
+  const today = path.join(home, '.codex', 'sessions', String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'));
+  const codex = (sid: string, meta: object): void => write(path.join(today, `rollout-2026-09-28T17-28-05-${sid}.jsonl`),
     line({ type: 'session_meta', payload: { id: sid, ...meta } }));
   codex(MAIN, { cwd: project, source: 'cli', thread_source: 'user', note: "You are the 'worker-a' agent in a team" });
   codex(REVIEW, { cwd: project, source: { subagent: { other: 'guardian' } }, thread_source: 'guardian_review', parent_thread_id: MAIN,
