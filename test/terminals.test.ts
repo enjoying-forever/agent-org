@@ -1,6 +1,6 @@
 // Agents' terminals inside the agent-org window (pseudo-terminals agent-org owns).
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import * as launch from '../src/launch.ts';
@@ -46,6 +46,22 @@ test('a fresh environment leaves out the session that started agent-org', (t) =>
   assert.ok(!Object.keys(env).some((k) => /^(CLAUDECODE|CLAUDE_CODE_|ELECTRON_)/i.test(k)));
   assert.ok(Object.keys(env).some((k) => k.toUpperCase() === 'PATH'));
   assert.equal(Object.keys(env).filter((k) => k.toUpperCase() === 'PATH').length, 1); // one PATH, however it is spelt
+});
+
+test('a program installed after a look-up is found, and one removed is not', (t) => {
+  const dir = tmpDir(t);
+  const [bin, other] = [path.join(dir, 'bin'), path.join(dir, 'other')];
+  mkdirSync(bin);
+  mkdirSync(other);
+  const searchPath = [path.join(dir, 'not-there'), other, bin].join(path.delimiter);
+  assert.equal(which('newtool', searchPath), null);
+  const tool = path.join(bin, process.platform === 'win32' ? 'newtool.cmd' : 'newtool');
+  writeFileSync(tool, '', 'utf8');
+  assert.equal(which('newtool', searchPath)?.toLowerCase(), tool.toLowerCase());
+  mkdirSync(path.join(other, process.platform === 'win32' ? 'newtool.exe' : 'newtool')); // a folder by that name is no program
+  assert.equal(which('newtool', searchPath)?.toLowerCase(), tool.toLowerCase());
+  rmSync(tool);
+  assert.equal(which('newtool', searchPath), null);
 });
 
 test('tab parts turn a tab into a terminal', (t) => {

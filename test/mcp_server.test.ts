@@ -374,8 +374,14 @@ test('checks run inside a real server while it reads its pipe', async (t) => {
   hub.session('worker-a').readInbox();
   hub.close();
   const proc = spawn(process.execPath, [SERVER, '--team', file, '--role', 'worker-a'], { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
-  cleanup(t, () => {
-    if (proc.exitCode === null) spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+  const exited = new Promise((resolve) => proc.once('exit', resolve));
+  cleanup(t, async () => { // the server holds the hub's database until it has exited: then its folder can go
+    proc.stdin.end();
+    const ended = await Promise.race([exited.then(() => true), new Promise((r) => setTimeout(r, 5000, false).unref())]);
+    if (!ended) {
+      spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+      await exited;
+    }
   });
   const lines: Reply[] = [];
   let buffer = '';

@@ -7,7 +7,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -107,10 +107,7 @@ function findProgram(name: string, searchPath: string | undefined = process.env.
   const windows = process.platform === 'win32';
   const exts = windows ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter((x) => x) : [''];
   const hasExt = windows && exts.some((x) => name.toLowerCase().endsWith(x.toLowerCase()));
-  const candidates = (dir: string): string[] => {
-    const base = path.join(dir, name);
-    return windows ? [...(hasExt ? [base] : []), ...exts.map((x) => base + x.toLowerCase())] : [base];
-  };
+  const names = windows ? [...(hasExt ? [name] : []), ...exts.map((x) => name + x.toLowerCase())] : [name];
   const isFile = (p: string): boolean => {
     try {
       return statSync(p).isFile();
@@ -122,13 +119,51 @@ function findProgram(name: string, searchPath: string | undefined = process.env.
       }
     }
   };
-  if (path.isAbsolute(name) || name.includes('/') || name.includes('\\')) return candidates('').find(isFile) ?? (isFile(name) ? name : null);
+  if (path.isAbsolute(name) || name.includes('/') || name.includes('\\')) return names.find(isFile) ?? (isFile(name) ? name : null);
   for (const dir of (searchPath ?? '').split(path.delimiter)) {
     if (!dir) continue;
-    const found = candidates(dir.replace(/^"|"$/g, '')).find(isFile);
-    if (found) return found;
+    const folder = dir.replace(/^"|"$/g, '');
+    const there = programsIn(folder);
+    const found = names.find((n) => there.has(windows ? n.toLowerCase() : n));
+    if (found !== undefined) return path.join(folder, found);
   }
   return null;
+}
+
+const listings = new Map<string, { changed: number; programs: Set<string> }>();
+const missing = new Map<string, number>(); // a PATH folder that is not there (or a broken link) -> when last tried
+const MISSING_RECHECK_MS = 30_000;
+const RACY_MS = 2000;
+
+/** The names of the files (and links: app execution aliases) in `folder`, lower-case on Windows; read again only
+ * when the folder changes. Looking for each candidate name in every PATH folder instead took 0.8 s for a program
+ * that is not there (90 folders, 13 extensions, and a broken link among the folders costing 15 ms a look). */
+function programsIn(folder: string): Set<string> {
+  let changed: number;
+  const tried = missing.get(folder);
+  if (tried !== undefined && Date.now() - tried < MISSING_RECHECK_MS) return new Set();
+  try {
+    changed = statSync(folder).mtimeMs;
+    missing.delete(folder);
+  } catch {
+    missing.set(folder, Date.now());
+    return new Set();
+  }
+  const known = listings.get(folder);
+  if (known !== undefined && known.changed === changed) return known.programs;
+  const programs = new Set<string>();
+  try {
+    for (const e of readdirSync(folder, { withFileTypes: true })) {
+      if (e.isFile() || e.isSymbolicLink()) programs.add(process.platform === 'win32' ? e.name.toLowerCase() : e.name);
+    }
+  } catch {
+    // not readable: nothing to run there
+  }
+  // A folder's time of change has a coarse clock (some 16 ms on Windows): a listing read just after a change may miss
+  // a file added in the same tick, so it is kept only once the folder has been quiet a while.
+  if (Date.now() - changed > RACY_MS) listings.set(folder, { changed, programs });
+  else listings.delete(folder);
+  return programs;
 }
 
 /** The values under a registry key ({} if it cannot be read), as `reg query` shows them. */
