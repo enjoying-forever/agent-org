@@ -543,7 +543,7 @@ function agentLook(r) {
   // its own status may lag: a call running (or one a moment ago, before it said anything) says it is at work
   const busy = running || r.actions?.some((a) => !s && Date.now() / 1000 - a.ended_at < 60);
   let [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : r.stuck ? ['stuck', 'stuck']
-    : busy && s?.state !== 'working' ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'starting'];
+    : busy && s?.state !== 'working' ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'idle']; // no word from it yet: at its prompt
   if (cls === 'done') [cls, label] = ['idle', 'idle'];
   let now = '';
   let shown = null; // the action the line is
@@ -553,7 +553,7 @@ function agentLook(r) {
   else if (running) [now, shown] = [running.what, running];
   else if (r.online && s?.task) now = s.task;
   else if (r.online && latest && Date.now() / 1000 - latest.ended_at < 600) [now, shown] = [latest.what, latest]; // what it did last
-  else if (r.online) now = { waiting: 'for new messages', starting: 'its program is starting' }[label] || '';
+  else if (r.online) now = { waiting: 'for new messages' }[label] || '';
   return { cls, label, now, shown };
 }
 
