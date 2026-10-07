@@ -299,3 +299,44 @@ test('a file the owner holds is refused in plain words', (t) => {
 test('non-ASCII hook answers are escaped for any console', () => {
   assert.equal(hooks.asciiJson({ reason: 'café ✓' }), '{"reason":"caf\\u00e9 \\u2713"}');
 });
+
+// what the agent is doing, for the owner's page
+
+test('tool calls are told in the owner\'s words', (t) => {
+  const { hub } = makeHub(t);
+  const root = hub.baseTeam.project_root;
+  const say = (payload: hooks.Payload): string | null => hooks.describeAction(payload, root);
+  assert.equal(say({ tool_name: 'Bash', tool_input: { command: 'npm   test\n  -- --watch=false' } }), '$ npm test -- --watch=false');
+  assert.equal(say({ tool_name: 'exec_command', tool_input: { cmd: ['bash', '-lc', 'pytest -q'] } }), '$ bash -lc pytest -q'); // Codex
+  assert.equal(say({ tool_name: 'Edit', tool_input: { file_path: path.join(root, 'src', 'app.py') } }), 'Editing src/app.py');
+  assert.equal(say({ toolName: 'read_file', toolInput: { path: 'README.md' }, cwd: root }), 'Reading README.md'); // Grok's camelCase
+  assert.equal(say({ toolCall: { name: 'write_to_file', args: { TargetFile: path.join(root, 'b.py') } } }), 'Editing b.py'); // Antigravity
+  assert.equal(say({ tool_name: 'Grep', tool_input: { pattern: 'TODO' } }), 'Searching TODO');
+  assert.equal(say({ tool_name: 'mcp__org__assign_task', tool_input: { to: 'worker-a', title: 'x' } }), 'assign task → worker-a');
+  assert.equal(say({ tool_name: 'mcp__github__create_issue', tool_input: {} }), 'github: create_issue');
+  assert.equal(say({ tool_name: 'Bash', tool_input: { command: 'curl -H "Authorization: Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123"' } }),
+    '$ curl -H "Authorization: Bearer •••"'); // never a secret
+  assert.ok(say({ tool_name: 'Bash', tool_input: { command: 'x'.repeat(500) } })!.length <= 140);
+  assert.equal(say({}), null); // Antigravity's model-call hook names no tool
+});
+
+test('the page sees what each agent is doing: a call runs until it ends, or its turn does', (t) => {
+  const { hub } = makeHub(t);
+  const worker = hub.session('worker-a');
+  const call = { tool_name: 'Bash', tool_input: { command: 'npm test' }, cwd: hub.baseTeam.project_root };
+  hooks.HANDLERS['pre-edit'](worker, call);
+  let [now] = hub.store.recentActions()['worker-a'];
+  assert.deepEqual([now.what, now.ended_at], ['$ npm test', null]); // running
+  hooks.HANDLERS['post-tool'](worker, call);
+  [now] = hub.store.recentActions()['worker-a'];
+  assert.ok(now.ended_at !== null && hub.store.recentActions()['worker-a'].length === 1); // the same call, ended
+  hooks.HANDLERS['post-tool'](worker, { tool_name: 'Read', tool_input: { file_path: 'README.md' }, cwd: hub.baseTeam.project_root });
+  hooks.HANDLERS['pre-edit'](worker, { tool_name: 'Bash', tool_input: { command: 'npm run build' } });
+  assert.deepEqual(hub.store.recentActions()['worker-a'].map((a) => a.what), ['$ npm run build', 'Reading README.md', '$ npm test']);
+  hub.store.endActions('worker-a'); // what the stop hook does: an interrupted call never says it ended
+  assert.ok(hub.store.recentActions()['worker-a'].every((a) => a.ended_at !== null));
+  hooks.HANDLERS['pre-edit'](hub.session('worker-b'), { tool_name: 'Edit', tool_input: { file_path: 'src/app.py' }, cwd: hub.baseTeam.project_root });
+  assert.equal(hub.store.recentActions()['worker-b'], undefined); // refused (outside its scope): it never ran
+  for (let i = 0; i < 40; i++) hub.store.noteAction('worker-a', `$ step ${i}`, false);
+  assert.equal(hub.store.recentActions(100)['worker-a'].length, 30); // only the latest are kept
+});

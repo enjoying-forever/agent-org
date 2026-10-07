@@ -543,7 +543,10 @@ function treeNode(r) {
   const st = S.state;
   const s = r.status;
   const asking = Boolean(r.online && (PANES.get(r.name)?.asking || r.terminal?.asking));
-  const [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : s ? [s.state, s.state] : ['idle', 'starting'];
+  // its own status may lag: a call running (or one a moment ago) says it is at work
+  const busy = r.actions?.some((a) => a.ended_at === null || (!s && Date.now() / 1000 - a.ended_at < 60));
+  const [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you']
+    : busy && (!s || s.state !== 'working') ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'starting'];
   const what = !r.online ? '' : asking ? 'Its terminal waits for your answer' : s?.task || '';
   const task = st.tasks.find((t) => t.assignee === r.name && t.state === 'working')
     || st.tasks.find((t) => t.assignee === r.name && ['open', 'blocked'].includes(t.state));
@@ -560,6 +563,9 @@ function treeNode(r) {
     launchable && !r.online ? iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)) : null),
   h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r)),
   h('div', { class: 'doing' }, h('span', { class: `state ${cls}` }, label), what ? h('span', { class: 'what', title: what }, what) : null),
+  r.actions?.length ? h('div', { class: 'acts', title: 'What it did last, newest first' }, r.actions.map((a) => h('div', { // not ul/li: the tree's own lines are drawn on those
+    class: a.ended_at === null ? 'running' : '', title: `${a.what}\n${a.ended_at === null ? 'started' : 'done'} at ${fmtTime(a.ended_at ?? a.at)}`,
+  }, h('span', { class: 'what' }, a.what), h('span', { class: 'when', 'data-at': a.ended_at ?? a.at, 'data-running': a.ended_at === null ? '1' : '' }, actionAge(a))))) : null,
   task ? h('div', { class: 'task', title: `#${task.id} ${task.title} (${task.state})` },
     `${task.state === 'working' ? 'On' : task.state === 'blocked' ? 'Blocked on' : 'Next'} `, h('b', {}, `#${task.id} ${task.title}`)) : null,
   last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${last.text.slice(0, 600)}` },
@@ -574,6 +580,26 @@ function treeNode(r) {
   if (!r.tier) dragTeammate(card, r.name);
   return card;
 }
+
+/** How long ago an action ended, or how long a running one has run: "now", "12s", "3m", "2h". */
+function actionAge(a) {
+  return shortSpan(Date.now() / 1000 - (a.ended_at ?? a.at), a.ended_at === null);
+}
+
+function shortSpan(s, running) {
+  if (s < 5 && !running) return 'now';
+  if (s < 60) return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m${running && s < 600 ? ` ${String(Math.floor(s % 60)).padStart(2, '0')}s` : ''}`;
+  return `${Math.floor(s / 3600)}h`;
+}
+
+// the ages tick on their own: the cards are rebuilt only when something changed
+setInterval(() => {
+  if (!L.tree || document.hidden || $('#tree-view').hidden) return;
+  for (const el of document.querySelectorAll('#team-tree .acts .when')) {
+    el.textContent = shortSpan(Date.now() / 1000 - Number(el.dataset.at), el.dataset.running === '1');
+  }
+}, 1000);
 
 for (const b of document.querySelectorAll('#team-mode button')) b.addEventListener('click', () => setTeamMode(b.dataset.mode === 'tree'));
 
@@ -616,7 +642,7 @@ function paneKey(p, r) {
     st.tasks.filter((t) => t.assignee === r.name && ['working', 'open', 'blocked'].includes(t.state)).map((t) => [t.id, t.state, t.title]),
     S.messages.filter((m) => m.sender === r.name || m.recipient === r.name).slice(-LOG_LINES).map((m) => [m.id, m.read]),
   ];
-  return JSON.stringify([r, own, S.focus === r.name, p.outputting, p.asking, live, st.leader, st.launchable, st.project_root,
+  return JSON.stringify([{ ...r, actions: null }, own, S.focus === r.name, // its actions show in the Tree, not here p.outputting, p.asking, live, st.leader, st.launchable, st.project_root,
     L.mode, L.max, mainPane()]);
 }
 

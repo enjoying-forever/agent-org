@@ -203,6 +203,72 @@ export function editedPaths(payload: Payload): string[] {
   return [...new Set(found)].map((p) => p.trim()).filter((p) => p);
 }
 
+// what the agent is doing, for the owner
+
+const READ_TOOLS = new Set(['read', 'read_file', 'view_file', 'view', 'notebookread', 'read_many_files', 'view_code_item']);
+const SEARCH_TOOLS = new Set(['grep', 'glob', 'search', 'search_files', 'find_files', 'codebase_search', 'grep_search', 'find_by_name',
+  'list_dir', 'ls', 'list_directory', 'file_search']);
+const FETCH_TOOLS = new Set(['webfetch', 'web_fetch', 'read_url_content', 'read_url', 'fetch']);
+const WEB_SEARCH_TOOLS = new Set(['websearch', 'web_search', 'search_web']);
+const HELPER_TOOLS = new Set(['task', 'agent', 'spawn_agent']);
+const PLAN_TOOLS = new Set(['todowrite', 'update_plan', 'write_todos']);
+const ACTION_CHARS = 140;
+
+/** One line saying what a tool call does, in the owner's words: "$ npm test", "Editing src/app.ts", "Reading
+ * README.md". Null when the payload names no tool (Antigravity's model-call hook). Secrets in a command are hidden. */
+export function describeAction(payload: Payload, root: string): string | null {
+  const [tool, raw] = toolCall(payload);
+  if (!tool) return null;
+  const parts = tool.split('__');
+  const name = parts.at(-1)!.toLowerCase();
+  const input = (typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {}) as Payload;
+  const text = (v: unknown): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+  const first = (...keys: string[]): string => keys.map((k) => text(input[k])).find((v) => v) ?? '';
+  const cwd = String(field(payload, 'cwd') || root);
+  const shown = (p: string): string => {
+    const full = path.resolve(cwd, p);
+    return relativeTo(full, root) ?? full.replace(/\\/g, '/');
+  };
+  let line: string;
+  if (parts.length > 2 && parts[1] === 'org') { // an org tool (cards.SERVER_NAME; not imported: a hook loads little): its name says it
+    const to = first('to', 'assignee', 'role', 'name');
+    line = `${name.replace(/_/g, ' ')}${to ? ` → ${to}` : ''}`;
+  } else if (isShell(tool)) {
+    line = `$ ${text(safety.commandOf(raw)) || name}`;
+  } else if (EDIT_TOOLS.has(name)) {
+    const files = editedPaths(payload).map(shown);
+    line = files.length ? `Editing ${files.join(', ')}` : `Editing (${tool})`;
+  } else if (READ_TOOLS.has(name)) {
+    const file = first(...PATH_KEYS);
+    line = file ? `Reading ${shown(file)}` : 'Reading';
+  } else if (SEARCH_TOOLS.has(name)) {
+    line = `Searching ${first('pattern', 'query', 'Query', 'Pattern', 'regex', 'SearchPath', 'path', 'DirectoryPath') || 'the files'}`;
+  } else if (FETCH_TOOLS.has(name)) {
+    line = `Reading ${first('url', 'Url', 'URL') || 'a web page'}`;
+  } else if (WEB_SEARCH_TOOLS.has(name)) {
+    line = `Searching the web: ${first('query', 'Query', 'q')}`;
+  } else if (HELPER_TOOLS.has(name)) {
+    line = `Running a helper: ${first('description', 'prompt', 'task') || name}`;
+  } else if (PLAN_TOOLS.has(name)) {
+    line = 'Updating its plan';
+  } else {
+    line = parts.length > 2 ? `${parts[1]}: ${parts.slice(2).join('__')}` : tool;
+  }
+  line = safety.maskSecrets(line);
+  return line.length > ACTION_CHARS ? `${line.slice(0, ACTION_CHARS - 1)}…` : line;
+}
+
+/** Note the call for the owner's page; never in the way of the hook itself. */
+function noteAction(me: RoleSession, payload: Payload, running: boolean): void {
+  try {
+    const what = describeAction(payload, me.hub.rootOf(me.name));
+    // Antigravity says only when an edit starts: it is noted as done
+    if (what !== null) me.store.noteAction(me.name, what, running && !payload.toolCall);
+  } catch {
+    // only the page misses it
+  }
+}
+
 export function isShell(tool: string): boolean {
   return safety.SHELL_TOOLS.has(tool.split('__').pop()!.toLowerCase());
 }
@@ -323,9 +389,20 @@ function onSession(): HookOut {
 }
 
 export const HANDLERS: Record<string, (me: RoleSession, payload: Payload) => HookOut | Promise<HookOut>> = dict({
-  stop: (me, payload) => onStop(me, payload),
-  'post-tool': onPostTool,
-  'pre-edit': onPreEdit,
+  stop: (me, payload) => {
+    me.store.endActions(me.name); // its turn is over
+    return onStop(me, payload);
+  },
+  'post-tool': (me, payload) => {
+    noteAction(me, payload, false);
+    return onPostTool(me, payload);
+  },
+  'pre-edit': (me, payload) => {
+    const out = onPreEdit(me, payload);
+    const refused = (out?.hookSpecificOutput as Payload | undefined)?.permissionDecision === 'deny';
+    if (!refused) noteAction(me, payload, true); // a refused call never runs
+    return out;
+  },
   session: onSession,
   invocation: onPostTool,
 });

@@ -662,6 +662,7 @@ export class App {
     const openTasks = store.tasks({ openOnly: true });
     const stuck = this.hub.stuck();
     const terms = this.inWindow ? this.termListing() : {};
+    const actions = store.recentActions();
     const roles = [team.leader, ...team.subtreeOf(team.leader)].map((name) => {
       const r = team.roles[name];
       const s = statuses[name];
@@ -679,6 +680,7 @@ export class App {
         usage: this.usage(name, r.harness),
         stuck: name in stuck ? { ...stuck[name], describe: describeStuck(stuck[name]) } : null,
         terminal: terms[name] ?? null,
+        actions: actions[name] ?? [],
       };
     });
     const s = team.settings;

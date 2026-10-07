@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS activity (
     at   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS actions (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    role     TEXT NOT NULL,
+    at       REAL NOT NULL,
+    what     TEXT NOT NULL,
+    ended_at REAL
+);
+
 CREATE TABLE IF NOT EXISTS notices (
     role    TEXT PRIMARY KEY,
     last_id INTEGER NOT NULL
@@ -165,6 +173,7 @@ CREATE INDEX IF NOT EXISTS messages_unread ON messages(recipient) WHERE read_at 
 CREATE INDEX IF NOT EXISTS messages_task ON messages(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS messages_sent ON messages(sent_at);
 CREATE INDEX IF NOT EXISTS messages_kind ON messages(recipient, kind, id);
+CREATE INDEX IF NOT EXISTS actions_role ON actions(role, id);
 `;
 
 const UPGRADES: Record<string, Record<string, string>> = {
@@ -223,6 +232,15 @@ export interface Status {
   readonly task: string;
   readonly updated_at: number;
 }
+
+/** One thing an agent did (a tool call), for the owner to see what it is doing. */
+export interface Action {
+  readonly at: number;
+  readonly what: string;
+  readonly ended_at: number | null; // null while it runs
+}
+
+const ACTIONS_KEPT = 30; // per role
 
 export interface Lock {
   readonly path: string;
@@ -551,6 +569,37 @@ export class Store {
   /** Note that `role` just did something (a tool call): the watchdog's sign of progress. */
   touch(role: string): void {
     this.run('INSERT INTO activity (role, at) VALUES (?, ?) ON CONFLICT(role) DO UPDATE SET at = excluded.at', role, now());
+  }
+
+  /** Note what `role` is doing: a tool call that starts (`running`), or one that ended - which closes the same
+   * call if its start was noted (calls may run side by side). The last ACTIONS_KEPT of each role are kept. */
+  noteAction(role: string, what: string, running: boolean): void {
+    const t = now();
+    if (!running) {
+      const open = this.get('SELECT id FROM actions WHERE role = ? AND ended_at IS NULL AND what = ? ORDER BY id DESC LIMIT 1', role, what);
+      if (open !== undefined) {
+        this.run('UPDATE actions SET ended_at = ? WHERE id = ?', t, Number(open.id));
+        return;
+      }
+    }
+    this.run('INSERT INTO actions (role, at, what, ended_at) VALUES (?, ?, ?, ?)', role, t, what, running ? null : t);
+    this.run('DELETE FROM actions WHERE role = ? AND id <= (SELECT id FROM actions WHERE role = ? ORDER BY id DESC LIMIT 1 OFFSET ?)',
+      role, role, ACTIONS_KEPT);
+  }
+
+  /** The turn is over: nothing of `role`'s still runs (a call it was interrupted in never reports its end). */
+  endActions(role: string): void {
+    this.run('UPDATE actions SET ended_at = ? WHERE role = ? AND ended_at IS NULL', now(), role);
+  }
+
+  /** Each role's latest `per` actions, newest first. */
+  recentActions(per = 3): Record<string, Action[]> {
+    const out = dict<Action[]>();
+    for (const r of this.all('SELECT role, at, what, ended_at FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY role ORDER BY id DESC) AS n'
+      + ' FROM actions) WHERE n <= ? ORDER BY role, id DESC', per)) {
+      (out[r.role as string] ??= []).push({ at: Number(r.at), what: String(r.what), ended_at: r.ended_at === null ? null : Number(r.ended_at) });
+    }
+    return out;
   }
 
   activity(): Record<string, number> {

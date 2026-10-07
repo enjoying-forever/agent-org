@@ -115,6 +115,13 @@ const SECRET_PATTERNS: [string, RegExp][] = [
     /\b(?:api[_-]?key|secret|passw(?:or)?d|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{12,}["']/i],
 ];
 
+/** `text` with every secret it holds replaced by •••. */
+export function maskSecrets(text: string): string {
+  let out = text;
+  for (const [, rule] of SECRET_PATTERNS) out = out.replace(new RegExp(rule.source, rule.flags.includes('g') ? rule.flags : `${rule.flags}g`), '•••');
+  return out;
+}
+
 /** Secrets that lines added in `diff` would put into history: 'file:line (kind)', never the value. */
 export function findSecrets(diff: string): string[] {
   const found: string[] = [];

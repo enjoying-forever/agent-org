@@ -71,9 +71,12 @@ agent carries on where it stopped.
   On the right, the team's messages. Dark or light with the button at the top.
 - **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
   or the team as a tree, for when you would rather not watch them all: each agent a card under
-  whom it reports to, saying whether it runs, its state and what it says it is doing, an amber
-  *asks you* when its terminal waits for an answer, its task, its last message, and whether it
-  is stuck, which files it is writing and its usage. Click a card for that agent's terminal; ▶
+  whom it reports to, saying whether it runs, its state and what it says it is doing, its last
+  few actions as they happen (`$ npm test` running for 40s, *Editing src/app.ts* 12s ago - taken from
+  the hooks every tool call goes through, with secrets in commands hidden), an amber *asks you* when
+  its terminal waits for an answer, its task, its last message, and whether it is stuck, which
+  files it is writing and its usage. (Antigravity reports only its edits, DeepSeek nothing yet.)
+  Click a card for that agent's terminal; ▶
   starts one that is not running. Roles dropped from **+** and teammates dragged onto a card
   change the team, as in the team list. The choice is remembered for each team.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its

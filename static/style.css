@@ -519,7 +519,7 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .node .name .nm { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node .model { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tree-view { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 24px 20px 40px; }
-.tree-view .node { width: 250px; max-width: none; gap: 5px; padding: 10px 12px 11px; font: inherit; color: var(--ink); cursor: pointer;
+.tree-view .node { width: 270px; max-width: none; gap: 5px; padding: 10px 12px 11px; font: inherit; color: var(--ink); cursor: pointer;
   transition: background-color 0.12s, border-color 0.12s; }
 .tree-view .node:hover { background: var(--sheet-2); }
 .tree-view .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -532,6 +532,15 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .node .doing { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: 12.5px; }
 .node .doing .state { flex-shrink: 0; }
 .node .doing .what { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.node .acts { margin: 1px 0 1px; padding: 5px 0 0; border-top: 1px solid var(--edge); display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--font-code); font-size: 11.5px; line-height: 1.4; }
+.node .acts > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--faint); }
+.node .acts > :first-child { color: var(--ink); }
+.node .acts .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .acts .when { flex-shrink: 0; font-family: var(--font-ui); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.node .acts > .running .when { color: var(--working); font-weight: 600; }
+.node .acts > .running .what::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
+  background: var(--working); vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
 .node .task, .node .last { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node .task b { color: var(--ink); font-weight: 600; }
 .node .facts { display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: 11.5px; color: var(--faint); }
