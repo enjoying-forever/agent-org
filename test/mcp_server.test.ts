@@ -135,7 +135,8 @@ test('a misnamed argument is not lost', async (t) => {
 });
 
 const BASIC_TOOLS = ['my_role', 'team_status', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view',
-  'claim_file', 'release_file', 'list_locks', 'hand_over_file', 'list_tasks', 'finish_task', 'save_notes', 'task_details', 'search_messages'];
+  'claim_file', 'release_file', 'list_locks', 'hand_over_file', 'list_tasks', 'finish_task', 'save_notes', 'task_details', 'search_messages',
+  'task_changes', 'run_checks'];
 
 async function toolNames(c: Client): Promise<string[]> {
   return (await c.call('tools/list')).result.tools.map((x: Reply) => x.name).sort();
@@ -421,4 +422,36 @@ test('a bad role exits with a message', (t) => {
   const proc = server(['--team', teamFile(t), '--role', 'ghost'], '');
   assert.equal(proc.status, 2);
   assert.ok(proc.stderr.includes('not in this team'), proc.stderr);
+});
+
+test('run_checks tries the checks without closing the task; task_changes shows the reviewer what changed', async (t) => {
+  const node = JSON.stringify(process.execPath);
+  const { hub } = makeHub(t, { ...team(), checks: [
+    { name: 'unit', run: `${node} -e "process.exit(require('fs').existsSync('src/bad.py') ? 1 : 0)"`, when: ['src/*'] },
+    { name: 'docs', run: `${node} -e "0"`, when: ['docs/*'] },
+  ] });
+  const lead = new Client(hub, 'tech-lead');
+  const worker = new Client(hub, 'worker-a');
+  const peer = new Client(hub, 'worker-b');
+  cleanup(t, async () => { for (const c of [lead, worker, peer]) await c.close(); });
+  await lead.tool('assign_task', { to: 'worker-a', title: 'Parser', done_when: 'unit passes' });
+  hub.session('worker-a').readInbox();
+  const [task] = hub.store.tasks({ assignee: 'worker-a' });
+  const root = hub.baseTeam.project_root;
+  mkdirSync(path.join(root, 'src'), { recursive: true });
+  writeFileSync(path.join(root, 'src', 'bad.py'), 'x = 1\n', 'utf8');
+  hub.session('worker-a').claim('src/bad.py');
+  hub.session('worker-a').noteEdit('src/bad.py');
+  let [text, err] = await worker.tool('run_checks', { task_id: task.id });
+  assert.ok(!err && text.startsWith('unit FAILED') && !text.includes('docs'), text); // only what applies to its files
+  assert.equal(hub.store.getTask(task.id)?.state, 'working'); // nothing closed
+  [text, err] = await lead.tool('task_changes', { task_id: task.id });
+  assert.ok(!err && text.includes('src/bad.py') && text.includes('keeps no history'), text);
+  assert.ok((await peer.tool('task_changes', { task_id: task.id }))[1]); // not theirs to see
+  writeFileSync(path.join(root, 'src', 'ok.py'), 'x = 1\n', 'utf8');
+  (await import('node:fs')).rmSync(path.join(root, 'src', 'bad.py'));
+  [text, err] = await worker.tool('run_checks', { task_id: task.id });
+  assert.equal(text, 'unit passed. finish_task will pass them.');
+  [text] = await worker.tool('run_checks');
+  assert.equal(text, 'unit passed, docs passed. finish_task will pass them.'); // without a task: every check
 });

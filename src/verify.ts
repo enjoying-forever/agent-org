@@ -30,11 +30,11 @@ export function applies(check: CheckSpec, files: readonly string[]): boolean {
   return files.some((f) => check.when.some((w) => fnmatchcase(f.toLowerCase(), w.toLowerCase().replace(/^\.\//, ''))));
 }
 
-/** Run every check that applies to a task which changed `files`, in `cwd` (the project folder). */
-export async function run(team: Team, files: readonly string[], cwd: string | null = null): Promise<Outcome[]> {
+/** Run every check that applies to a task which changed `files` (`all`: every check), in `cwd` (the project folder). */
+export async function run(team: Team, files: readonly string[], cwd: string | null = null, all = false): Promise<Outcome[]> {
   const outcomes: Outcome[] = [];
   for (const check of team.checks) {
-    if (!applies(check, files)) continue;
+    if (!all && !applies(check, files)) continue;
     let result: { code: number | null; output: string };
     try {
       result = await command(check.run, cwd ?? team.project_root, check.timeout);

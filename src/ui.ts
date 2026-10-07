@@ -486,22 +486,8 @@ export class App {
   }
 
   taskChanges(taskId: number): Json {
-    const [task] = this.me.taskDetails(taskId); // the owner may see every task; this checks it exists
-    const files = this.hub.store.taskFiles(taskId);
-    if (this.hub.branches) { // landed: the merge into main; still working: its branch against main
-      const root = this.hub.baseTeam.project_root;
-      let diff = '';
-      try {
-        const wt = this.hub.rootOf(task.assignee);
-        diff = task.commit_id ? gitops.commitDiff(root, task.commit_id)
-          : existsSync(path.join(wt, '.git')) ? gitops.branchDiff(wt, gitops.mainBranch(root)) : '';
-      } catch {
-        diff = '';
-      }
-      return { files, history: true, diff, branch: true };
-    }
-    const history = this.history();
-    return { files, history, diff: history ? gitops.diff(this.hub.baseTeam.project_root, files) : '' };
+    const changes = this.me.taskChanges(taskId); // the owner may see every task; this checks it exists
+    return changes.branch ? changes : { files: changes.files, history: changes.history, diff: changes.diff };
   }
 
   problems(): watchdog.Problem[] {

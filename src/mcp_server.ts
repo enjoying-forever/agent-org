@@ -20,6 +20,7 @@ import { dict } from './dict.ts';
 export const FALLBACK_PROTOCOL = '2025-06-18';
 export const DEFAULT_WAIT = 1800; // seconds; launchers raise each harness's tool timeout above this
 export const HEARTBEAT = 10; // seconds between presence check-ins; the hub counts a role as running for 30
+const DIFF_CHARS = 30_000; // the most of a diff task_changes returns
 
 type Args = Record<string, unknown>;
 type Handler = (args: Args, signal: AbortSignal | null) => string | Promise<string>;
@@ -95,6 +96,11 @@ export class Tools {
       { task_id: { type: 'integer' }, result: text, outcome: { type: 'string', enum: [...OUTCOMES] } },
       ['task_id', 'result'], (a) => this.finish(a));
     this.add('task_details', 'A task and its whole conversation.', { task_id: { type: 'integer' } }, ['task_id'], (a) => this.details(a));
+    this.add('task_changes', 'What a task changed: its files and their diff - to review a task you gave before review_task.',
+      { task_id: { type: 'integer' } }, ['task_id'], (a) => this.changes(a));
+    this.add('run_checks', "Run the team's checks (tests, lint...) on your work now, as finish_task will, without closing "
+      + 'anything: for your task, those that apply to its files; without one, all of them.',
+    { task_id: { type: 'integer', description: 'your task; empty: every check' } }, [], (a) => this.checks(a));
     this.add('search_messages', 'Search the messages you may read.', { words: text }, ['words'],
       (a) => fmtMessages(me.search(str(a, 'words')), 'Nothing found.'));
     this.add('save_notes', 'Replace your notes: what you know, decided and are doing. A new session of yours starts from them.',
@@ -306,6 +312,26 @@ export class Tools {
     if (task.result) lines.push('', `result: ${task.result}`);
     lines.push('', 'Thread:', fmtMessages(thread, '(no messages)'));
     return lines.join('\n');
+  }
+
+  private changes(args: Args): string {
+    const taskId = int(need(args, 'task_id'));
+    const c = this.me.taskChanges(taskId);
+    if (!c.files.length && !c.diff) return `Task #${taskId} has changed no files (none were edited under it).`;
+    const lines = [`Task #${taskId} changed: ${c.files.join(', ') || '(see the diff)'}`];
+    if (c.diff) {
+      lines.push('', c.diff.length > DIFF_CHARS ? `${c.diff.slice(0, DIFF_CHARS)}\n... (${c.diff.length - DIFF_CHARS} more characters: read the files)` : c.diff);
+    } else if (!c.history) {
+      lines.push('', 'The project keeps no history (git), so there is no diff: read the files.');
+    }
+    return lines.join('\n');
+  }
+
+  private async checks(args: Args): Promise<string> {
+    if (!this.me.team.checks.length) return 'This team has no checks: run the tests you know of yourself.';
+    const [summary, failed] = await this.me.checkWork(args.task_id == null ? null : int(args.task_id));
+    if (!summary) return 'No check applies to the files of that task.';
+    return failed ? `${summary}.\n\n${failed}\n\nFix it before finish_task.` : `${summary}. finish_task will pass them.`;
   }
 
   private async finish(args: Args): Promise<string> {

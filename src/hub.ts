@@ -399,7 +399,7 @@ export class Hub {
     if (task.details) lines.push('', task.details);
     if (task.done_when) lines.push('', `Done when: ${task.done_when}`);
     if (this.baseTeam.checks.length) {
-      lines.push('', "Before it can close as done, the hub runs the team's checks (run them yourself first):");
+      lines.push('', "Before it can close as done, the hub runs the team's checks (try them first with run_checks(" + task.id + ')):');
       lines.push(...this.baseTeam.checks.map((c) => `- ${verify.describe(c)}`));
     }
     if (task.parent_id) lines.push('', `(Part of task #${task.parent_id}.)`);
@@ -1100,6 +1100,44 @@ export class RoleSession {
       throw new PermissionDenied(`task #${taskId} is between ${task.assigner} and ${task.assignee}; you can see its status with team_status`);
     }
     return [task, this.store.thread(taskId)];
+  }
+
+  /** What a task changed: its files, and their diff when the project keeps a history (with branches: what landed
+   * in main, or its branch against main while it is still at work). */
+  taskChanges(taskId: number): { files: string[]; history: boolean; diff: string; branch: boolean } {
+    const [task] = this.taskDetails(taskId); // may you see it?
+    const files = this.store.taskFiles(taskId);
+    const root = this.hub.baseTeam.project_root;
+    if (this.hub.branches) {
+      let diff = '';
+      try {
+        const wt = this.hub.rootOf(task.assignee);
+        diff = task.commit_id ? gitops.commitDiff(root, task.commit_id)
+          : existsSync(path.join(wt, '.git')) ? gitops.branchDiff(wt, gitops.mainBranch(root)) : '';
+      } catch {
+        diff = '';
+      }
+      return { files, history: true, diff, branch: true };
+    }
+    const history = gitops.isOwnRepo(root);
+    return { files, history, diff: history && files.length ? gitops.diff(root, files) : '', branch: false };
+  }
+
+  /** Run the team's checks that apply to a task's files (all of them without a task), where `finish_task` will,
+   * without closing anything: [summary, the output of each that failed]. */
+  async checkWork(taskId: number | null): Promise<[string, string]> {
+    if (!this.team.checks.length) return ['', ''];
+    let files: string[] = [];
+    if (taskId !== null) {
+      const task = this.store.getTask(taskId);
+      if (task === null || task.assignee !== this.name) throw new PermissionDenied(`task #${taskId} is not assigned to you`);
+      files = this.store.taskFiles(taskId);
+    }
+    const cwd = this.hub.rootOf(this.name);
+    const outcomes = await verify.run(this.team, files, cwd, taskId === null);
+    const failed = outcomes.filter((o) => !o.ok);
+    this.hub.event('check', this.name, `ran the checks: ${verify.summary(outcomes) || 'none applied'}`, taskId);
+    return [verify.summary(outcomes), failed.map((o) => `--- ${o.name}: \`${o.command}\` (run in ${cwd}) ---\n${o.output}`).join('\n\n')];
   }
 
   /** Tasks you are working on or should start (not the ones still waiting for others). */

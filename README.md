@@ -297,8 +297,10 @@ These are set in `team.yaml` (`checks`, `autostart`, `max_running`).
 - **Checks** are commands that must pass before a task can be closed as done - your
   tests, a linter, a build. Each can be limited to certain files (`*.py`), so a task that
   changed only documents does not run the tests. Agents see the checks in their role card
-  and in every task they get, so they run them before they finish. When a check fails,
-  the agent gets its command and output, and the task stays in progress until it passes.
+  and in every task they get, and try them with `run_checks` before they finish (the same
+  checks, in the same place, without closing anything). When a check fails, the agent gets its
+  command and output, and the task stays in progress until it passes. Whoever gave the task
+  reviews it with `task_changes`: the files it changed and, with history on, their diff.
 - **History:** open any task on the Board and click *Turn on history* (once per
   project). The project folder becomes its own git repository, each task shows exactly
   what it changed, and **Accept & commit** saves one commit per accepted task, so any

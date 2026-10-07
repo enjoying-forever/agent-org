@@ -73,7 +73,7 @@ export function dutiesLeft(me: RoleSession): string[] {
   for (const task of me.toReview()) {
     const check = task.done_when ? ` against its 'done when' (${task.done_when})` : '';
     left.push(`Task #${task.id} you gave to ${task.assignee} (${task.title}) is done and waits for your review. `
-      + `Check it${check}, then review_task(${task.id}, accept=true), or review_task(${task.id}, accept=false, `
+      + `Check it${check} (task_changes(${task.id}) shows what it changed), then review_task(${task.id}, accept=true), or review_task(${task.id}, accept=false, `
       + 'feedback=...) to send it back.');
   }
   for (const task of me.givenTasks()) {
