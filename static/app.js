@@ -509,9 +509,10 @@ function renderChart() {
         title: `${r.name}: ${PROGRAM[r.harness] || r.harness}, ${modelLine(r)}${r.duties ? `\n${r.duties}` : ''}\nDouble-click for details`,
         onclick: () => focusPane(r.name), ondblclick: () => openDrawer(r.name),
       },
-      h('span', { class: 'ri-top' }, runningDot(r), // the count before the name, in a slot of its own so the names line up
+      h('span', { class: 'ri-top' }, runningDot(r), h('span', { class: 'nm' }, r.name),
+        // the count just before the program badge, in a slot of its own: counts and badges stay in columns
         h('span', { class: 'ri-count' }, count ? h('span', { class: `pill${r.unread ? ' hot' : ''}`, title: r.unread ? `${r.unread} unread` : plural(r.open_tasks, 'open task') }, count) : null),
-        h('span', { class: 'nm' }, r.name), badge(r)),
+        badge(r)),
       h('span', { class: `ri-sub${r.online ? '' : ' off'}` }, r.online ? agentLook(r).now || agentLook(r).label : 'not running')); // what it does, as a thread's preview
     if (!r.tier) dragTeammate(row, r.name);
     dropTarget(row, r.name);
@@ -519,9 +520,9 @@ function renderChart() {
   };
   const ownerRow = h('button', {
     class: 'rail-item owner', title: 'Messages to you', onclick: () => { showTab('messages'); setFilter('me'); },
-  }, h('span', { class: 'ri-top' }, h('span', { class: 'ri-dot' }),
+  }, h('span', { class: 'ri-top' }, h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)')),
     h('span', { class: 'ri-count' }, st.owner_unread ? h('span', { class: 'pill hot', title: `${st.owner_unread} unread` }, st.owner_unread) : null),
-    h('span', { class: 'nm' }, st.owner, st.owner !== 'you' && h('span', { class: 'sub' }, ' (you)'))));
+    h('span', { class: 'ri-badge' })));
   dropTarget(ownerRow, st.owner);
   const owner = h('li', {}, ownerRow);
   $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
