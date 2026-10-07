@@ -57,7 +57,24 @@ export function shellPath(p: string): string {
  * as Node (an environment variable cannot be set on a command line every shell reads). */
 export function hookCommand(event: string): string {
   if (!IN_ELECTRON) return `${shellPath(process.execPath)} ${shellPath(entry('org_hook'))} ${event}`;
+  const node = systemNode(); // a hook runs on every tool step: the .cmd and its cmd.exe add about 55 ms
+  if (node !== null) return `${shellPath(node)} ${shellPath(entry('org_hook'))} ${event}`;
   return `${shellPath(hookShim())} ${event}`;
+}
+
+let nodeFound: string | null | undefined;
+
+/** The computer's own Node.js (installing agent-org needs one), if it is new enough for agent-org's code. */
+export function systemNode(): string | null {
+  if (nodeFound !== undefined) return nodeFound;
+  nodeFound = null;
+  const node = which('node');
+  if (node !== null && /\.exe$/i.test(node)) {
+    const out = spawnSync(node, ['-p', 'process.versions.node'], { encoding: 'utf8', windowsHide: true, timeout: 15_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+    const [major, minor] = (out.stdout ?? '').trim().split('.').map(Number);
+    if (major > 22 || (major === 22 && minor >= 13)) nodeFound = node;
+  }
+  return nodeFound;
 }
 
 /** org_hook.cmd in agent-org's home folder, written when missing or out of date. */
