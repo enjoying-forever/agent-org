@@ -299,11 +299,14 @@ export class Hub {
     let latest: string;
     let changed: string[];
     let conflicts: string[];
+    const seen = (commit: string): boolean => this.store.getSetting(`synced:${owner}`) === commit
+      || this.store.getSetting(`sync-conflict:${owner}`) === commit;
+    const fast = gitops.mainHead(root);
+    if (fast !== null && seen(fast[1])) return ''; // main has not moved: no git at all (this runs on every tool step)
     try {
-      const main = gitops.mainBranch(root);
-      latest = gitops.head(root, main);
-      if (!latest || gitops.merging(wt) || this.store.getSetting(`synced:${owner}`) === latest
-        || this.store.getSetting(`sync-conflict:${owner}`) === latest) return '';
+      const main = fast?.[0] ?? gitops.mainBranch(root);
+      latest = fast?.[1] ?? gitops.head(root, main);
+      if (!latest || gitops.merging(wt) || seen(latest)) return '';
       gitops.commitAll(wt, `${owner}: work in progress (before taking in main)`);
       [changed, conflicts] = gitops.sync(wt, main, true);
     } catch (e) {

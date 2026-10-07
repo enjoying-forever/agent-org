@@ -212,3 +212,27 @@ test('secrets never reach main', async (t) => {
   await rejects(() => hub.session('worker-a').finishTask(a.task.id, 'done'), HubError, 'would put secrets into git history: tests/test_shared.py:2');
   assert.ok(!mainText(hub).includes('sk-ant'));
 });
+
+test("main's head is read from the repository's files, as git would answer", async (t) => {
+  const hub = makeHub(t);
+  const a = start(hub, 'worker-a'); // history is on, and worker-a has its copy
+  const root = hub.baseTeam.project_root;
+  const answer = (): [string, string] => [git(root, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), git(root, 'rev-parse', 'HEAD').trim()];
+  assert.deepEqual(gitops.mainHead(root), answer());
+  edit(a.wt, 'return 1', "return 'one'");
+  await hub.session('worker-a').finishTask(a.task.id, 'done'); // main moves on
+  assert.deepEqual(gitops.mainHead(root), answer());
+  git(root, 'pack-refs', '--all'); // refs packed into one file
+  assert.deepEqual(gitops.mainHead(root), answer());
+  git(root, 'checkout', '-q', '--detach');
+  assert.equal(gitops.mainHead(root), null); // not on a branch: git is asked instead
+});
+
+test('a copy whose main has not moved costs no git calls', (t) => {
+  const hub = makeHub(t);
+  start(hub, 'worker-a');
+  hub.syncRole('worker-a'); // the first look takes main in
+  const started = performance.now();
+  for (let i = 0; i < 20; i++) assert.equal(hub.syncRole('worker-a'), '');
+  assert.ok(performance.now() - started < 200, `${(performance.now() - started).toFixed(0)} ms for 20 looks`); // one git call takes 30 ms or more
+});

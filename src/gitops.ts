@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import path from 'node:path';
 import { withFileLock } from './filelock.ts';
 import { fnmatchcase } from './fnmatch.ts';
+import { which } from './runtime.ts';
 
 const MAX_DIFF = 200_000; // characters of diff shown for one task
 const IGNORE = ['.agent-org/', '.agents/plugins/agent-org/']; // the hub's own files never go into history
@@ -29,9 +30,31 @@ export interface GitResult {
   stderr: string;
 }
 
+let program: [string, Record<string, string>] | null = null;
+
+/** How git is run. On Windows the git found on PATH is usually Git's small launcher (cmd\git.exe), which only
+ * starts the real one: a second process on every call, about 30 ms each (a task landing runs dozens). So the
+ * real git.exe is run, with the PATH the launcher would give it (hooks still find sh). */
+export function gitProgram(): [string, Record<string, string>] {
+  if (program !== null) return program;
+  program = ['git', {}];
+  const found = which('git');
+  if (found !== null && /[\\/]cmd[\\/]git\.exe$/i.test(found)) {
+    const top = path.dirname(path.dirname(found));
+    const real = path.join(top, 'mingw64', 'bin', 'git.exe');
+    if (existsSync(real)) {
+      const name = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+      const dirs = [path.join(top, 'mingw64', 'bin'), path.join(top, 'usr', 'bin'), process.env[name] ?? ''];
+      program = [real, { [name]: dirs.join(path.delimiter) }];
+    }
+  }
+  return program;
+}
+
 export function git(root: string, args: string[], opts: { check?: boolean; env?: Record<string, string>; timeout?: number } = {}): GitResult {
-  const r = spawnSync('git', ['-C', root, ...args], {
-    encoding: 'utf8', timeout: (opts.timeout ?? 60) * 1000, env: { ...process.env, ...(opts.env ?? {}) },
+  const [command, env] = gitProgram();
+  const r = spawnSync(command, ['-C', root, ...args], {
+    encoding: 'utf8', timeout: (opts.timeout ?? 60) * 1000, env: { ...process.env, ...env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 * 1024 * 1024,
   });
   if (r.error) {
@@ -49,15 +72,27 @@ const lines = (text: string): string[] => text.split(/\r?\n/).filter((l) => l);
 const samePath = (a: string, b: string): boolean =>
   (process.platform === 'win32' ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b));
 
+// What one operation asks again and again (a landing asked the same few questions over and over), kept for a
+// few seconds: a repository's top folder and the owner's git identity change seldom, and agent-org forgets them
+// itself when it changes one.
+const KEEP_MS = 5000;
+const ownRepo = new Map<string, [number, boolean]>();
+const identities = new Map<string, [number, Record<string, string>]>();
+const key = (root: string): string => path.resolve(root).toLowerCase();
+
 /** True if `root` is the top folder of a git repository. */
 export function isOwnRepo(root: string): boolean {
+  const kept = ownRepo.get(key(root));
+  if (kept && Date.now() - kept[0] < KEEP_MS) return kept[1];
   let r: GitResult;
   try {
     r = git(root, ['rev-parse', '--show-toplevel']);
   } catch {
     return false;
   }
-  return r.returncode === 0 && samePath(r.stdout.trim(), root);
+  const own = r.returncode === 0 && samePath(r.stdout.trim(), root);
+  ownRepo.set(key(root), [Date.now(), own]);
+  return own;
 }
 
 export function hasCommits(root: string): boolean {
@@ -66,12 +101,17 @@ export function hasCommits(root: string): boolean {
 
 /** Use the person's own git name if they set one; otherwise sign as agent-org. */
 function identity(root: string): Record<string, string> {
-  return git(root, ['config', 'user.email']).stdout.trim() ? {} : NAME;
+  const kept = identities.get(key(root));
+  if (kept && Date.now() - kept[0] < KEEP_MS) return kept[1];
+  const found = git(root, ['config', 'user.email']).stdout.trim() ? {} : NAME;
+  identities.set(key(root), [Date.now(), found]);
+  return found;
 }
 
 /** Turn on history: a repository in the project folder with everything so far as its first commit. */
 export function init(root: string): string {
   if (isOwnRepo(root)) return 'already on';
+  ownRepo.delete(key(root));
   git(root, ['init'], { check: true });
   const ignore = path.join(root, '.gitignore');
   const have = existsSync(ignore) ? readFileSync(ignore, 'utf8').split(/\r?\n/) : [];
@@ -80,6 +120,7 @@ export function init(root: string): string {
   if (missing.length) writeFileSync(ignore, `${[...have, ...missing].join('\n')}\n`, 'utf8');
   git(root, ['add', '-A'], { check: true });
   git(root, ['commit', '-m', 'agent-org: starting point', '--allow-empty'], { check: true, env: identity(root) });
+  ownRepo.delete(key(root));
   return 'on';
 }
 
@@ -133,6 +174,25 @@ export function mainBranch(root: string): string {
   return name;
 }
 
+/** [branch, commit] the project folder has checked out, read straight from its repository's files - a hook asks on
+ * every tool step whether main moved, and git itself takes 80 ms or more to start on Windows. null when they
+ * cannot be read that way (a detached head, another ref store): then ask git. */
+export function mainHead(root: string): [string, string] | null {
+  try {
+    const dir = path.join(root, '.git');
+    if (!statSync(dir).isDirectory()) return null;
+    const ref = /^ref: refs\/heads\/(\S+)$/.exec(readFileSync(path.join(dir, 'HEAD'), 'utf8').trim());
+    if (ref === null) return null;
+    const branch = ref[1];
+    const loose = path.join(dir, 'refs', 'heads', ...branch.split('/'));
+    if (existsSync(loose)) return [branch, readFileSync(loose, 'utf8').trim()];
+    const packed = readFileSync(path.join(dir, 'packed-refs'), 'utf8').split(/\r?\n/).find((l) => l.endsWith(` refs/heads/${branch}`));
+    return packed ? [branch, packed.split(' ')[0]] : null;
+  } catch {
+    return null;
+  }
+}
+
 export function head(root: string, ref = 'HEAD'): string {
   return git(root, ['rev-parse', '--verify', '--quiet', ref]).stdout.trim();
 }
@@ -162,7 +222,10 @@ const JUNK = ['__pycache__/', '*.pyc', '*.pyo', '.pytest_cache/', '.mypy_cache/'
 
 /** Keep build output out of the agents' commits (running code makes __pycache__ in every copy, and two copies
  * of a compiled file always conflict). It goes in .git/info/exclude, never in .gitignore. */
+const excluded = new Set<string>(); // repositories whose exclude list this process has seen complete
+
 export function excludeJunk(root: string): void {
+  if (excluded.has(key(root))) return;
   const common = git(root, ['rev-parse', '--git-common-dir']).stdout.trim();
   if (!common) return;
   const file = path.join(path.isAbsolute(common) ? common : path.join(root, common), 'info', 'exclude');
@@ -173,6 +236,7 @@ export function excludeJunk(root: string): void {
   if (missing.length) {
     writeFileSync(file, `${[...have, "# agent-org: build output never goes into the agents' commits", ...missing].join('\n')}\n`, 'utf8');
   }
+  excluded.add(key(root));
 }
 
 export function merging(wt: string): boolean {
@@ -211,9 +275,13 @@ export function isJunk(file: string): boolean {
 /** Commit everything in the worktree (also concludes a merge whose conflicts were resolved). */
 export function commitAll(wt: string, message: string): string | null {
   git(wt, ['add', '-A'], { check: true });
-  const junk = lines(git(wt, ['diff', '--cached', '--name-only']).stdout).filter(isJunk);
-  if (junk.length) git(wt, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...junk]); // tracked before the exclude list
-  if (!merging(wt) && !git(wt, ['diff', '--cached', '--name-only']).stdout.trim()) return null;
+  let staged = lines(git(wt, ['diff', '--cached', '--name-only']).stdout);
+  const junk = staged.filter(isJunk);
+  if (junk.length) { // tracked before the exclude list: taken out (which itself is a change to commit)
+    git(wt, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...junk]);
+    staged = lines(git(wt, ['diff', '--cached', '--name-only']).stdout);
+  }
+  if (!staged.length && !merging(wt)) return null;
   git(wt, ['commit', '--no-edit', '-m', message], { check: true, env: identity(wt) });
   return head(wt).slice(0, 9);
 }
