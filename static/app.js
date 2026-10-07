@@ -518,11 +518,25 @@ function applyTeamMode() {
 function renderTree() {
   const st = S.state;
   if (!st || !L.tree || $('#view-team').hidden) return;
+  const box = $('#tree-view');
+  const [left, scrollTop, first] = [box.scrollLeft, box.scrollTop, !$('#team-tree').childElementCount];
+  drawTree(false);
+  if (!fitTree()) { // too wide even drawn smaller: people with nobody under them go in a column
+    drawTree(true);
+    fitTree();
+  }
+  if (first) box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2; // you and the leader in view
+  else [box.scrollLeft, box.scrollTop] = [left, scrollTop];
+}
+
+function drawTree(stacked) {
+  const st = S.state;
   const reached = new Set();
   const branch = (r) => {
     reached.add(r.name);
     const kids = rolesUnder(r.name);
-    return h('li', {}, treeNode(r), kids.length ? h('ul', {}, kids.map(branch)) : null);
+    const column = stacked && kids.length > 1 && kids.every((k) => !rolesUnder(k.name).length);
+    return h('li', {}, treeNode(r), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
   };
   const top = rolesUnder(st.owner).map(branch);
   const lost = st.roles.filter((r) => !reached.has(r.name)).map(branch); // whoever reports to someone missing
@@ -534,11 +548,27 @@ function renderTree() {
     st.owner_unread ? h('span', { class: 'pill hot', title: `${st.owner_unread} unread` }, st.owner_unread) : null),
   h('div', { class: 'model' }, st.owner_unread ? `${plural(st.owner_unread, 'message')} for you` : 'owner'));
   dropTarget(owner, st.owner);
-  const box = $('#tree-view');
-  const [left, scrollTop] = [box.scrollLeft, box.scrollTop];
   $('#team-tree').replaceChildren(h('li', {}, owner, top.length || lost.length ? h('ul', {}, top, lost) : null));
-  [box.scrollLeft, box.scrollTop] = [left, scrollTop];
 }
+
+const TREE_MIN_ZOOM = 0.7; // smaller is hard to read: wider than that, the tree scrolls
+
+/** A team wider than the view is drawn smaller to fit it, down to TREE_MIN_ZOOM. False when even that is too wide. */
+function fitTree() {
+  const tree = $('#team-tree');
+  const box = $('#tree-view');
+  if (box.hidden || !box.clientWidth) return true;
+  tree.style.zoom = '';
+  const room = box.clientWidth - 40; // its padding
+  const wide = tree.scrollWidth;
+  if (wide > room) tree.style.zoom = String(Math.max(TREE_MIN_ZOOM, Math.floor((room / wide) * 100) / 100));
+  return wide * TREE_MIN_ZOOM <= room;
+}
+let treeWidth = 0;
+new ResizeObserver(() => {
+  const w = $('#tree-view').clientWidth;
+  if (w && w !== treeWidth) { treeWidth = w; renderTree(); } // a new width may need the other arrangement
+}).observe($('#tree-view'));
 
 function treeNode(r) {
   const st = S.state;

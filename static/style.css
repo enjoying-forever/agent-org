@@ -510,6 +510,17 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .tree li:last-child::before { border-right: 1.5px solid var(--rule); border-radius: 0 8px 0 0; }
 .tree li:first-child::after { border-radius: 8px 0 0 0; }
 .tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 24px; border-left: 1.5px solid var(--rule); }
+/* a wide team: people with nobody under them in a column below their manager, on a rail */
+.tree ul.stack { flex-direction: column; align-items: stretch; padding-top: 24px; }
+.tree ul.stack::before { height: 12px; }
+.tree ul.stack::after { content: ""; position: absolute; top: 12px; left: 10px; width: calc(50% - 10px); border-top: 1.5px solid var(--rule); }
+.tree ul.stack > li { align-items: flex-start; padding: 0 0 10px 24px; }
+.tree ul.stack > li:last-child { padding-bottom: 0; }
+.tree ul.stack > li::before { display: block; left: 10px; right: auto; top: -12px; bottom: 0; width: 0; height: auto;
+  border: 0; border-left: 1.5px solid var(--rule); border-radius: 0; }
+.tree ul.stack > li:last-child::before { bottom: auto; height: 32px; }
+.tree ul.stack > li::after { display: block; left: 10px; right: auto; top: 20px; width: 14px; height: 0;
+  border: 0; border-top: 1.5px solid var(--rule); border-radius: 0; }
 .node { width: max-content; min-width: 150px; max-width: 240px; background: var(--term); border: 1px solid var(--edge); border-top: 3px solid var(--harness, var(--rule));
   border-radius: 8px; padding: 7px 10px 8px; text-align: left; display: flex; flex-direction: column; gap: 2px; }
 .node.owner { --harness: var(--owner); align-items: center; text-align: center; }

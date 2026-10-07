@@ -78,7 +78,10 @@ agent carries on where it stopped.
   files it is writing and its usage. (Antigravity reports only its edits, DeepSeek nothing yet.)
   Click a card for that agent's terminal; ▶
   starts one that is not running. Roles dropped from **+** and teammates dragged onto a card
-  change the team, as in the team list. The choice is remembered for each team.
+  change the team, as in the team list. A team wider than the view is drawn smaller to fit, and
+  if that is not enough, agents with nobody under them go in a column below their manager. The
+  choice of view is remembered for each team; while the Tree (or any other page) shows, the
+  terminals are not read, and what they wrote meanwhile is drawn when they show again.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
   buttons) and the terminal below; hover the title for its status, model, usage, tasks and files.
   Claude agents start without your personal Claude Code mods (their status lines, such as a
