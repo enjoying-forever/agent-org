@@ -73,7 +73,18 @@ Hook speed (a hook process runs on every tool step of Codex, Grok and Antigravit
 tool server): about 145 ms each, on Node or on Electron as Node, against 70 ms for an empty start. The
 YAML library took 65 ms to load: it now loads only when a team.yaml must be read afresh (each one read is
 kept as JSON in ~/.agent-org/cache/teams, under the file's size and time of change). Bundling into one
-file (esbuild, tried earlier) would save little more.
+file (esbuild, tried earlier) would save little more. A Codex hook also globbed every day of
+~/.codex/sessions to tell the agent's conversation from its auto-reviewer's (33 ms of 86 with 130 days):
+it now reads only the days since the conversation's id (a UUID v7) began, 151 -> 118 ms a hook.
+
+Starting a role (measured 2026-10-07, on the app's main thread): finding programs on PATH took most of it,
+as which() tried 13 extensions in each of 90 folders, one a broken link costing 15 ms a look (0.8 s for a
+program not there). Folder listings are now kept until the folder changes: Claude and Codex 100 -> 10 ms,
+Antigravity 1.3 s -> 26 ms, DeepSeek 0.9-2.3 s -> 21 ms. A role with no conversation on record searched
+the harness's saved ones (Codex: 280 ms with 500 conversations); a new team now reads none, a ten-day-old
+one 44 ms. In the app (live, 2026-10-07), the first agent's start answers in about 0.8 s, of which 0.45 s
+is Windows starting its first pseudo-console (later ones 45-70 ms) and 0.25 s the one-time check of
+dsh's version; the next agent answers in 0.34 s.
 
 Before this branch becomes main:
 - Live runs on Codex (the new hook command needs the owner's one-time "Trust all"), Grok (agent-org
