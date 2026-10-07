@@ -244,6 +244,7 @@ test('a restarted agent with unfinished tasks carries on, once', (t) => {
   const term = new FakeTerm(now);
   assert.deepEqual(w.tick(hub, host({ researcher: term }), now), ['researcher']);
   assert.ok(term.got[0].includes('unfinished work') && term.got[0].includes(`#${task.id} Compare the two libraries`));
+  assert.ok(!term.got[0].includes('restart')); // its first start too: no word of a restart (seen live)
   assert.deepEqual(w.tick(hub, host({ researcher: term }), now + 2 * waker.AGAIN), []); // only at its start
 });
 

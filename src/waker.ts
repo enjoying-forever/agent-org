@@ -58,7 +58,8 @@ export function wakeLine(harness: string, role: string, tasks: string[] | null =
   let line: string;
   if (tasks?.length) {
     const shown = tasks.slice(0, 4).join('; ') + (tasks.length > 4 ? `; and ${tasks.length - 4} more` : '');
-    line = `agent-org: '${role}', the team was restarted and you have unfinished work: ${shown}. Carry on with it (list_tasks), `
+    // a start, first or again: no word of a restart, which would send a new agent looking for one
+    line = `agent-org: '${role}', you have unfinished work: ${shown}. Carry on with it (list_tasks), `
       + 'then end your turn.';
   } else {
     line = `agent-org: '${role}', you have new messages. Call read_inbox and act on them, then end your turn.`;
@@ -123,7 +124,7 @@ export class Waker {
       this.typedAt.set(term.id, now);
       this.tries.set(term.id, [oldest, times + 1]);
       void this.typeLine(term, line);
-      hub.event('agent', name, `woken: ${line.includes('restarted') ? 'unfinished work after a restart' : 'new messages'}`);
+      hub.event('agent', name, `woken: ${line.includes('unfinished work') ? 'unfinished work' : 'new messages'}`);
       woken.push(name);
     }
     return woken;
