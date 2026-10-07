@@ -32,6 +32,7 @@ function pty(): PtyModule | null {
   return ptyModule;
 }
 
+export const GATHER_MS = 40; // terminal output is answered at most this often (see readMany)
 export const KEEP = 400_000; // characters of output kept per terminal: what a page opened later still sees
 let nextId = 1;
 const ESCAPES = /\x1b\[[0-9;?<>=!]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bO.|\x1b./g; // keys and replies, not text
@@ -234,6 +235,7 @@ export class Terminal {
 export class TerminalHost {
   private readonly terms = new Map<string, Terminal>();
   private waiters: (() => void)[] = [];
+  private answeredAt = 0; // when readMany last answered with output
   // The size each pane last had: an agent starts at it, even after agent-org restarted (a program started at
   // another size and then resized can leave pieces of its old screen behind).
   private readonly sizesFile: string | null;
@@ -299,13 +301,20 @@ export class TerminalHost {
   async readMany(wants: Record<string, [number, number]>, wait = 15, signal: AbortSignal | null = null): Promise<Record<string, Chunk | { none: true }>> {
     const deadline = Date.now() + wait * 1000;
     for (;;) {
+      // Busy agents redraw many times a second: within GATHER_MS of the last answer, what more comes goes into one
+      // answer (six busy terminals made about 100 a second). After a quiet spell the first output goes at once.
+      const early = this.answeredAt + GATHER_MS - Date.now();
+      if (early > 0 && !signal?.aborted) await new Promise((r) => setTimeout(r, early));
       const out: Record<string, Chunk | { none: true }> = {};
       for (const [name, [termId, offset]] of Object.entries(wants)) {
         const term = this.get(name);
         if (term === undefined) out[name] = { none: true };
         else if (termId !== term.id || offset !== term.end) out[name] = term.chunk(termId === term.id ? offset : -1);
       }
-      if (Object.keys(out).length) return out;
+      if (Object.keys(out).length) {
+        this.answeredAt = Date.now();
+        return out;
+      }
       const left = deadline - Date.now();
       if (left <= 0 || signal?.aborted) return {};
       await new Promise<void>((resolve) => {
