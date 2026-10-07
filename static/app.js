@@ -1058,14 +1058,20 @@ function startFresh(r) {
 
 // ---------- messages ----------
 
+// The page keeps the newest messages (Search finds every one), and the conversation shows the newest of those:
+// a long day's thousands of messages would otherwise all be rebuilt for each new one.
+const KEEP_MESSAGES = 2000;
+const FEED_SHOWN = 300;
+
 function addMessages(list) {
   for (const m of list) {
     S.messages.push(m);
     S.lastId = Math.max(S.lastId, m.id);
   }
+  if (S.messages.length > KEEP_MESSAGES) S.messages.splice(0, S.messages.length - KEEP_MESSAGES);
   notifyOwner(list);
   if (S.state) {
-    renderFeed(); // it stays at the newest message unless you scrolled up (see stickFeed)
+    appendFeed(list); // it stays at the newest message unless you scrolled up (see stickFeed)
     renderPanes();
     renderGuide();
   }
@@ -1101,9 +1107,34 @@ function renderFeed(scroll) {
   const empty = S.messages.length
     ? 'No messages match this filter.'
     : 'No messages yet. Launch the team, then give your leader a task below.';
-  feed.replaceChildren(...(shown.length ? shown.map((m) => messageEl(m)) : [h('div', { class: 'empty' }, empty)]));
+  feed.replaceChildren(...(shown.length ? shown.slice(-FEED_SHOWN).map((m) => messageEl(m)) : [h('div', { class: 'empty' }, empty)]));
+  feed.dataset.list = shown.length ? '1' : ''; // new messages can be added at the end
+  olderNote(feed, shown.length > FEED_SHOWN || olderKept());
   if (scroll === 'bottom') S.feedStick = true;
   stickFeed();
+}
+
+/** New messages, added at the end of the conversation as it is shown (filters and all). */
+function appendFeed(list) {
+  const feed = $('#feed');
+  if ($('#search').value.trim()) return; // showing search results
+  if (!feed.dataset.list) { renderFeed(); return; } // it showed none yet: the whole list
+  const fresh = list.filter(visible);
+  if (!fresh.length) return;
+  feed.append(...fresh.map((m) => messageEl(m)));
+  const shown = feed.querySelectorAll(':scope > .msg');
+  for (let i = 0; i < shown.length - FEED_SHOWN; i += 1) shown[i].remove();
+  olderNote(feed, shown.length > FEED_SHOWN || olderKept());
+  stickFeed();
+}
+
+/** Older messages than the page has (ids count from 1): the page loads the newest, and keeps the newest. */
+const olderKept = () => S.messages.length > 0 && S.messages[0].id > 1;
+
+function olderNote(feed, older) {
+  const note = feed.querySelector(':scope > .older');
+  if (older && !note) feed.prepend(h('div', { class: 'older muted small' }, 'Older messages are not shown here: Search finds them.'));
+  if (!older && note) note.remove();
 }
 
 // The conversation opens at its newest message and follows new ones - unless you scrolled up to
@@ -1380,6 +1411,7 @@ $('#search').addEventListener('input', (e) => {
       const { messages } = await api(`/api/search?q=${encodeURIComponent(q)}`);
       $('#feed').replaceChildren(h('div', { class: 'muted small' }, `${plural(messages.length, 'message')} with "${q}"`),
         ...messages.map((m) => messageEl(m)));
+      $('#feed').dataset.list = ''; // search results: cleared, the conversation is drawn whole again
     } catch (err) { toast(err.message, true); }
   }, 250);
 });
