@@ -107,8 +107,9 @@ function showBlocker() {
   const b = $('#blocker');
   b.replaceChildren(h('div', {},
     h('h2', {}, 'This browser is not signed in to agent-org'),
-    h('p', { class: 'muted' }, 'Click in the black agent-org window and press Enter: it prints a new sign-in '
-      + 'link. Open it here. Each link works once, for two minutes.')));
+    h('p', { class: 'muted' }, 'Use agent-org from its own window (double-click agent-org.cmd). In a browser: press '
+      + 'Enter in the terminal where agent-org runs (node dist/ui.js); it prints a new sign-in link to open here. '
+      + 'Each link works once, for two minutes.')));
   b.hidden = false;
 }
 
