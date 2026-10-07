@@ -68,9 +68,11 @@ agent carries on where it stopped.
   whether it runs, its unread messages and, below its name, what it is doing right now. Click one
   for its terminal; Ctrl+Alt+B or the button at the top left hides the sidebar, and its edge drags
   wider. In the middle, the page; on the right, the team's messages, with a message box like the
-  Codex composer (Message or Task, to whom, urgent, and a round send button). Neutral grays,
-  black-and-white pill buttons, one plain sans, and the window's own buttons in its top bar. Light
-  or dark follows Windows until you choose with the button at the top.
+  Codex composer (Message or Task, to whom, urgent, and a round send button). Neutral grays with
+  blue for what you act on and what is new, each page and each program in its own color (the
+  badges C, X, G, A, D and a stripe on each pane), pill buttons, one plain sans, and the window's
+  own buttons in its top bar. Light or dark follows Windows until you choose with the button at
+  the top.
 - **Team:** one pane per agent: its **live terminal** - click in it and type, exactly as in its own
   console - with buttons to give it a task, start, restart or stop it, and its details (notes,
   files, usage). An agent that is not running shows a summary instead: its program and model, what
