@@ -13,11 +13,11 @@ import * as ui from '../ui.ts';
 
 const MIN_WIDTH = 900;
 const MIN_HEIGHT = 600;
-const BAR_HEIGHT = 52; // the page's title bar, which the window's own buttons sit in (as in the Claude app)
+const BAR_HEIGHT = 52; // the page's title bar, which the window's own buttons sit in
 
 /** The colors of the window's own parts, matching the page's paper and ink. */
 function chrome(dark: boolean): { color: string; symbolColor: string; height: number } {
-  return dark ? { color: '#262624', symbolColor: '#f5f4ef', height: BAR_HEIGHT } : { color: '#faf9f5', symbolColor: '#1f1e1d', height: BAR_HEIGHT };
+  return dark ? { color: '#212121', symbolColor: '#ececec', height: BAR_HEIGHT } : { color: '#ffffff', symbolColor: '#0d0d0d', height: BAR_HEIGHT };
 }
 
 function argument(name: string): string | undefined {

@@ -68,9 +68,9 @@ agent carries on where it stopped.
   in it and type, exactly as in its own console - with buttons to give it a task, start,
   restart or stop it, and its details (notes, files, usage). An agent that is not running
   shows a summary instead: its program and model, what it does, and its recent messages.
-  On the right, the team's messages. It looks like the Claude desktop app: warm paper or charcoal,
-  terracotta for what you act on, a serif for headings and messages, and the window's own buttons in
-  its top bar. Light or dark follows Windows until you choose with the button at the top.
+  On the right, the team's messages. It looks like the Codex app: neutral grays, black-and-white
+  pill buttons, one plain sans, and the window's own buttons in its top bar. Light or dark follows
+  Windows until you choose with the button at the top.
 - **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
   or the team as a tree, for when you would rather not watch them all. Above the tree, the team at a
   glance (how many work, wait, ask you or are not running) and **what needs you**: a question for

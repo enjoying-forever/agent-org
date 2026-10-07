@@ -972,16 +972,16 @@ function logLine(m, me) {
 
 // ---------- live terminals (xterm.js) ----------
 
-// The 16 terminal colors, warm like the page; on paper, "white" and "yellow" are dark enough to read
+// The 16 terminal colors, quiet like the page; on white, "white" and "yellow" are dark enough to read
 const ANSI_DARK = {
-  black: '#3a3935', red: '#e8735f', green: '#6dbf87', yellow: '#e2b350', blue: '#7fa9e0', magenta: '#c79be8', cyan: '#5fc2c0', white: '#d6d3c7',
-  brightBlack: '#77746b', brightRed: '#f2917f', brightGreen: '#8fd6a5', brightYellow: '#f0c977', brightBlue: '#a2c1ef',
-  brightMagenta: '#dab8f2', brightCyan: '#86d8d4', brightWhite: '#f5f4ef',
+  black: '#2e2e2e', red: '#ff6b6b', green: '#4cc38a', yellow: '#f0b72f', blue: '#79b8ff', magenta: '#c79bf2', cyan: '#56c8d8', white: '#cccccc',
+  brightBlack: '#6e6e6e', brightRed: '#ff8e8e', brightGreen: '#74d8a6', brightYellow: '#f5ca62', brightBlue: '#a1cdff',
+  brightMagenta: '#dab8f5', brightCyan: '#82dbe6', brightWhite: '#ececec',
 };
 const ANSI_LIGHT = {
-  black: '#1f1e1d', red: '#c4442f', green: '#2f8a55', yellow: '#9a6512', blue: '#3d6fbf', magenta: '#8a4fbf', cyan: '#147d7a', white: '#6f6c64',
-  brightBlack: '#8f8c83', brightRed: '#d65a43', brightGreen: '#3a9e64', brightYellow: '#b07a1c', brightBlue: '#5585d1',
-  brightMagenta: '#9d66cf', brightCyan: '#1f918d', brightWhite: '#3d3b36',
+  black: '#0d0d0d', red: '#d93a3a', green: '#128a52', yellow: '#9a6512', blue: '#0169cc', magenta: '#7c4dd6', cyan: '#0e7f8a', white: '#6e6e6e',
+  brightBlack: '#8f8f8f', brightRed: '#e25555', brightGreen: '#1fa366', brightYellow: '#b07a1c', brightBlue: '#2b84de',
+  brightMagenta: '#9166e0', brightCyan: '#1d93a0', brightWhite: '#3d3d3d',
 };
 
 function termTheme() {
@@ -989,7 +989,7 @@ function termTheme() {
   const v = (name) => css.getPropertyValue(name).trim();
   const light = document.documentElement.dataset.theme === 'light';
   return { background: v('--term'), foreground: v('--ink'), cursor: v('--accent'), cursorAccent: v('--term'),
-    selectionBackground: light ? 'rgba(201, 100, 66, 0.22)' : 'rgba(217, 119, 87, 0.32)', ...(light ? ANSI_LIGHT : ANSI_DARK) };
+    selectionBackground: light ? 'rgba(0, 0, 0, 0.14)' : 'rgba(255, 255, 255, 0.22)', ...(light ? ANSI_LIGHT : ANSI_DARK) };
 }
 
 function openTerm(p) {
@@ -1295,7 +1295,7 @@ $('#theme-btn').addEventListener('click', () => {
   try { localStorage.setItem('agent-org-theme', next); } catch { /* remembered for this visit only */ }
   applyTheme(next);
 });
-// As the system is set, until you choose (as the Claude app does)
+// As the system is set, until you choose
 const LIGHT_SYSTEM = matchMedia('(prefers-color-scheme: light)');
 const chosenTheme = () => {
   try { return localStorage.getItem('agent-org-theme'); } catch { return null; }
