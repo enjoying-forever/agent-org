@@ -147,3 +147,18 @@ test('the runtime check names what agent-org runs on', () => {
   assert.ok(runtime.ok && runtime.detail.includes(process.versions.node));
   assert.equal(terms.name, 'Terminals');
 });
+
+test("the window's stop ends harness programs side by side, and nothing else", { skip: windows || (which('pwsh') === null && 'needs PowerShell 7') }, async (t) => {
+  const { hub } = makeHub(t);
+  const agents = [0, 1].map(() => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })); // node.exe, as Codex runs
+  const bystander = spawn(which('pwsh') ?? 'pwsh', ['-NoProfile', '-Command', 'Start-Sleep 60'], { stdio: 'ignore' });
+  cleanup(t, () => { for (const c of [...agents, bystander]) c.kill(); });
+  hub.store.checkIn(999_011, 'worker-a', agents[0].pid);
+  hub.store.checkIn(999_012, 'worker-a', agents[1].pid);
+  hub.store.checkIn(999_013, 'worker-b', bystander.pid);
+  const [a, b] = await Promise.all([launch.stopRoleAsync(hub, 'worker-a'), launch.stopRoleAsync(hub, 'worker-b')]);
+  assert.deepEqual([a, b], [2, 0]);
+  assert.ok(await exited(agents[0], 15_000) && await exited(agents[1], 15_000));
+  assert.ok(!(await exited(bystander, 500))); // pwsh.exe is not a harness
+  assert.deepEqual([hub.store.online()['worker-a'] ?? 0, hub.store.online()['worker-b'] ?? 0], [0, 0]);
+});

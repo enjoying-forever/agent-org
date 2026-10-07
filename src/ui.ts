@@ -265,7 +265,9 @@ export class App {
   readonly waker = new waker.Waker();
   private readonly timers: NodeJS.Timeout[] = [];
   // What the window does with the computer; tests and the Electron shell stand in for them.
-  launcher = { openTab: launch.openTab, stopRole: launch.stopRole };
+  launcher: { openTab: (tab: string[]) => void; stopRole: (hub: Hub, role: string) => number | Promise<number> } =
+    { openTab: launch.openTab, stopRole: launch.stopRoleAsync };
+  private starting = false; // an automatic start is under way (see autostart)
   runChecks = doctor.runChecks;
   pickFolderWith: (title: string) => Promise<string> = pickFolderWithPowerShell;
   shortcut = { target: path.join(CODE_DIR, '..', 'agent-org.cmd'), args: '', cwd: path.join(CODE_DIR, '..') };
@@ -293,7 +295,7 @@ export class App {
   private open(file: string): void {
     const teamFile = path.resolve(file);
     const hub = Hub.open(teamFile, launch.tabOpener(teamFile, (tab) => this.openTab(tab), this.inWindow)); // throws TeamError
-    hub.stopper = (role: string) => this.launcher.stopRole(hub, role);
+    hub.stopper = (role: string) => { void Promise.resolve(this.launcher.stopRole(hub, role)).catch(() => {}); };
     this.hubOrNull?.close();
     this.hubOrNull = hub;
     this.teamFile = teamFile;
@@ -405,7 +407,12 @@ export class App {
     try {
       hub.store.prune(wake.alive);
       const problems = watchdog.patrol(hub);
-      if (hub.baseTeam.settings.autostart) this.autostart(hub, problems);
+      if (hub.baseTeam.settings.autostart && !this.starting) {
+        this.starting = true; // one round at a time: stopping a stuck agent takes a moment
+        void this.autostart(hub, problems).catch((e) => process.stderr.write(`autostart: ${(e as Error).message}
+`))
+          .finally(() => { this.starting = false; });
+      }
     } catch (e) { // a failed patrol must not end the window
       process.stderr.write(`watchdog: ${(e as Error).message}\n`);
     }
@@ -434,14 +441,14 @@ export class App {
 
   /** Start agents that have work but are not running, within the cap, and restart agents left idle at their
    * prompt by a usage limit that has reset or an API error. */
-  autostart(hub: Hub, problems: watchdog.Problem[]): void {
+  async autostart(hub: Hub, problems: watchdog.Problem[]): Promise<void> {
     if (launch.cannotStart(this.inWindow)) return; // nothing could start (the Launch button says why)
     const now = Date.now() / 1000;
     for (const p of problems) {
       if ((p.kind !== 'stopped' && p.kind !== 'stuck') || now - (this.autostarted.get(p.role) ?? 0) < AUTOSTART_GAP) continue;
       if (!(hub.team.roles[p.role]?.harness in launch.BUILDERS)) continue;
       if (p.kind === 'stuck') {
-        this.launcher.stopRole(hub, p.role);
+        await this.launcher.stopRole(hub, p.role);
         if (hub.store.online()[p.role]) { // its program did not stop: leave it for a while
           this.autostarted.set(p.role, now);
           hub.event('agent', p.role, 'could not be restarted automatically: its program did not stop');
@@ -778,12 +785,12 @@ export class App {
   }
 
   /** Stop a role's agent and start it again on the same conversation (after a limit or an error). */
-  restart(body: Body): Json {
+  async restart(body: Body): Promise<Json> {
     const role = str(body, 'role');
     if (!(role in this.hub.team.roles)) throw new ApiError(`'${role}' is not a role`);
     const why = launch.cannotStart(this.inWindow);
     if (why) throw new ApiError(why); // before stopping it: it could not come back
-    const stopped = this.launcher.stopRole(this.hub, role);
+    const stopped = await this.launcher.stopRole(this.hub, role);
     const result = this.launch({ roles: [role] }) as Body;
     this.hub.event('agent', role, 'restarted by the owner');
     return { stopped, ...result };
@@ -834,12 +841,13 @@ export class App {
   }
 
   /** Stop one role's agent, or every running agent (role '@all'). */
-  stop(body: Body): Json {
+  async stop(body: Body): Promise<Json> {
     const role = str(body, 'role');
     const team = this.hub.team;
     if (role !== '@all' && !(role in team.roles)) throw new ApiError(`'${role}' is not a role`);
     const names = role === '@all' ? Object.keys(team.roles).filter((n) => this.hub.store.online()[n]) : [role];
-    return { stopped: Object.fromEntries(names.map((n) => [n, this.launcher.stopRole(this.hub, n)])) };
+    const stopped = await Promise.all(names.map((n) => this.launcher.stopRole(this.hub, n)));
+    return { stopped: Object.fromEntries(names.map((n, i) => [n, stopped[i]])) };
   }
 
   /** Keep the open team (as saved in team.yaml) to start new projects from. */

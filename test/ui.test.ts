@@ -295,10 +295,10 @@ test('autostart starts agents that have work', async (t) => {
   const server = await startServer(t);
   server.settings({ autostart: true });
   await server.ok('/api/task', { to: 'leader', title: 'Build it' });
-  server.app.autostart(server.hub, watchdog.patrol(server.hub));
+  await server.app.autostart(server.hub, watchdog.patrol(server.hub));
   assert.deepEqual(titles(server.openedTabs), ['leader']);
   assert.ok(events(server).includes('started automatically: it has work waiting'));
-  server.app.autostart(server.hub, watchdog.patrol(server.hub)); // not again straight away
+  await server.app.autostart(server.hub, watchdog.patrol(server.hub)); // not again straight away
   assert.equal(server.openedTabs.length, 1);
 });
 
@@ -337,7 +337,7 @@ test('autostart restarts an agent stuck on an error', async (t) => {
   stuckOnAnError(t);
   const stopped: string[] = [];
   server.app.launcher.stopRole = (hub, role) => { stopped.push(role); hub.store.checkOut(4242); return 1; };
-  server.app.autostart(server.hub, watchdog.patrol(server.hub));
+  await server.app.autostart(server.hub, watchdog.patrol(server.hub));
   assert.deepEqual(stopped, ['leader']);
   assert.deepEqual(titles(server.openedTabs), ['leader']);
   assert.ok(events(server).includes('restarted automatically: it was stuck with work waiting'));
@@ -352,8 +352,8 @@ test('autostart does not keep restarting an agent that will not stop', async (t)
   stuckOnAnError(t);
   const stopped: string[] = [];
   server.app.launcher.stopRole = (_hub, role) => { stopped.push(role); return 0; }; // nothing stops
-  server.app.autostart(server.hub, watchdog.patrol(server.hub));
-  server.app.autostart(server.hub, watchdog.patrol(server.hub));
+  await server.app.autostart(server.hub, watchdog.patrol(server.hub));
+  await server.app.autostart(server.hub, watchdog.patrol(server.hub));
   assert.ok(stopped.length === 1 && server.openedTabs.length === 0);
   assert.ok(events(server).includes('could not be restarted automatically: its program did not stop'));
 });

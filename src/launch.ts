@@ -10,7 +10,7 @@
  * PowerShell 7 window.
  */
 
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -735,6 +735,36 @@ export function stopRole(hub: Hub, role: string): number {
   }
   if (running.length && hub.team.roles[role]?.harness === 'deepseek') stopped = 1; // one agent: a run, or its waiter between runs
   return stopped;
+}
+
+/** A program's output, without waiting for it on this thread. */
+function output(command: string, args: string[], timeout: number): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(command, args, { encoding: 'utf8', timeout: timeout * 1000, windowsHide: true }, (_error, stdout) => resolve(stdout ?? ''));
+  });
+}
+
+/** stopRole for the agent-org window, whose terminals must not wait: each check (tasklist takes about 0.35 s)
+ * and stop runs without blocking, and the role's sessions are stopped side by side. */
+export async function stopRoleAsync(hub: Hub, role: string): Promise<number> {
+  const folder = path.join(path.dirname(hub.team.database), 'launch', role);
+  if (existsSync(folder)) writeFileSync(path.join(folder, STOP_MARKER), 'stopped by agent-org\n', 'utf8'); // a program its start script runs again (DeepSeek) stays stopped
+  const running = hub.store.sessionsOf(role);
+  const ended = await Promise.all(running.map(async ([pid, ppid]) => {
+    let stopped = false;
+    if (ppid) {
+      const first = (await output('tasklist', ['/FI', `PID eq ${ppid}`, '/FO', 'CSV', '/NH'], 15)).trim().split(/\r?\n/)[0] ?? '';
+      const name = first.startsWith('"') ? first.split('","')[0].replace(/^"|"$/g, '').toLowerCase() : '';
+      if (HARNESS_PROGRAMS.has(name)) {
+        await output('taskkill', ['/PID', String(ppid), '/T', '/F'], 30);
+        stopped = true;
+      }
+    }
+    hub.store.checkOut(pid);
+    return stopped;
+  }));
+  if (running.length && hub.team.roles[role]?.harness === 'deepseek') return 1; // one agent: a run, or its waiter between runs
+  return ended.filter((x) => x).length;
 }
 
 export const LAUNCHER_HEADER = 'X-Agent-Org-Launcher';
