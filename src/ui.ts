@@ -332,7 +332,8 @@ export class App {
       return;
     }
     const [title, color, cwd, argv] = launch.tabParts(tab);
-    this.terminals.open(launch.tabRole(tab), argv, cwd, title, color);
+    const direct = launch.directStart(tab); // the agent's program itself, without PowerShell, when it can be
+    this.terminals.open(launch.tabRole(tab), direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env);
   }
 
   /** Start a role an agent just hired or summoned, in a terminal of this window. The agent's own tool server
@@ -356,7 +357,8 @@ export class App {
       if (!own) hub.close();
     }
     const [title, color, cwd, argv] = launch.tabParts(tab);
-    this.host(teamFile).open(role, argv, cwd, title, color);
+    const direct = launch.directStart(tab);
+    this.host(teamFile).open(role, direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env);
     return { started: role };
   }
 

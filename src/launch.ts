@@ -579,6 +579,57 @@ export function ps(text: string): string {
   return `'${text.replace(/'/g, "''")}'`;
 }
 
+export const DIRECT_START = 'start.json'; // beside start.ps1: how the window runs the role without PowerShell
+
+/** How to run `command` without a shell: [program, and the script it runs]. npm installs a program as .cmd (and
+ * .ps1) scripts that start the package's own .exe, or node with the package's script; the program itself is
+ * found in the .cmd's last "%dp0%\..." path. null when it cannot be told (then PowerShell runs it). */
+export function directProgram(command: string): string[] | null {
+  const found = which(command);
+  if (found === null) return null;
+  if (/\.exe$/i.test(found)) return [found];
+  if (!/\.cmd$/i.test(found)) return null;
+  let text: string;
+  try {
+    text = readFileSync(found, 'utf8');
+  } catch {
+    return null;
+  }
+  const target = [...text.matchAll(/"%dp0%\\([^"%]+)"/g)].at(-1)?.[1];
+  if (target === undefined) return null;
+  const full = path.join(path.dirname(found), target);
+  if (!isFile(full)) return null;
+  if (/\.exe$/i.test(full)) return [full];
+  const node = isFile(path.join(path.dirname(found), 'node.exe')) ? path.join(path.dirname(found), 'node.exe') : which('node');
+  return node === null ? null : [node, full];
+}
+
+/** In the agent-org window a role whose start is one program runs it directly, without the PowerShell that
+ * start.ps1 needs (about 35 MB per agent, and a slower start): what to run, where, with which environment. A
+ * role that needs more (DeepSeek's loop, Grok's setup) has no such file. */
+function writeDirectStart(l: Launch, teamFile: string, file: string): void {
+  const program = l.script === null && !l.setup.length ? directProgram(l.command) : null;
+  if (program === null) {
+    rmSync(file, { force: true });
+    return;
+  }
+  const env = { AGENT_ORG_TEAM: teamFile, AGENT_ORG_ROLE: l.role, ...networkEnv({}), ...l.env };
+  writeFileSync(file, JSON.stringify({ argv: [...program, ...l.args], cwd: l.cwd, env }, null, 2), 'utf8');
+}
+
+export interface DirectStart { argv: string[]; cwd: string; env: Record<string, string> }
+
+/** The direct start written beside a tab command's start script, if there is one. */
+export function directStart(tab: string[]): DirectStart | null {
+  try {
+    const start = JSON.parse(readFileSync(path.join(path.dirname(tab.at(-1) ?? ''), DIRECT_START), 'utf8'));
+    if (Array.isArray(start.argv) && start.argv.length && typeof start.cwd === 'string') return start as DirectStart;
+  } catch {
+    // none: PowerShell runs the start script
+  }
+  return null;
+}
+
 export function roleScript(l: Launch, team: Team, teamFile: string): string {
   // its way to the internet (agent-org's proxy, or Windows' own), as no profile sets one (tabCommand)
   const env = { AGENT_ORG_TEAM: teamFile, AGENT_ORG_ROLE: l.role, ...networkEnv({}), ...l.env };
@@ -656,6 +707,7 @@ export function roleTab(hub: Hub, teamFile: string, role: string, fresh = false,
   const script = path.join(out, 'start.ps1');
   rmSync(path.join(out, STOP_MARKER), { force: true }); // starting it again lifts an earlier Stop
   writeFileSync(script, roleScript(l, team, teamFile), 'utf8');
+  writeDirectStart(l, teamFile, path.join(out, DIRECT_START));
   const title = spec.is_consultant ? `${role} (${spec.tier})` : role;
   return tabCommand(title, TAB_COLORS[spec.harness], cwd, script);
 }

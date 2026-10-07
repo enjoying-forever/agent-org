@@ -152,7 +152,8 @@ export class Terminal {
   private buf = '';
   private start = 0; // where buf begins in the whole output
 
-  constructor(argv: string[], cwd: string, title = '', color = '', cols = 120, rows = 32, notify: () => void = () => {}) {
+  constructor(argv: string[], cwd: string, title = '', color = '', cols = 120, rows = 32, notify: () => void = () => {},
+    extraEnv: Env = {}) {
     const node = pty();
     if (node === null) throw new Error('terminals in the window need node-pty, which could not be loaded');
     this.title = title;
@@ -160,6 +161,7 @@ export class Terminal {
     this.cols = cols;
     this.rows = rows;
     const env = freshEnv();
+    for (const [name, value] of Object.entries(extraEnv)) put(env, name, value);
     const exe = which(argv[0], env.Path ?? env.PATH) ?? which(argv[0]) ?? argv[0];
     this.proc = node.spawn(exe, argv.slice(1), { name: 'xterm-256color', cols, rows, cwd, env });
     this.proc.onData((data) => {
@@ -261,9 +263,9 @@ export class TerminalHost {
   };
 
   /** Start `argv` in a new terminal for `name`, closing the one it had. */
-  open(name: string, argv: string[], cwd: string, title = '', color = ''): Terminal {
+  open(name: string, argv: string[], cwd: string, title = '', color = '', env: Env = {}): Terminal {
     const [cols, rows] = this.sizes.get(name) ?? [120, 32];
-    const term = new Terminal(argv, cwd, title || name, color, cols, rows, this.notify);
+    const term = new Terminal(argv, cwd, title || name, color, cols, rows, this.notify, env);
     const old = this.terms.get(name);
     this.terms.set(name, term);
     old?.close();

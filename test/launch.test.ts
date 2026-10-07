@@ -8,7 +8,7 @@ import { test, type TestContext } from 'node:test';
 import { parse as parseToml } from 'smol-toml';
 import { Hub, HubError } from '../src/hub.ts';
 import * as launch from '../src/launch.ts';
-import { entry, which } from '../src/runtime.ts';
+import { entry, lookup, which } from '../src/runtime.ts';
 import * as runview from '../src/runview.ts';
 import * as sessions from '../src/sessions.ts';
 import { dumpYaml, parseYaml } from '../src/team.ts';
@@ -463,4 +463,46 @@ test('the waiter and the run view run as programs', (t) => {
   assert.equal(waited.status, wake.STOPPED, waited.stderr);
   const shown = spawnSync(process.execPath, [entry('runview'), '--banner', 'DeepSeek Harness', '0.2', 'deepseek-flash', 'C:\\x'], { encoding: 'utf8', timeout: 20_000 });
   assert.ok(plain(shown.stdout).includes('DeepSeek Harness 0.2'), shown.stderr);
+});
+
+function fakeNpm(t: TestContext): string {
+  const dir = tmpDir(t);
+  const bin = path.join(dir, 'node_modules', 'pkg', 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, 'tool.exe'), '');
+  writeFileSync(path.join(bin, 'tool.js'), '');
+  writeFileSync(path.join(dir, 'node.exe'), '');
+  // as npm writes them: one runs the package's .exe, one runs node with its script
+  const lines = (...l: string[]): string => `${l.join('\r\n')}\r\n`;
+  writeFileSync(path.join(dir, 'exetool.cmd'), lines('@ECHO off', 'SETLOCAL', 'CALL :find_dp0',
+    String.raw`"%dp0%\node_modules\pkg\bin\tool.exe"   %*`));
+  writeFileSync(path.join(dir, 'jstool.cmd'), lines('@ECHO off', String.raw`IF EXIST "%dp0%\node.exe" (`, String.raw`  SET "_prog=%dp0%\node.exe"`, ')',
+    String.raw`endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_modules\pkg\bin\tool.js" %*`));
+  writeFileSync(path.join(dir, 'broken.cmd'), '@echo hello\r\n');
+  const before = lookup.which;
+  lookup.which = (name, p) => (['exetool', 'jstool', 'broken'].includes(name) ? path.join(dir, `${name}.cmd`)
+    : name === 'claude' ? path.join(dir, 'exetool.cmd') : before(name, p));
+  cleanup(t, () => { lookup.which = before; });
+  return dir;
+}
+
+test('a program npm installed is run without its shell script', (t) => {
+  const dir = fakeNpm(t);
+  assert.deepEqual(launch.directProgram('exetool'), [path.join(dir, 'node_modules', 'pkg', 'bin', 'tool.exe')]);
+  assert.deepEqual(launch.directProgram('jstool'), [path.join(dir, 'node.exe'), path.join(dir, 'node_modules', 'pkg', 'bin', 'tool.js')]);
+  assert.equal(launch.directProgram('broken'), null); // cannot tell: PowerShell runs it
+});
+
+test('in the window a one-program role starts without PowerShell', (t) => {
+  const dir = fakeNpm(t);
+  const file = teamFile(t);
+  const hub = openHub(t, file);
+  const tab = launch.roleTab(hub, file, 'leader', false, true); // claude, quiet: as the window starts it
+  const start = launch.directStart(tab);
+  assert.ok(start);
+  assert.equal(start.argv[0], path.join(dir, 'node_modules', 'pkg', 'bin', 'tool.exe'));
+  assert.ok(start.argv.includes('--mcp-config') && start.argv.at(-2) === '--name');
+  assert.deepEqual([start.env.AGENT_ORG_ROLE, start.env.AGENT_ORG_STOP_IDLE, start.env.AGENT_ORG_TEAM], ['leader', '1', file]);
+  assert.equal(start.cwd, hub.rootOf('leader'));
+  assert.equal(launch.directStart(launch.roleTab(hub, file, 'researcher')), null); // Grok registers its server first: PowerShell
 });
