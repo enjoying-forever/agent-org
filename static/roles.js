@@ -209,7 +209,7 @@ $('#place-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = { id: R.placing.id, name: $('#place-name').value.trim(), superior: $('#place-superior').value };
   const res = await act(api('/api/role-place', body), (r) => `${r.name} joined the team under ${body.superior}.`);
-  if (res) { $('#place-dialog').close(); if (typeof E !== 'undefined') E.draft = null; await loadRoles(); }
+  if (res) { $('#place-dialog').close(); await loadRoles(); }
 });
 
 // ---------- building a new team from roles (welcome page) ----------

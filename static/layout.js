@@ -18,11 +18,12 @@ function loadLayout(team) {
   try { saved = JSON.parse(localStorage.getItem(`agent-org-layout:${team}`) || '{}'); } catch { /* defaults */ }
   const narrow = innerWidth < 1100;
   Object.assign(L, {
-    team, mode: 'grid', hidden: [], max: null, main: null, order: [], cols: {}, rows: {},
+    team, mode: 'grid', tree: false, hidden: [], max: null, main: null, order: [], cols: {}, rows: {},
     rail: !narrow, side: !narrow, railW: 236, sideW: 400, ...saved,
   });
   L.max = null; // full screen never survives a reload
   applyChrome();
+  applyTeamMode();
 }
 
 function saveLayout() {

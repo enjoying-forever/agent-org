@@ -40,8 +40,7 @@ function renderPalette() {
 
 function hireByDrop(roleId, superior) {
   const p = (R.list || []).find((x) => x.id === roleId);
-  act(api('/api/role-place', { id: roleId, superior }), (r) => `${r.name} (${p?.title || roleId}) joined the team under ${superior}.`)
-    .then((r) => { if (r && typeof E !== 'undefined') E.draft = null; });
+  act(api('/api/role-place', { id: roleId, superior }), (r) => `${r.name} (${p?.title || roleId}) joined the team under ${superior}.`);
 }
 
 function moveByDrop(name, superior) {
@@ -50,8 +49,7 @@ function moveByDrop(name, superior) {
     toast(`${name} cannot report to ${superior}: ${superior} is below ${name}. Move ${superior} first.`, true);
     return;
   }
-  act(api('/api/teammate', { name, changes: { superior } }), () => `${name} now reports to ${superior}.`)
-    .then((r) => { if (r && typeof E !== 'undefined') E.draft = null; });
+  act(api('/api/teammate', { name, changes: { superior } }), () => `${name} now reports to ${superior}.`);
 }
 
 function clearDrops() {
@@ -107,7 +105,7 @@ async function openCard(name, anchor) {
   if (!spec) { // a consultant: it comes from its tier
     fill(card, h('div', { class: 'card-head' }, glyph(r.harness), h('b', {}, name),
       h('button', { class: 'icon-btn', title: 'Close', onclick: closeCard }, icon('close'))),
-    h('p', { class: 'muted small' }, `${name} is a ${r.tier} consultant: it comes from that tier, which you change in Edit team.`));
+    h('p', { class: 'muted small' }, `${name} is a ${r.tier} consultant: it comes from that tier, which is set in team.yaml.`));
     placeCard(card, anchor);
     return;
   }
@@ -155,7 +153,6 @@ async function openCard(name, anchor) {
       const ok = await act(api('/api/teammate', { name, changes }), () => (restart || !running
         ? `Saved ${name}.` : `Saved ${name}: it uses the new settings from its next start.`));
       if (!ok) return;
-      if (typeof E !== 'undefined') E.draft = null;
     }
     closeCard();
     if (restart) act(api('/api/restart', { role: name }), () => `Restarting ${name} with its new settings.`);
@@ -200,7 +197,7 @@ async function removeTeammate(name) {
   if (!confirm(`Remove ${name} from the team?${subs.length ? ` ${subs.join(', ')} will report to ${sup}.` : ''} `
     + 'Its messages and finished tasks stay in the history.')) return;
   const r = await act(api('/api/teammate-remove', { name }), () => `${name} left the team.`);
-  if (r) { closeCard(); if (typeof E !== 'undefined') E.draft = null; }
+  if (r) closeCard();
 }
 
 /** A teammate's badge: click it to open its card. */

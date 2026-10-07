@@ -1,5 +1,5 @@
 /**
- * The owner's page: team, tasks, messages, files, consultants, the team editor and setup - and the local web
+ * The owner's page: team, tasks, messages, files, consultants, the Role Market and setup - and the local web
  * server behind it, which the agent-org window (Electron) shows. Without a team it opens on a welcome page,
  * where you open or create one.
  *
@@ -1000,7 +1000,7 @@ export class App {
     if (!changes || typeof changes !== 'object' || Array.isArray(changes) || !Object.keys(changes).length) throw new ApiError('say what to change');
     const unknown = Object.keys(changes).filter((k) => !TEAMMATE_FIELDS.includes(k)).sort();
     if (unknown.length) throw new ApiError(`cannot change ${unknown.join(', ')} here`);
-    if (!(name in this.hub.baseTeam.roles)) throw new ApiError(`'${name}' is not in team.yaml (a consultant comes from its tier: change that in Edit team)`);
+    if (!(name in this.hub.baseTeam.roles)) throw new ApiError(`'${name}' is not in team.yaml (a consultant comes from its tier, set in team.yaml)`);
     for (const [key, raw] of Object.entries(changes)) {
       if (key === 'write_scope') {
         const value = typeof raw === 'string' ? raw.replace(/\n/g, ',').split(',').map((x) => x.trim()).filter((x) => x) : raw;

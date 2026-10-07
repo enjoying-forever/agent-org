@@ -16,7 +16,6 @@
       <button data-view="team" class="active">Team</button>
       <button data-view="board">Board <span id="board-count" class="count"></span></button>
       <button data-view="roles">Roles</button>
-      <button data-view="editor">Edit team</button>
     </nav>
     <div class="bar-right">
     <span id="conn" class="conn" hidden>connecting</span>
@@ -25,6 +24,10 @@
       <div id="attention" class="popover" hidden>
         <div id="guide" class="guide" hidden></div>
       </div>
+    </div>
+    <div class="seg team-mode" id="team-mode" hidden>
+      <button data-mode="panes" class="active" title="Every agent's terminal">Terminals</button>
+      <button data-mode="tree" title="The team as a tree: what each agent is doing">Tree</button>
     </div>
     <details class="menu" id="layout-menu" hidden>
       <summary class="icon-btn" title="Arrange the agent panes" aria-label="Arrange the agent panes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></summary>
@@ -43,6 +46,7 @@
         <button id="checks-btn" title="Check that Claude, Codex, Grok, Antigravity and DeepSeek are ready">Setup check</button>
         <button id="keys-btn" title="Moving between panes without the mouse">Keyboard shortcuts</button>
         <button id="switch-btn" hidden title="Open or create another team">Switch team</button>
+        <button id="save-template" hidden title="Keep this team to start new projects from, so you set it up only once">Save as my team…</button>
         <hr>
         <button id="stop-all" hidden class="danger" title="Stop every running agent">Stop all agents</button>
       </div>
@@ -102,6 +106,7 @@
     <div class="gutter rail-gutter" data-edge="rail" title="Drag to resize"></div>
     <section class="chart-pane">
       <div id="panes" class="panes"></div>
+      <div id="tree-view" class="tree-view" hidden><ul id="team-tree" class="tree"></ul></div>
     </section>
     <div class="gutter side-gutter" data-edge="side" title="Drag to resize"></div>
     <aside class="side">
@@ -157,23 +162,6 @@
       <span class="muted hint">A task moves right as it is worked on. Done tasks wait in Review until whoever gave them accepts them.</span>
     </div>
     <div id="board" class="board"></div>
-  </main>
-
-  <main id="view-editor" class="editor-view" hidden>
-    <div id="editor" class="editor-main"></div>
-    <aside class="editor-side">
-      <div class="preview"><ul id="preview" class="tree small"></ul></div>
-      <div class="save">
-        <ul id="errors" class="errors"></ul>
-        <div style="display:flex;gap:8px">
-          <button id="revert">Revert</button>
-          <button id="save" class="primary" style="flex:1">Save team.yaml</button>
-        </div>
-        <button id="save-template" title="Keep this team to start new projects from, so you set it up only once">Save as my team…</button>
-        <span class="muted" style="font-size:12px">Running agents see the new team at once; a new model or program
-          applies from an agent's next start.</span>
-      </div>
-    </aside>
   </main>
 
   <main id="view-roles" class="roles-view" hidden>
@@ -317,7 +305,6 @@
   <script src="/static/addon-web-links.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/board.js"></script>
-  <script src="/static/editor.js"></script>
   <script src="/static/roles.js"></script>
   <script src="/static/layout.js"></script>
   <script src="/static/teammates.js"></script>

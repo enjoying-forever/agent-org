@@ -69,6 +69,13 @@ agent carries on where it stopped.
   restart or stop it, and its details (notes, files, usage). An agent that is not running
   shows a summary instead: its program and model, what it does, and its recent messages.
   On the right, the team's messages. Dark or light with the button at the top.
+- **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
+  or the team as a tree, for when you would rather not watch them all: each agent a card under
+  whom it reports to, saying whether it runs, its state and what it says it is doing, an amber
+  *asks you* when its terminal waits for an answer, its task, its last message, and whether it
+  is stuck, which files it is writing and its usage. Click a card for that agent's terminal; ▶
+  starts one that is not running. Roles dropped from **+** and teammates dragged onto a card
+  change the team, as in the team list. The choice is remembered for each team.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
   buttons) and the terminal below; hover the title for its status, model, usage, tasks and files.
   Claude agents start without your personal Claude Code mods (their status lines, such as a
@@ -116,9 +123,9 @@ agent carries on where it stopped.
   own records: Claude Code's and Codex's session files, Antigravity's conversation
   database, DeepSeek's run events, and Grok's turn records (a Grok turn is counted when it
   ends). For Codex the title also shows how much of your subscription limit is used.
-- **Edit team:** add and remove roles, choose the leader and each role's superior, the
-  program and model each role uses, what files it may write, the consultant tiers,
-  the checks, and whether agents start by themselves.
+- **Team settings** (consultant tiers, checks, starting agents by themselves) are kept in
+  `team.yaml` (see [team.yaml](#teamyaml)). **More** > **Save as my team…** keeps the team to
+  start new projects from.
 - **The law:** the rules below. **Setup:** checks that the programs are ready.
 
 ### The window, or a browser, or terminal tabs
@@ -262,12 +269,12 @@ When a subordinate asks for help, its superior can summon a **consultant**: a
 temporary helper, placed under the agent that asked, running a stronger (or cheaper)
 model from a tier you configure. It opens in its own terminal, edits only the files it is
 handed, and is dismissed when the problem is solved; its files go back to the agent
-it helped. Tiers are set in *Edit team* (for example *opus-medium*, *luna-high*,
+it helped. Tiers are set in `team.yaml`, under `consultants` (for example *opus-medium*, *luna-high*,
 *opus-xhigh*), each with what it is good for and how many may run at once.
 
 ## Checks, history and starting by themselves
 
-These are set in *Edit team*, under the team's name.
+These are set in `team.yaml` (`checks`, `autostart`, `max_running`).
 
 - **Checks** are commands that must pass before a task can be closed as done - your
   tests, a linter, a build. Each can be limited to certain files (`*.py`), so a task that
@@ -286,7 +293,7 @@ These are set in *Edit team*, under the team's name.
 
 ## Set your team up once
 
-In *Edit team*, **Save as my team…** keeps the team (its roles, programs, models, duties,
+**More** > **Save as my team…** keeps the team (its roles, programs, models, duties,
 consultants, checks and settings) and can make it your **default**. When you create a team
 for a new project, your saved teams are listed first and the default is already chosen:
 pick the folder and click *Create team*. *Make default* and *Delete* are next to each.
@@ -310,8 +317,8 @@ tester, researcher, Gemini coder) and your own.
 - **Add to team** places a role in the open team: choose its name and whom it reports to.
 - **Build a new team from roles:** under *Create a new team*, choose *Build my own from the
   Role Market*, add roles, and set whom each reports to - the first one leads.
-- In *Edit team*, **Save as preset…** turns any role into a market role, and **+ Add role…**
-  offers the market. Managers can hire from it too: `hire_agent(name, preset="reviewer")`.
+- The **+** in the team list offers the market: drag a role onto a teammate. Managers can hire
+  from it too: `hire_agent(name, preset="reviewer")`.
 
 Your roles are kept in `~/.agent-org/roles/`.
 
@@ -327,14 +334,48 @@ The leader, and any agent with people below it, can:
   be reassigned or cancelled first). Its program stops; its people move up one level.
 
 Every change is saved to `team.yaml` (the old one is kept as `team.yaml.bak`), everyone
-sees it at once, and you are told about it in *Messages*. You can turn it off in *Edit team*
-(**Agents may change the team**). So you can also start with just a leader (*Solo*) and
+sees it at once, and you are told about it in *Messages*. You can turn it off with
+`team_changes: false` in `team.yaml`. So you can also start with just a leader (*Solo*) and
 let it build the team the work needs.
+
+## team.yaml
+
+The team lives in `team.yaml` in its folder. The page changes the roles for you (the **+**, dragging,
+a teammate's card); the rest you edit in the file, and running agents see the change at once (a new
+model or program applies from an agent's next start). Every key, with its default:
+
+```yaml
+owner: you                    # you: the leader reports to you
+project_root: .               # the folder the agents work in (relative to this file)
+database: .agent-org/hub.db   # messages, tasks and files held
+roles:
+  leader:
+    superior: you             # exactly one role reports to the owner: the leader
+    harness: claude           # claude, codex, grok, antigravity or deepseek
+    model: claude-opus-5-5    # optional: the program's default
+    effort: high              # optional: reasoning effort
+    duties: Plan the work and hand it out.
+    instructions: How to work, what to check.
+    write_scope: [PLAN.md, docs/*]   # files it may write (empty: none)
+consultants:                  # tiers a superior may summon a consultant from
+  opus-medium: { harness: claude, model: claude-opus-5-5, effort: medium, max_active: 2,
+                 use_for: questions a strong model answers quickly }
+checks:                       # must pass before a task is done
+  - { name: tests, run: npm test, when: ["src/*", "test/*"], timeout: 300 }
+autostart: false              # start an agent with work waiting while the page is open
+max_running: 0                # at most this many agents at once (0: no limit)
+isolation: leases             # leases (one writer per file) or branches (see below)
+commit_on_accept: true        # with history on: one commit per accepted task
+team_changes: true            # agents may hire, change and let go of agents below them
+guard_commands: true          # refuse dangerous commands (see Safety)
+scan_secrets: true            # refuse new work that adds a key or token (see Safety)
+max_agents: 12                # the most agents the team may grow to by hiring
+```
 
 ## Several agents on one file: git branches
 
 By default one agent writes a file at a time (the lease in rule 9), and the others wait.
-Turn on **Agents work on their own git branches** in *Edit team* and they no longer wait:
+Set `isolation: branches` in `team.yaml` and they no longer wait:
 
 - Each agent works in its own copy of the project (a git worktree in
   `.agent-org/worktrees/<role>`, on branch `agent/<role>`), and edits any file in its scope.
@@ -368,12 +409,12 @@ pre-approved). On top of that, agent-org holds every agent to these limits:
   (`sk-...`, AWS, GitHub, Google, Slack keys, passwords in code) is refused, with the file
   and line but never the value, until it reads them from the environment instead.
 - **Nobody gives more than they have.** A manager can only hire or change agents with files
-  it may write itself, and the team cannot grow past **At most this many agents in the
-  team** (12 by default). A new hire does not start past the running limit.
+  it may write itself, and the team cannot grow past `max_agents` in `team.yaml` (12 by
+  default). A new hire does not start past the running limit.
 - **With git branches, scope is checked at the door:** work only reaches main if every file
   it changed is in the agent's write scope - including files written through the shell.
 - Every refusal is recorded in *Activity* (kind "safety"). The command guard and the secret
-  check can be turned off in *Edit team* if a project really needs it.
+  check can be turned off in `team.yaml` (`guard_commands`, `scan_secrets`) if a project really needs it.
 
 ### The web page
 

@@ -185,6 +185,7 @@ function applyState(state) {
   if (!S.focus || !findRole(S.focus)) S.focus = state.leader;
   renderChart();
   renderPanes();
+  renderTree();
   renderGuide();
   renderProblems();
   renderBoard();
@@ -210,7 +211,7 @@ function enterTeam() {
   $('#view-home').hidden = true;
   $('#view-roles').hidden = true;
   $('#market-btn').hidden = true;
-  for (const id of ['#views', '#conn', '#switch-btn', '#stop-all', '#launch-all']) $(id).hidden = false;
+  for (const id of ['#views', '#conn', '#switch-btn', '#save-template', '#stop-all', '#launch-all']) $(id).hidden = false;
   showView('team');
 }
 
@@ -218,12 +219,11 @@ function enterHome() {
   if (S.mode === 'home') return;
   S.mode = 'home';
   Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0, focus: null, drafts: {} });
-  if (typeof E !== 'undefined') E.draft = null;
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
-  for (const id of ['#view-team', '#view-board', '#view-editor', '#view-roles', '#views', '#conn', '#switch-btn',
-    '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#layout-menu', '#attention-btn']) {
+  for (const id of ['#view-team', '#view-board', '#view-roles', '#views', '#conn', '#switch-btn', '#save-template',
+    '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
   $('#market-btn').hidden = false;
@@ -313,13 +313,18 @@ $('#create-go').addEventListener('click', async () => {
   if (lacking.length && !confirm(`${lacking.join(' and ')} ${lacking.length > 1 ? 'are' : 'is'} not installed on this `
     + 'computer, so the agents that use it could not start. Create the team anyway? (You can switch an agent to '
     + 'another program on its card.)')) return;
-  await act(api('/api/create', body), () => 'Team created. Check it in "Edit team", then Launch team.');
+  await act(api('/api/create', body), () => 'Team created. Click a teammate to change it, then Launch team.');
 });
 $('#shortcut-btn').addEventListener('click', () =>
   act(api('/api/desktop-shortcut', {}), () => 'Shortcut added: double-click "agent-org" on your desktop next time.'));
-$('#switch-btn').addEventListener('click', async () => {
-  if (typeof E !== 'undefined' && E.dirty && !confirm('Leave without saving your team changes?')) return;
-  await act(api('/api/close', {}));
+$('#switch-btn').addEventListener('click', () => act(api('/api/close', {})));
+$('#save-template').addEventListener('click', async () => {
+  $('#more-menu').open = false;
+  const name = prompt('Name for this team (it will be offered for every new project):', 'My team');
+  if (name === null || !name.trim()) return;
+  const makeDefault = confirm(`Use "${name.trim()}" as the default for new projects?`);
+  await act(api('/api/save-template', { name: name.trim(), default: makeDefault }),
+    () => `Saved "${name.trim()}"${makeDefault ? ' as your default team' : ''}. Choose it when you create a team.`);
 });
 
 // ---------- setup checks ----------
@@ -373,7 +378,7 @@ function renderGuide() {
   const running = st.roles.some((r) => r.online || r.resumes); // launched now, or before (a conversation to resume)
   const talked = st.tasks.some((t) => t.assigner === st.owner) || S.messages.some((m) => m.sender === st.owner);
   const steps = [
-    { done: true, text: 'Check the team in "Edit team": who reports to whom, and which model each role uses.' },
+    { done: true, text: 'Check the team: click a teammate in the team list to change its program, its model or whom it reports to.' },
     { done: running, text: `Click "Launch team". ${st.in_window ? 'Each agent starts in its own terminal on this page' : 'Each agent opens in its own terminal tab'}. The first time, `
       + 'say yes when Claude or Codex asks to trust the folder, and choose "Trust all and continue" when '
       + 'Codex asks to review hooks.' },
@@ -480,6 +485,7 @@ function renderChart() {
 }
 
 function focusPane(name) {
+  if (L.tree) setTeamMode(false); // its terminal is what was asked for
   showPane(name); // a closed pane comes back
   if (L.max && L.max !== name) L.max = name; // full screen: switch to that agent
   S.focus = name;
@@ -487,6 +493,89 @@ function focusPane(name) {
   renderPanes();
   document.querySelector(`.pane[data-role="${CSS.escape(name)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
+
+// ---------- the team as a tree ----------
+// For whoever would rather not watch every terminal: each agent as a card in the org chart, saying what it is
+// doing (its state and its own words for it), its task, and its last message. A card opens the agent's terminal.
+
+function setTeamMode(tree) {
+  L.tree = tree;
+  saveLayout();
+  applyTeamMode();
+}
+
+function applyTeamMode() {
+  const tree = Boolean(L.tree);
+  for (const b of document.querySelectorAll('#team-mode button')) b.classList.toggle('active', (b.dataset.mode === 'tree') === tree);
+  $('#panes').hidden = tree; // the terminals keep running and reading: only not shown
+  $('#tree-view').hidden = !tree;
+  $('#layout-menu').hidden = tree || $('#team-mode').hidden;
+  if (tree) renderTree();
+  else if (S.state) setTimeout(applyLayout, 0); // the panes have a size again
+}
+
+function renderTree() {
+  const st = S.state;
+  if (!st || !L.tree || $('#view-team').hidden) return;
+  const reached = new Set();
+  const branch = (r) => {
+    reached.add(r.name);
+    const kids = rolesUnder(r.name);
+    return h('li', {}, treeNode(r), kids.length ? h('ul', {}, kids.map(branch)) : null);
+  };
+  const top = rolesUnder(st.owner).map(branch);
+  const lost = st.roles.filter((r) => !reached.has(r.name)).map(branch); // whoever reports to someone missing
+  const owner = h('button', {
+    class: 'node owner', title: 'Messages to you',
+    onclick: () => { showTab('messages'); setFilter('me'); if (!L.side) { L.side = true; applyChrome(); saveLayout(); } },
+  },
+  h('div', { class: 'name', style: { justifyContent: 'center' } }, h('span', { class: 'nm' }, st.owner),
+    st.owner_unread ? h('span', { class: 'pill hot', title: `${st.owner_unread} unread` }, st.owner_unread) : null),
+  h('div', { class: 'model' }, st.owner_unread ? `${plural(st.owner_unread, 'message')} for you` : 'owner'));
+  dropTarget(owner, st.owner);
+  const box = $('#tree-view');
+  const [left, scrollTop] = [box.scrollLeft, box.scrollTop];
+  $('#team-tree').replaceChildren(h('li', {}, owner, top.length || lost.length ? h('ul', {}, top, lost) : null));
+  [box.scrollLeft, box.scrollTop] = [left, scrollTop];
+}
+
+function treeNode(r) {
+  const st = S.state;
+  const s = r.status;
+  const asking = Boolean(r.online && (PANES.get(r.name)?.asking || r.terminal?.asking));
+  const [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : s ? [s.state, s.state] : ['idle', 'starting'];
+  const what = !r.online ? '' : asking ? 'Its terminal waits for your answer' : s?.task || '';
+  const task = st.tasks.find((t) => t.assignee === r.name && t.state === 'working')
+    || st.tasks.find((t) => t.assignee === r.name && ['open', 'blocked'].includes(t.state));
+  const last = S.messages.findLast((m) => m.sender === r.name || m.recipient === r.name);
+  const launchable = st.launchable.includes(r.harness);
+  const open = () => { setTeamMode(false); focusPane(r.name); };
+  const card = h('div', {
+    class: `node h-${r.harness}${r.tier ? ' consultant' : ''}${r.online ? '' : ' off'}${asking ? ' asking' : ''}`,
+    role: 'button', tabindex: '0', title: `Open ${r.name}'s terminal`,
+    onclick: open, onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); },
+  },
+  h('div', { class: 'name' }, runningDot(r), badge(r), h('span', { class: 'nm' }, r.name), h('span', { class: 'grow' }),
+    r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
+    launchable && !r.online ? iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)) : null),
+  h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r)),
+  h('div', { class: 'doing' }, h('span', { class: `state ${cls}` }, label), what ? h('span', { class: 'what', title: what }, what) : null),
+  task ? h('div', { class: 'task', title: `#${task.id} ${task.title} (${task.state})` },
+    `${task.state === 'working' ? 'On' : task.state === 'blocked' ? 'Blocked on' : 'Next'} `, h('b', {}, `#${task.id} ${task.title}`)) : null,
+  last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${last.text.slice(0, 600)}` },
+    `${last.sender === r.name ? `→ ${last.recipient}` : `← ${last.sender}`}: ${last.text.replace(/\s+/g, ' ')}`) : null,
+  h('div', { class: 'facts' },
+    r.stuck ? h('span', { class: 'bad', title: r.stuck.text }, r.stuck.describe) : null,
+    r.online > 1 ? h('span', { class: 'bad' }, `${r.online} sessions`) : null,
+    r.locks.length ? h('span', { title: r.locks.join('\n') }, `writing ${plural(r.locks.length, 'file')}`) : null,
+    r.open_tasks > (task ? 1 : 0) ? h('span', {}, plural(r.open_tasks, 'open task')) : null,
+    r.usage && totalTokens(r.usage) ? h('span', { title: usageText(r.usage) }, shortUsage(r.usage)) : null));
+  dropTarget(card, r.name);
+  if (!r.tier) dragTeammate(card, r.name);
+  return card;
+}
+
+for (const b of document.querySelectorAll('#team-mode button')) b.addEventListener('click', () => setTeamMode(b.dataset.mode === 'tree'));
 
 // ---------- agent panes ----------
 // Each agent has one pane, kept across refreshes (a live terminal must not be rebuilt):
@@ -506,7 +595,7 @@ function renderPanes() {
   for (const [name, p] of PANES) if (!names.has(name)) { dropPane(p); PANES.delete(name); }
   box.querySelector(':scope > .empty')?.remove();
   if (!order.length) {
-    box.append(h('div', { class: 'empty' }, 'No roles yet. Add one with + in the team list, or in Edit team.'));
+    box.append(h('div', { class: 'empty' }, 'No roles yet. Add one with + in the team list.'));
     return;
   }
   order.forEach((r, i) => {
@@ -1086,6 +1175,7 @@ function addMessages(list) {
   if (S.state) {
     appendFeed(list); // it stays at the newest message unless you scrolled up (see stickFeed)
     renderPanes();
+    renderTree();
     renderGuide();
   }
   if (S.selected) renderDrawer();
@@ -1411,12 +1501,11 @@ function showView(v) {
   for (const b of document.querySelectorAll('.views button')) b.classList.toggle('active', b.dataset.view === v);
   $('#view-team').hidden = v !== 'team';
   $('#view-board').hidden = v !== 'board';
-  $('#view-editor').hidden = v !== 'editor';
   $('#view-roles').hidden = v !== 'roles';
-  $('#launch-all').hidden = S.mode !== 'team' || v === 'editor';
-  for (const id of ['#rail-toggle', '#side-toggle', '#layout-menu']) $(id).hidden = S.mode !== 'team' || v !== 'team';
-  if (v === 'team' && S.state) setTimeout(applyLayout, 0); // once the view has its size again
-  if (v === 'editor') { closeDrawer(); if (!E.draft) loadEditor(); }
+  $('#launch-all').hidden = S.mode !== 'team';
+  for (const id of ['#rail-toggle', '#side-toggle', '#team-mode']) $(id).hidden = S.mode !== 'team' || v !== 'team';
+  $('#layout-menu').hidden = S.mode !== 'team' || v !== 'team' || Boolean(L.tree);
+  if (v === 'team' && S.state) { setTimeout(applyLayout, 0); renderTree(); } // once the view has its size again
   if (v === 'roles') { closeDrawer(); loadRoles(); }
 }
 
