@@ -939,7 +939,8 @@ body[data-mode="team"] .brand-mark { display: none; }
 .brand-mark { display: inline-flex; align-items: center; gap: 10px; }
 .bar-title { font-size: 14px; font-weight: 600; white-space: nowrap; }
 .bar-title:empty { display: none; }
-#more-menu > summary::after { display: none; }
+#more-menu > summary::after, .role-more > summary::after { display: none; }
+.role-more .menu-list { min-width: 150px; }
 .bar-right { gap: 4px; }
 .bar-right > #launch-all { margin-left: 6px; }
 

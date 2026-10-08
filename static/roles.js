@@ -65,11 +65,29 @@ function roleTile(p) {
       h('button', { class: 'primary small', onclick: () => placeRole(p) }, 'Add to team'),
       h('span', { class: 'grow' }),
       h('button', { class: 'ghost small', onclick: () => openRoleDesigner(p) }, 'Edit'),
-      h('button', { class: 'ghost small', title: 'Make a copy to change separately', onclick: () => duplicateRole(p) }, 'Duplicate'),
-      h('button', { class: 'ghost small', title: 'Download as a file to share or keep', onclick: () => exportRole(p) }, 'Export'),
-      p.edited && h('button', { class: 'ghost small', title: 'Undo your edits to this ready-made role', onclick: () => resetRole(p) }, 'Reset'),
-      h('button', { class: 'ghost small danger', onclick: () => deleteRole(p) }, 'Delete')));
+      roleMenu(p)));
 }
+
+/** The role's rarer actions, behind ⋯ (one closes when another opens, or on a click elsewhere). */
+function roleMenu(p) {
+  const menu = h('details', { class: 'menu role-more' });
+  const item = (label, title, run, cls = '') => h('button', { class: cls, title, onclick: () => { menu.open = false; run(); } }, label);
+  menu.append(
+    h('summary', { class: 'icon-btn', title: 'More', 'aria-label': `More for ${p.title}` }, icon('more')),
+    h('div', { class: 'menu-list' },
+      item('Duplicate', 'Make a copy to change separately', () => duplicateRole(p)),
+      item('Export', 'Download as a file to share or keep', () => exportRole(p)),
+      p.edited && item('Reset', 'Undo your edits to this ready-made role', () => resetRole(p)),
+      h('hr'),
+      item('Delete', '', () => deleteRole(p), 'danger')));
+  menu.addEventListener('toggle', () => {
+    if (menu.open) for (const other of document.querySelectorAll('.role-more[open]')) if (other !== menu) other.open = false;
+  });
+  return menu;
+}
+document.addEventListener('click', (e) => {
+  for (const m of document.querySelectorAll('.role-more[open]')) if (!m.contains(e.target)) m.open = false;
+});
 
 // ---------- designing a role ----------
 
