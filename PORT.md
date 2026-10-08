@@ -86,6 +86,13 @@ one 44 ms. In the app (live, 2026-10-07), the first agent's start answers in abo
 is Windows starting its first pseudo-console (later ones 45-70 ms) and 0.25 s the one-time check of
 dsh's version; the next agent answers in 0.34 s.
 
+A small task, live (2026-10-08; Claude leader and worker on Sonnet, the owner's task -> the leader assigns it
+-> the worker writes a file and runs the checks -> the leader looks at task_changes and accepts -> reports):
+49 s, of which waits of agent-org's own: a task still unread was announced as "unfinished work" (the leader
+then spent three calls finding it), and every message waited 2.5 s in case a Stop hook still listened. Now
+the line says read_inbox, and the Stop hook says when it listens (by its process id), so a resting agent is
+woken the moment mail comes: 39 s. The rest is the models' own turns.
+
 Before this branch becomes main:
 - Live runs on Codex (the new hook command needs the owner's one-time "Trust all"), Grok (agent-org
   rewrites ~/.grok/hooks/agent-org.json for the new command), Antigravity (it replaces the user-level
