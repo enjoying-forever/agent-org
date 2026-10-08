@@ -232,7 +232,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 /* ---------- team view: rail, agent panes, messages ---------- */
 .team-view {
   flex: 1; min-height: 0; display: grid; padding: 0 10px 10px;
-  grid-template-columns: minmax(0, 1fr) 10px var(--side-w, 400px);
+  /* in a small window the messages give way first, so the agents keep about 580px */
+  grid-template-columns: minmax(0, 1fr) 10px min(var(--side-w, 400px), max(320px, 100vw - var(--rail-w, 260px) - 580px));
   grid-template-rows: minmax(0, 1fr);
 }
 .team-view.no-side { grid-template-columns: minmax(0, 1fr) 0 0; }
@@ -981,3 +982,13 @@ button.primary.send svg { width: 16px; height: 16px; }
 .seg button.active, .filters .seg button.active, #mode-seg button.active { color: var(--accent-ink); }
 .views button.active { color: var(--accent-ink); }
 .tabs button.active { color: var(--accent-ink); background: var(--accent-wash); }
+/* a narrow messages panel: "urgent" shrinks to its box and a "!", so whom it goes to stays readable */
+.composer { container-type: inline-size; }
+.pill-select { min-width: 84px; }
+@container (max-width: 320px) {
+  .composer-bar { gap: 4px; }
+  #mode-seg button { padding: 2px 7px; }
+  .pill-select { min-width: 72px; padding: 3px 6px; }
+  .composer .urgent { font-size: 0; gap: 0; padding: 3px 6px; }
+  .composer .urgent::after { content: "!"; font-size: 13px; font-weight: 700; margin-left: 3px; }
+}

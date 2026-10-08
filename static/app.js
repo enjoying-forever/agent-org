@@ -1702,7 +1702,7 @@ function messageEl(m, compact = false) {
     }, 'Show more'),
     !compact && toMe && h('div', { class: 'acts' },
       h('button', { class: 'small', onclick: () => replyTo(m) }, 'Reply'),
-      m.kind === 'help' && S.state.tiers.length
+      m.kind === 'help' && S.state.tiers.length > 0
         && h('button', { class: 'small', onclick: () => openSummon(m) }, 'Summon consultant')));
 }
 

@@ -38,7 +38,7 @@ function applyChrome() {
   $('#app').classList.toggle('no-rail', !L.rail); // the sidebar is the whole app's
   $('#app').style.setProperty('--rail-w', `${L.railW}px`);
   view.classList.toggle('no-side', !L.side);
-  view.style.setProperty('--side-w', `${L.sideW}px`);
+  view.style.setProperty('--side-w', `${Math.max(320, L.sideW)}px`); // older layouts allowed 280
   $('#rail-toggle').classList.toggle('on', L.rail);
   $('#side-toggle').classList.toggle('on', L.side);
 }
@@ -209,12 +209,12 @@ function dragEdge(e) {
   const edge = e.currentTarget.dataset.edge;
   e.preventDefault();
   const start = e.clientX;
-  const base = edge === 'rail' ? L.railW : L.sideW;
+  const base = edge === 'rail' ? L.railW : Math.round($('#view-team .side').getBoundingClientRect().width) || L.sideW; // as shown
   document.body.classList.add('dragging-x');
   const move = (ev) => {
     const d = ev.clientX - start;
     if (edge === 'rail') L.railW = Math.min(Math.max(base + d, 160), 420);
-    else L.sideW = Math.min(Math.max(base - d, 280), Math.max(320, innerWidth * 0.5));
+    else L.sideW = Math.min(Math.max(base - d, 320), Math.max(320, innerWidth * 0.5)); // narrower, the message box no longer fits
     applyChrome();
   };
   const up = () => {
