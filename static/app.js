@@ -885,8 +885,8 @@ function treeNode(r, looks, reports) {
       older.length ? h('div', { class: 'acts', title: 'What it did before, newest first' }, older.map((a) => h('div', {
         title: `${a.what}\n${a.ended_at === null ? 'started' : 'done'} at ${fmtTime(a.ended_at ?? a.at)}`,
       }, h('span', { class: 'what' }, a.what), h('span', { class: 'when', 'data-at': a.ended_at ?? a.at, 'data-running': a.ended_at === null ? '1' : '' }, actionAge(a))))) : null,
-      last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${last.text.slice(0, 600)}` },
-        `${last.sender === r.name ? `→ ${last.recipient}` : `← ${last.sender}`}: ${last.text.replace(/\s+/g, ' ')}`) : null,
+      last ? h('div', { class: 'last', title: `${last.sender} → ${last.recipient}\n\n${shownText(last).slice(0, 600)}` },
+        `${last.sender === r.name ? `→ ${last.recipient}` : `← ${last.sender}`}: ${shownText(last).replace(/\s+/g, ' ')}`) : null,
       facts.childElementCount ? facts : null,
     ];
   }
@@ -1097,12 +1097,12 @@ function renderSummary(p, r) {
 function logLine(m, me) {
   const out = m.sender === me;
   return h('button', {
-    type: 'button', class: `logline ${m.kind}`, title: `${m.sender} → ${m.recipient}, ${KIND_LABEL[m.kind] || m.kind}\n\n${m.text.slice(0, 600)}`,
+    type: 'button', class: `logline ${m.kind}`, title: `${m.sender} → ${m.recipient}, ${KIND_LABEL[m.kind] || m.kind}\n\n${shownText(m).slice(0, 600)}`,
     onclick: (e) => { e.stopPropagation(); jumpTo(m.id); },
   },
   h('span', { class: 't' }, fmtTime(m.sent_at).slice(0, 5)),
   h('span', { class: 'who' }, `${out ? '→' : '←'} ${out ? m.recipient : m.sender}`),
-  h('span', { class: 'txt' }, m.text.replace(/\s+/g, ' ')));
+  h('span', { class: 'txt' }, shownText(m).replace(/\s+/g, ' ')));
 }
 
 // ---------- live terminals (xterm.js) ----------
@@ -1671,10 +1671,19 @@ const KIND_LABEL = {
   task: 'task', result: 'result', reply: 'reply', notice: 'hub notice', note: 'hub note',
 };
 
+/** A message as the owner reads it: a task without the lines that tell its agent how to close it. */
+function shownText(m) {
+  if (m.kind !== 'task') return m.text;
+  return m.text
+    .replace(/\n\nBefore it can close as done, the hub runs the team's checks[^\n]*(\n- [^\n]*)*/, '')
+    .replace(/\n\nWhen you finish, call finish_task\(\d+, result\)[^\n]*$/, '');
+}
+
 function messageEl(m, compact = false) {
   const toMe = m.recipient === S.state.owner;
-  const long = m.text.length > 600 || m.text.split('\n').length > 8;
-  const text = h('div', { class: 'text' + (long ? ' clamped' : '') }, m.text);
+  const shown = shownText(m);
+  const long = shown.length > 600 || shown.split('\n').length > 8;
+  const text = h('div', { class: 'text' + (long ? ' clamped' : '') }, shown);
   const cls = ['msg', m.kind, toMe && 'to-me', toMe && !m.read && 'unread', m.urgent && 'urgent'];
   return h('div', { class: cls.filter(Boolean).join(' '), id: compact ? null : `m${m.id}` },
     h('div', { class: 'head' },

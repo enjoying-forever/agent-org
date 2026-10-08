@@ -122,7 +122,8 @@ agent carries on where it stopped.
   badge lights up while it writes. Ctrl+Alt+1-9, Ctrl+Alt+arrows and Ctrl+Alt+Enter move between
   panes and go full screen; Ctrl+wheel or Ctrl+Alt+= / - / 0 makes the terminals' text bigger,
   smaller or normal (*More* > *Keyboard shortcuts* lists them all).
-- **Messages:** the whole team's conversation, live. Write to anyone, reply, mark a
+- **Messages:** the whole team's conversation, live (a task shows without the lines that tell its
+  agent how to close it). Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
   *Reply* and *Summon consultant* buttons.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
