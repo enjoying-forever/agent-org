@@ -611,6 +611,8 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .state.asking { --state: var(--signal); }
 .state.off { --state: var(--idle); font-weight: 500; }
 .state.stuck { --state: var(--danger); }
+.state.paused { --state: var(--idle); font-weight: 500; }
+.pane-head .flag.calm { color: var(--muted); background: var(--sheet-2); }
 .team-mode button { padding: 3px 11px; }
 
 /* ---------- welcome page ---------- */

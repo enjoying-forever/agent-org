@@ -581,6 +581,10 @@ function renderTree() {
   else [box.scrollLeft, box.scrollTop] = [left, scrollTop];
 }
 
+/** Out of its usage limit, which has not reset yet: it waits, and nothing is asked of you (its manager is told
+ * who else is free; after the reset a Restart shows, or it starts by itself with automatic starting on). */
+const pausedByLimit = (r) => Boolean(r.stuck && r.stuck.kind === 'limit' && (r.stuck.until ?? 0) > Date.now() / 1000);
+
 /** How an agent is doing, as the tree shows it: its state (cls and label), the line saying what it does now,
  * and whether that line is a call still running. */
 function agentLook(r) {
@@ -589,7 +593,8 @@ function agentLook(r) {
   const running = r.actions?.find((a) => a.ended_at === null);
   // its own status may lag: a call running (or one a moment ago, before it said anything) says it is at work
   const busy = running || r.actions?.some((a) => !s && Date.now() / 1000 - a.ended_at < 60);
-  let [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : r.stuck ? ['stuck', 'stuck']
+  let [cls, label] = !r.online ? ['off', 'not running'] : asking ? ['asking', 'asks you'] : pausedByLimit(r) ? ['paused', 'paused']
+    : r.stuck ? ['stuck', 'stuck']
     : busy && s?.state !== 'working' ? ['working', 'working'] : s ? [s.state, s.state] : ['idle', 'idle']; // no word from it yet: at its prompt
   if (cls === 'done') [cls, label] = ['idle', 'idle'];
   let now = '';
@@ -612,9 +617,9 @@ function renderTreeBar(looks) {
   const st = S.state;
   const counts = {};
   for (const r of st.roles) counts[looks[r.name].cls] = (counts[looks[r.name].cls] || 0) + 1;
-  const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'],
+  const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'], ['paused', 'paused'],
     ['waiting', 'waiting'], ['idle', 'idle'], ['off', 'not running']].filter(([k]) => counts[k]);
-  const needs = [...st.problems, ...askingProblems().map((p) => ({ ...p, kind: 'asking' }))]
+  const needs = [...st.problems.filter((p) => p.kind !== 'limit'), ...askingProblems().map((p) => ({ ...p, kind: 'asking' }))]
     .sort((a, b) => NEED_ORDER.indexOf(a.kind) - NEED_ORDER.indexOf(b.kind));
   const spent = st.roles.reduce((sum, r) => sum + totalTokens(r.usage), 0);
   const open = L.needsOpen ?? true;
@@ -727,7 +732,7 @@ new ResizeObserver(() => {
 function treeNode(r, looks, reports) {
   const st = S.state;
   const look = looks[r.name];
-  const needs = st.problems.filter((p) => p.role === r.name && ['question', 'review', 'blocked', 'limit'].includes(p.kind));
+  const needs = st.problems.filter((p) => p.role === r.name && ['question', 'review', 'blocked'].includes(p.kind));
   const task = st.tasks.find((t) => t.assignee === r.name && t.state === 'working')
     || st.tasks.find((t) => t.assignee === r.name && ['open', 'blocked'].includes(t.state));
   const launchable = st.launchable.includes(r.harness);
@@ -897,9 +902,9 @@ function updatePane(p, r) {
       ? h('span', { class: 'tok', title: usageText(r.usage) }, shortUsage(r.usage)) : null,
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
     r.online > 1 && h('span', { class: 'flag bad' }, `${r.online} sessions`),
-    r.stuck && h('span', { class: 'flag bad', title: r.stuck.text }, r.stuck.describe),
+    r.stuck && h('span', { class: `flag ${pausedByLimit(r) ? 'calm' : 'bad'}`, title: r.stuck.text }, r.stuck.describe),
     launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
-    launchable && r.online > 0 && r.stuck && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),
+    launchable && r.online > 0 && r.stuck && !pausedByLimit(r) && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),
     launchable && r.online > 0 && iconBtn('stop', `Stop ${r.name}`, () => stopRoles(r.name), 'danger'),
     iconBtn('more', 'Details, tasks and files', () => openDrawer(r.name)),
     windowButtons(r.name));
@@ -1384,7 +1389,7 @@ function renderDrawer() {
         h('button', { onclick: () => composeTo(r.name, 'message') }, 'Message'),
         launchable && !r.online && h('button', { onclick: () => startRole(r) },
           r.resumes ? 'Start (resume)' : 'Start'),
-        launchable && r.online > 0 && r.stuck && h('button', { class: 'primary', onclick: () => restartRole(r.name) }, 'Restart'),
+        launchable && r.online > 0 && r.stuck && !pausedByLimit(r) && h('button', { class: 'primary', onclick: () => restartRole(r.name) }, 'Restart'),
         r.stuck && r.open_tasks > 0 && h('button', { onclick: () => openMoveTasks(r.name) }, 'Move its tasks'),
         launchable && r.online > 0 && h('button', { class: 'danger', onclick: () => stopRoles(r.name) }, 'Stop'),
         launchable && h('button', { onclick: () => startFresh(r) }, 'Start fresh'),

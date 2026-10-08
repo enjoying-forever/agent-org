@@ -107,7 +107,8 @@ agent carries on where it stopped.
   shows where it is: a stuck agent or a second session in its pane's title, unread messages
   as a count, and an agent whose terminal is asking something (a permission, "trust this
   folder?") as an amber outline on its pane until you answer. While the window is in the
-  background, an agent that gets stuck or runs out of usage brings a desktop notification. Drag a
+  background, an agent that gets stuck brings a desktop notification (one waiting out its usage
+  limit does not: it shows as *paused*, and asks nothing of you until the reset). Drag a
   pane by its title onto another to swap them. The arrangement is remembered for each team, and the
   window comes back where and as big as it was.
 - **Changing the team right there:** the **+** next to Agents in the sidebar opens your roles: drag one onto
@@ -459,7 +460,7 @@ the work.
 
 - agent-org reads each agent's conversation file and notices when Claude Code or Codex
   stopped on its usage limit (and when the limit resets), or on another API error.
-- The agent's card says so ("out of its usage limit until 19:20"). It is not started
+- The agent's card says so, calmly ("paused: out of its usage limit until 19:20"). It is not started
   again before the reset, and whoever gave it tasks is told who else is free - agents on
   other programs first. They, or you with **Move its tasks**, move each task with
   everything done so far: its conversation, the files it changed and the leases on them.

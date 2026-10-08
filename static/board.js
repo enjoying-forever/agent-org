@@ -249,7 +249,7 @@ $('#board-role').addEventListener('change', renderBoard);
 
 // ---------- problems ----------
 
-const NOTIFY_KINDS = ['limit', 'stuck', 'loop', 'duplicate', 'asking'];  // the rest already arrive as messages
+const NOTIFY_KINDS = ['stuck', 'loop', 'duplicate', 'asking'];  // the rest arrive as messages; a usage limit needs nothing of you
 
 /** A desktop notification when an agent runs out of usage, gets stuck, or loops - once each. */
 function notifyProblems(list) {
