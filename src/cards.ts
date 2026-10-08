@@ -44,8 +44,8 @@ export function roleCard(me: RoleSession, resumed = false): string {
       + "others need now (an interface, a plan). Your copy takes in main's new work by itself as you go.");
   }
   if (team.checks.length) {
-    lines.push("The team's checks - finish_task(done) is refused until those that apply pass, so run them before you "
-      + 'finish, and write tasks whose results can pass them:');
+    lines.push("The team's checks - finish_task(done) is refused until those that apply pass, so try them with run_checks "
+      + 'before you finish (the same checks, run the same way), and write tasks whose results can pass them:');
     lines.push(...team.checks.map((c) => `  - ${describe(c)}`));
   }
   lines.push(
