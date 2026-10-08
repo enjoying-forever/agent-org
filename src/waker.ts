@@ -13,13 +13,14 @@
 
 import { SERVER_NAME } from './cards.ts';
 import type { Hub, RoleSession } from './hub.ts';
+import { listeningKey } from './hooks.ts';
 import { logFault } from './runtime.ts';
+import { alive } from './wake.ts';
 import type { Terminal, TerminalHost } from './terminals.ts';
 
 export const EVERY = 1.0; // seconds between looks (each costs about a millisecond)
 export const QUIET = 3.0; // seconds without output: the agent is at its prompt (an idle Claude redraws every ~13 s)
 export const READY = 6.0; // seconds after a start before its first line: the program is still drawing its screen
-export const UNREAD_FOR = 2.5; // a waiting Stop hook takes mail within a second: older mail has nobody taking it
 export const AGAIN = 90.0; // seconds before the same terminal gets another line (doubling while the same mail waits)
 export const MOST = 1800.0; // the longest it waits before trying once more
 export const TYPED = 30.0; // seconds after you typed in a terminal before it gets a line (you may be mid-sentence)
@@ -108,16 +109,21 @@ export class Waker {
       if (now - term.started < READY || now - term.lastOutput < QUIET || now - term.lastInput < TYPED) continue;
       if (term.unsent && now - term.lastInput < UNSENT) continue;
       const [since, oldest] = unreadSince[name] ?? [null, null];
+      // Its Stop hook listening for mail (it says so, by its process id): the mail reaches it that way. Otherwise it
+      // rests, and is woken as soon as mail is there - a guess of 2.5 s for a hook that might still be listening
+      // used to come first. (A hook killed while listening leaves an id that is no longer alive.)
+      const listener = Number(hub.store.getSetting(listeningKey(name))) || 0;
+      if (listener && alive(listener)) continue;
       let [wokenFor, times] = this.tries.get(term.id) ?? [null, 0];
       if (oldest !== wokenFor) times = 0; // other mail than last time: it did read what it was woken for
       if (now - (this.typedAt.get(term.id) ?? 0) < Math.min(AGAIN * 2 ** times, MOST)) continue;
       const firstLook = !this.started.has(term.id);
-      if (since !== null && now - since < UNREAD_FOR) continue; // mail just came: in a moment it gets "read_inbox", which
-      // hands over the whole task (told "unfinished work" instead, an agent spent three calls finding it - seen live)
       this.started.add(term.id);
       let line: string;
       let tasks: string[];
-      if (since !== null && now - since >= UNREAD_FOR) line = wakeLine(spec.harness, name);
+      // mail first: read_inbox hands over a new task whole (told "unfinished work" for a task still unread, a new
+      // leader spent three calls finding it - seen live)
+      if (since !== null) line = wakeLine(spec.harness, name);
       else if (firstLook && (tasks = unfinished(hub.session(name))).length) line = wakeLine(spec.harness, name, tasks);
       else continue;
       if (asking(term)) {

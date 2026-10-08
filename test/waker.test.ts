@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test, type TestContext } from 'node:test';
 import * as hooks from '../src/hooks.ts';
+import { listeningKey } from '../src/hooks.ts';
 import { Hub } from '../src/hub.ts';
 import * as launch from '../src/launch.ts';
 import * as sessions from '../src/sessions.ts';
@@ -176,25 +177,24 @@ test('a question only written in an answer does not block waking', (t) => {
   assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), now), ['researcher']);
 });
 
-test('fresh mail waits for a Stop hook, and a woken agent is not pushed again', (t) => {
+test('fresh mail wakes a resting agent at once, and a woken agent is not pushed again', (t) => {
   const { hub } = setup(t);
   hub.session('leader').send('researcher', 'look into X');
   const w = makeWaker();
-  const now = Date.now() / 1000 + 1; // a waiting Stop hook would have taken it by now+1
+  const now = Date.now() / 1000 + 0.5; // no Stop hook listens for it: it rests
   const term = new FakeTerm(now);
   const tick = (at: number): string[] => w.tick(hub, host({ researcher: term }), at);
-  assert.deepEqual(tick(now), []);
-  assert.deepEqual(tick(now + 10), ['researcher']);
-  assert.deepEqual(tick(now + 20), []); // given time to act on it
+  assert.deepEqual(tick(now), ['researcher']);
+  assert.deepEqual(tick(now + 10), []); // given time to act on it
   // still unread: it is tried again, each time after twice as long (it may be unable to act on it)
-  assert.deepEqual(tick(now + 10 + waker.AGAIN), []);
-  const at = now + 10 + 2 * waker.AGAIN;
+  assert.deepEqual(tick(now + waker.AGAIN), []);
+  const at = now + 2 * waker.AGAIN;
   assert.deepEqual(tick(at), ['researcher']);
   assert.deepEqual(tick(at + 2 * waker.AGAIN), []);
   assert.deepEqual(tick(at + 4 * waker.AGAIN), ['researcher']);
   hub.session('researcher').readInbox(); // it read that mail; new mail is woken for at the usual pace
   hub.session('leader').send('researcher', 'and Y');
-  const laterAt = at + 4 * waker.AGAIN + waker.AGAIN + waker.UNREAD_FOR;
+  const laterAt = at + 4 * waker.AGAIN + waker.AGAIN + 1;
   assert.deepEqual(tick(Math.max(laterAt, Date.now() / 1000 + 10)), ['researcher']);
 });
 
@@ -239,12 +239,29 @@ test('a task that just came is handed over by read_inbox, not found by searching
   // seen live: told "unfinished work" for a task still unread, a new leader spent three calls finding it
   const { hub } = setup(t);
   hub.session('leader').assignTask('researcher', 'Compare the two libraries');
-  const w = makeWaker();
-  const sent = Date.now() / 1000;
-  const term = new FakeTerm(sent);
-  assert.deepEqual(w.tick(hub, host({ researcher: term }), sent + 1), []); // it just came: a moment
-  assert.deepEqual(w.tick(hub, host({ researcher: term }), sent + waker.UNREAD_FOR + 1), ['researcher']);
+  const term = new FakeTerm(Date.now() / 1000);
+  assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), Date.now() / 1000 + 0.5), ['researcher']); // at once: nothing listens for it
   assert.ok(term.got[0].includes('read_inbox') && !term.got[0].includes('unfinished'), term.got[0]);
+});
+
+test('an agent whose Stop hook listens for mail is left to it; one resting is woken at once', async (t) => {
+  const { hub } = setup(t);
+  hub.session('leader').send('researcher', 'look into X');
+  const now = Date.now() / 1000 + 0.5;
+  const look = (): string[] => makeWaker().tick(hub, host({ researcher: new FakeTerm(now) }), now);
+  hub.store.setSetting(listeningKey('researcher'), String(process.pid)); // a hook that runs (this process stands in for it)
+  assert.deepEqual(look(), []);
+  hub.store.setSetting(listeningKey('researcher'), '999999'); // one killed while it listened
+  assert.deepEqual(look(), ['researcher']);
+  hub.store.setSetting(listeningKey('researcher'), ''); // none: it rests
+  assert.deepEqual(look(), ['researcher']);
+  // the Stop hook says so while it waits, and stops saying so when it is done
+  const me = hub.session('leader');
+  const waiting = hooks.onStop(me, { stop_hook_active: true }, 0.4, 0.05);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(hub.store.getSetting(listeningKey('leader')), String(process.pid));
+  await waiting;
+  assert.equal(hub.store.getSetting(listeningKey('leader')), '');
 });
 
 test('a restarted agent with unfinished tasks carries on, once', (t) => {

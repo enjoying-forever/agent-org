@@ -143,13 +143,24 @@ export async function onStop(me: RoleSession, payload: Payload, wait: number | n
   letGoOfFiles(me);
   const before = me.store.getStatus(me.name);
   me.setStatus('waiting', before ? before.task : '');
-  const messages = await me.waitForMessages(wait ?? stopWait(), poll);
+  // While it listens, mail reaches the agent through it: the window leaves the agent alone meanwhile, and wakes
+  // it at once once it rests (see waker). A hook that is killed leaves its process id, which then is not alive.
+  me.store.setSetting(listeningKey(me.name), String(process.pid));
+  let messages: Message[];
+  try {
+    messages = await me.waitForMessages(wait ?? stopWait(), poll);
+  } finally {
+    me.store.setSetting(listeningKey(me.name), '');
+  }
   if (!messages.length && process.env.AGENT_ORG_STOP_IDLE) return null; // in the window: rest; the window wakes it
   if (!messages.length) {
     return block('agent-org: no new messages yet. End your turn again to keep waiting; you will be woken as soon as a message arrives.');
   }
   return deliver(me, messages);
 }
+
+/** The setting that holds the process id of a Stop hook listening for `role`'s mail ('' when none is). */
+export const listeningKey = (role: string): string => `listening:${role}`;
 
 export function stopWait(): number {
   const v = Number(process.env.AGENT_ORG_STOP_WAIT ?? STOP_WAIT);
