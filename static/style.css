@@ -550,7 +550,7 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .tb-needs-head { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0;
   color: var(--signal); font: inherit; font-size: 13px; cursor: pointer; }
 .tb-needs-head .chev { color: var(--faint); font-size: 11px; }
-.tb-list { display: flex; flex-direction: column; gap: 4px; max-height: 32vh; overflow-y: auto; }
+.tb-list { display: flex; flex-direction: column; gap: 4px; max-height: clamp(80px, 30vh - 50px, 240px); /* a short window keeps room for the tree */ overflow-y: auto; }
 .tb-need { --kind: var(--idle); display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; font-size: 13px;
   color: var(--ink); background: var(--term); border: 1px solid var(--edge); border-left: 3px solid var(--kind); border-radius: 10px; padding: 7px 12px; cursor: pointer; }
 .tb-need:hover { background: var(--sheet-2); }
