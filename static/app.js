@@ -34,6 +34,19 @@ function fill(el, ...kids) {
  * A dropdown of known choices (models, effort levels), with "Other…" to type any name.
  * `onchange(value)` gets the chosen text ('' = the program's default); `.read()` returns it too.
  */
+/** Give a select these [value, label] choices, keeping what is chosen; left alone when they are the same - the
+ * page updates many times a second while agents work, and refilling an open dropdown closes it under you. */
+function fillSelect(sel, choices, keep) {
+  const key = JSON.stringify(choices);
+  if (sel.dataset.choices !== key) {
+    sel.dataset.choices = key;
+    sel.replaceChildren(...choices.map(([value, label]) => h('option', { value }, label)));
+  }
+  const want = choices.some(([value]) => value === keep) ? keep : choices[0]?.[0] ?? '';
+  if (sel.value !== want) sel.value = want;
+  return sel.value;
+}
+
 function choiceField(value, options, { blank = 'default', onchange = () => {} } = {}) {
   const OTHER = '\u0000other';
   value = value || '';
@@ -531,6 +544,7 @@ function teamOrder() {
 }
 
 function renderChart() {
+  if (S.dragging) { S.redrawAfterDrag = true; return; } // the row you are dropping on stays
   const st = S.state;
   const item = (r, depth) => {
     const kids = rolesUnder(r.name);
@@ -599,12 +613,21 @@ function applyTeamMode() {
 }
 
 function renderTree() {
+  if (S.dragging) { S.redrawAfterDrag = true; return; }
   const st = S.state;
   if (!st || !L.tree || $('#view-team').hidden) return;
   const box = $('#tree-view');
   const [left, scrollTop, first] = [box.scrollLeft, box.scrollTop, !$('#team-tree').childElementCount];
   const looks = Object.fromEntries(st.roles.map((r) => [r.name, agentLook(r)]));
   renderTreeBar(looks);
+  // Most updates are one agent's new step: with the same team, only the cards that changed are drawn again (a
+  // whole redraw and its fitting took 11 ms with six agents, several times a second while they work).
+  const shape = JSON.stringify([st.owner, st.roles.map((r) => [r.name, r.superior, r.tier]), L.collapsed || [], box.clientWidth]);
+  if (shape === S.treeShape && !first) {
+    updateTreeCards(looks);
+    return;
+  }
+  S.treeShape = shape;
   drawTree(looks, false);
   if (!fitTree()) { // too wide even drawn smaller: people with nobody under them go in a column
     drawTree(looks, true);
@@ -648,6 +671,9 @@ const NEED_ORDER = ['asking', 'question', 'review', 'stuck', 'limit', 'blocked',
 
 function renderTreeBar(looks) {
   const st = S.state;
+  const key = JSON.stringify([st.roles.map((r) => looks[r.name].cls), st.problems, askingProblems(), st.roles.map((r) => costTokens(r.usage)), L.needsOpen]);
+  if (key === S.treeBarKey) return;
+  S.treeBarKey = key;
   const counts = {};
   for (const r of st.roles) counts[looks[r.name].cls] = (counts[looks[r.name].cls] || 0) + 1;
   const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'], ['paused', 'paused'],
@@ -662,7 +688,7 @@ function renderTreeBar(looks) {
       h('span', { class: 'grow' }),
       spent ? h('span', { class: 'tb-spent', title: 'Tokens the team has used, over every conversation' }, `${fmtNum(spent)} tokens`) : null),
     needs.length ? h('div', { class: 'tb-needs' },
-      h('button', { class: 'tb-needs-head', 'aria-expanded': String(open), onclick: () => { L.needsOpen = !open; saveLayout(); renderTreeBar(looks); } },
+      h('button', { class: 'tb-needs-head', 'aria-expanded': String(open), onclick: () => { L.needsOpen = !open; saveLayout(); S.treeBarKey = ''; renderTreeBar(looks); } },
         h('b', {}, needs.length === 1 ? 'One thing needs you' : `${needs.length} things need you`), h('span', { class: 'chev' }, open ? '▾' : '▸')),
       open ? h('div', { class: 'tb-list' }, needs.slice(0, 8).map(needItem),
         needs.length > 8 ? h('span', { class: 'muted small' }, `and ${needs.length - 8} more`) : null) : null)
@@ -697,6 +723,8 @@ function needItem(p) {
 
 function drawTree(looks, stacked) {
   const st = S.state;
+  S.treeCards = new Map(); // role -> { key, el }
+  S.treeFolded = new Map(); // manager -> its folded card
   const reached = new Set();
   const collapsed = new Set(L.collapsed || []);
   const branch = (r) => {
@@ -705,13 +733,23 @@ function drawTree(looks, stacked) {
     if (kids.length && collapsed.has(r.name)) {
       const below = subtreeOf(r.name);
       for (const k of below) reached.add(k.name);
-      return h('li', {}, treeNode(r, looks, kids.length), h('ul', {}, h('li', {}, folded(r, below, looks))));
+      const fold = folded(r, below, looks);
+      S.treeFolded.set(r.name, fold);
+      return h('li', {}, treeCard(r, looks, kids.length), h('ul', {}, h('li', {}, fold)));
     }
     const column = stacked && kids.length > 1 && kids.every((k) => !rolesUnder(k.name).length);
-    return h('li', {}, treeNode(r, looks, kids.length), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
+    return h('li', {}, treeCard(r, looks, kids.length), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
   };
   const top = rolesUnder(st.owner).map(branch);
   const lost = st.roles.filter((r) => !reached.has(r.name)).map(branch); // whoever reports to someone missing
+  const owner = ownerCard();
+  S.treeOwner = owner;
+  $('#team-tree').replaceChildren(h('li', {}, owner, top.length || lost.length ? h('ul', {}, top, lost) : null));
+}
+
+/** Your card at the top of the tree. */
+function ownerCard() {
+  const st = S.state;
   const owner = h('button', {
     class: 'node owner', title: 'Messages to you',
     onclick: () => { showTab('messages'); setFilter('me'); if (!L.side) { L.side = true; applyChrome(); saveLayout(); } },
@@ -720,7 +758,49 @@ function drawTree(looks, stacked) {
     st.owner_unread ? h('span', { class: 'pill hot', title: `${st.owner_unread} unread` }, st.owner_unread) : null),
   h('div', { class: 'model' }, st.owner_unread ? `${plural(st.owner_unread, 'message')} for you` : 'owner'));
   dropTarget(owner, st.owner);
-  $('#team-tree').replaceChildren(h('li', {}, owner, top.length || lost.length ? h('ul', {}, top, lost) : null));
+  return owner;
+}
+
+/** What a card shows, as one string: it is drawn again only when this changes. */
+function treeCardKey(r, looks, reports) {
+  const st = S.state;
+  return JSON.stringify([r, looks[r.name], st.problems.filter((p) => p.role === r.name),
+    st.tasks.filter((t) => t.assignee === r.name && ['working', 'open', 'blocked'].includes(t.state)).map((t) => [t.id, t.state, t.title, t.started_at]),
+    S.messages.findLast((m) => m.sender === r.name || m.recipient === r.name)?.id, st.launchable.includes(r.harness),
+    Boolean(L.collapsed?.includes(r.name)), reports, S.focus === r.name]);
+}
+
+function treeCard(r, looks, reports) {
+  const el = treeNode(r, looks, reports);
+  S.treeCards.set(r.name, { key: treeCardKey(r, looks, reports), el });
+  return el;
+}
+
+/** The same team: each card that changed is swapped for a new one, in place; the folded ones and yours are small
+ * and drawn again. The chart's shape and its fitting stay. */
+function updateTreeCards(looks) {
+  for (const r of S.state.roles) {
+    const had = S.treeCards?.get(r.name);
+    if (!had) continue; // folded away
+    const reports = rolesUnder(r.name).length;
+    const key = treeCardKey(r, looks, reports);
+    if (key === had.key) continue;
+    const el = treeNode(r, looks, reports);
+    had.el.replaceWith(el);
+    S.treeCards.set(r.name, { key, el });
+  }
+  for (const [name, el] of S.treeFolded || []) {
+    const r = findRole(name);
+    if (!r) continue;
+    const fresh = folded(r, subtreeOf(name), looks);
+    el.replaceWith(fresh);
+    S.treeFolded.set(name, fresh);
+  }
+  if (S.treeOwner) {
+    const fresh = ownerCard();
+    S.treeOwner.replaceWith(fresh);
+    S.treeOwner = fresh;
+  }
 }
 
 function toggleFold(name) {
@@ -842,6 +922,16 @@ setInterval(() => {
 }, 1000);
 
 for (const b of document.querySelectorAll('#team-mode button')) b.addEventListener('click', () => setTeamMode(b.dataset.mode === 'tree'));
+
+// A drag (a role from the palette, a teammate, a pane) holds the redraws that would replace what it is over
+document.addEventListener('dragstart', () => { S.dragging = true; });
+const dragOver = () => {
+  if (!S.dragging) return;
+  S.dragging = false;
+  if (S.redrawAfterDrag && S.state) { S.redrawAfterDrag = false; renderChart(); renderTree(); }
+};
+document.addEventListener('dragend', dragOver);
+document.addEventListener('drop', () => setTimeout(dragOver, 0)); // after the drop's own handler
 
 // ---------- agent panes ----------
 // Each agent has one pane, kept across refreshes (a live terminal must not be rebuilt):
@@ -1644,23 +1734,17 @@ function setFilter(f) {
 }
 
 function renderRoleFilter() {
-  const sel = $('#filter-role');
-  const keep = S.roleFilter;
-  sel.replaceChildren(h('option', { value: '' }, 'All roles'),
-    ...S.state.roles.map((r) => h('option', { value: r.name }, r.name)));
-  sel.value = findRole(keep) ? keep : '';
-  S.roleFilter = sel.value;
+  S.roleFilter = fillSelect($('#filter-role'), [['', 'All roles'], ...S.state.roles.map((r) => [r.name, r.name])], S.roleFilter);
 }
 
 function renderRecipients() {
   const sel = $('#to');
-  const keep = sel.value || S.state.leader;
   const task = S.compose === 'task';
-  sel.replaceChildren(
-    ...S.state.roles.filter((r) => !(task && r.tier)).map((r) =>
-      h('option', { value: r.name }, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader && r.name !== 'leader' ? ' (leader)' : ''}`)),
-    !task && h('option', { value: '@all' }, 'To everyone'));
-  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : S.state.leader;
+  const choices = S.state.roles.filter((r) => !(task && r.tier)).map((r) =>
+    [r.name, `To ${r.name}${r.tier ? ' (consultant)' : r.name === S.state.leader && r.name !== 'leader' ? ' (leader)' : ''}`]);
+  if (!task) choices.push(['@all', 'To everyone']);
+  const keep = choices.some(([v]) => v === sel.value) ? sel.value : S.state.leader;
+  fillSelect(sel, choices, keep);
 }
 
 function renderInboxBadge() {
@@ -1733,6 +1817,9 @@ function taskEl(t) {
 
 function renderLocks() {
   const locks = S.state.locks;
+  const key = JSON.stringify(locks);
+  if (key === S.locksKey) return; // the same files: the table (and a Release you are about to click) stays
+  S.locksKey = key;
   $('#files-count').textContent = locks.length ? `(${locks.length})` : '';
   $('#locks').replaceChildren(...(locks.length
     ? locks.map((l) => h('tr', {},

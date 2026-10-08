@@ -22,12 +22,10 @@ function renderBoard() {
   $('#board-count').textContent = open.length ? `(${open.length})` : '';
   S.boardStale = $('#view-board').hidden; // drawn when it shows
   if (S.boardStale) return;
-  const sel = $('#board-role');
-  const keep = sel.value;
-  sel.replaceChildren(h('option', { value: '' }, 'Everyone'),
-    ...S.state.roles.filter((r) => !r.tier).map((r) => h('option', { value: r.name }, r.name)));
-  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
-  const who = sel.value;
+  const who = fillSelect($('#board-role'), [['', 'Everyone'], ...S.state.roles.filter((r) => !r.tier).map((r) => [r.name, r.name])], $('#board-role').value);
+  const key = JSON.stringify([tasks, who]);
+  if (key === S.boardKey) return; // the same tasks: the board (and the card under your pointer) stays
+  S.boardKey = key;
   const mine = (t) => !who || t.assignee === who || t.assigner === who;
   $('#board').replaceChildren(...COLUMNS.map((col) => {
     let items = tasks.filter((t) => col.states.includes(t.state) && mine(t));
