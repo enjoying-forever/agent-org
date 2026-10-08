@@ -726,7 +726,9 @@ button.taskc { text-align: left; cursor: pointer; }
 .ev .eicon { width: 14px; text-align: center; color: var(--faint); }
 .ev.watch .eicon, .ev.safety .eicon { color: var(--danger); }
 .ev.task .eicon { color: var(--task); }
-.ev button.link { text-align: left; }
+.ev b { white-space: nowrap; }
+.ev button.link { text-align: left; color: var(--ink); }
+.ev button.link:hover { color: var(--accent-ink); text-decoration: underline; }
 
 /* stuck agents, moving tasks */
 .stuck-badge { display: inline-block; margin-top: 2px; padding: 1px 8px; border-radius: 5px; font-size: 12px;
