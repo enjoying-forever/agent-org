@@ -373,12 +373,13 @@ body.dragging-y, body.dragging-y * { cursor: row-resize !important; user-select:
 .state { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--state, var(--idle)); }
 .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--state, var(--idle)); }
 .state.working { --state: var(--working); }
-.state.working::before { animation: pulse 1.6s ease-in-out infinite; }
 .state.waiting { --state: var(--waiting); }
 .state.idle { --state: var(--idle); }
 .state.blocked { --state: var(--blocked); }
 .state.done { --state: var(--done); }
-@keyframes pulse { 50% { opacity: .3; } }
+/* No endless animation anywhere (a pulsing "working" dot was one): the window draws without the GPU, and a pulse
+   repainted it some 60 times a second - 12-40% of a core while agents worked; blinking once a second, still 7%. The
+   green and the word say it. */
 
 .badge { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent);
   font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -603,7 +604,7 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .node .acts .when { flex-shrink: 0; font-family: var(--font-ui); font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .node .acts > .running .when { color: var(--working); font-weight: 600; }
 .node .acts > .running .what::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: var(--working); vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
+  background: var(--working); vertical-align: 1px; }
 .node .task, .node .last { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node .task b { color: var(--ink); font-weight: 600; }
 .node .facts { display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: 11.5px; color: var(--faint); }
