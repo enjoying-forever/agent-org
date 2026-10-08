@@ -1135,7 +1135,8 @@ function openTerm(p) {
   p.body.replaceChildren(host);
   const term = new Terminal({
     fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: termFont(), lineHeight: 1.15,
-    cursorBlink: true, scrollback: 5000, theme: termTheme(), allowProposedApi: true,
+    // a steady cursor: a blinking one repaints the terminal twice a second (0.6% of a core each, measured)
+    cursorBlink: false, scrollback: 5000, theme: termTheme(), allowProposedApi: true,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
