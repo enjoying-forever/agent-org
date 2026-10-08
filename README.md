@@ -77,7 +77,7 @@ agent carries on where it stopped.
   console - with buttons to give it a task, start, restart or stop it, and its details (notes,
   files, usage). An agent that is not running shows a summary instead: its program and model, what
   it does, and its recent messages.
-- **Terminals or Tree:** the switch at the top of the Team page shows either every agent's terminal
+- **Terminals or Tree:** the switch at the top of the Team page (or Ctrl+Alt+T) shows either every agent's terminal
   or the team as a tree, for when you would rather not watch them all. Above the tree, the team at a
   glance (how many work, wait, ask you or are not running) and **what needs you**: a question for
   you, a task waiting for your review, a terminal asking something, a stuck agent, one with work

@@ -391,6 +391,7 @@ const SHORTCUTS = [
   ['Ctrl+Alt+1 … 9', 'Go to pane 1 to 9'],
   ['Ctrl+Alt+← / →', 'Previous / next pane'],
   ['Ctrl+Alt+Enter', 'Full screen for this pane, or back'],
+  ['Ctrl+Alt+T', 'Terminals or Tree'],
   ['Ctrl+Alt+B', 'Show or hide the sidebar'],
   ['Ctrl+Alt+M', 'Show or hide the messages'],
   ['Ctrl+Alt+= / - / 0', 'Bigger, smaller or normal text in the terminals (or Ctrl+wheel over one)'],
@@ -400,7 +401,7 @@ const SHORTCUTS = [
 
 function isShortcut(e) {
   return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey
-    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyM', 'Equal', 'Minus',
+    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyT', 'KeyB', 'KeyM', 'Equal', 'Minus',
       'NumpadAdd', 'NumpadSubtract'].includes(e.code));
 }
 
@@ -420,6 +421,7 @@ document.addEventListener('keydown', (e) => {
   if (!isShortcut(e) || S.mode !== 'team' || !S.state) return;
   e.preventDefault();
   e.stopPropagation();
+  if (e.code === 'KeyT') { showView('team'); setTeamMode(!L.tree); if (!L.tree && S.focus) goToPane(S.focus); return; }
   if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
   if (e.code === 'KeyM') { L.side = !L.side; applyChrome(); saveLayout(); return; }
   if (['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0'].includes(e.code)) {
