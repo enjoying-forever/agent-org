@@ -235,6 +235,18 @@ test('an idle agent without mail is left alone', (t) => {
   assert.deepEqual(term.got, []);
 });
 
+test('a task that just came is handed over by read_inbox, not found by searching for it', (t) => {
+  // seen live: told "unfinished work" for a task still unread, a new leader spent three calls finding it
+  const { hub } = setup(t);
+  hub.session('leader').assignTask('researcher', 'Compare the two libraries');
+  const w = makeWaker();
+  const sent = Date.now() / 1000;
+  const term = new FakeTerm(sent);
+  assert.deepEqual(w.tick(hub, host({ researcher: term }), sent + 1), []); // it just came: a moment
+  assert.deepEqual(w.tick(hub, host({ researcher: term }), sent + waker.UNREAD_FOR + 1), ['researcher']);
+  assert.ok(term.got[0].includes('read_inbox') && !term.got[0].includes('unfinished'), term.got[0]);
+});
+
 test('a restarted agent with unfinished tasks carries on, once', (t) => {
   const { hub } = setup(t);
   const task = hub.session('leader').assignTask('researcher', 'Compare the two libraries');

@@ -112,6 +112,8 @@ export class Waker {
       if (oldest !== wokenFor) times = 0; // other mail than last time: it did read what it was woken for
       if (now - (this.typedAt.get(term.id) ?? 0) < Math.min(AGAIN * 2 ** times, MOST)) continue;
       const firstLook = !this.started.has(term.id);
+      if (since !== null && now - since < UNREAD_FOR) continue; // mail just came: in a moment it gets "read_inbox", which
+      // hands over the whole task (told "unfinished work" instead, an agent spent three calls finding it - seen live)
       this.started.add(term.id);
       let line: string;
       let tasks: string[];
