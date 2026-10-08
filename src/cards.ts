@@ -27,12 +27,15 @@ export function roleCard(me: RoleSession, resumed = false): string {
   const peers = me.peers(team);
   if (peers.length) lines.push(`Your peers (same superior): ${peers.join(', ')}`);
   lines.push('The whole team (who reports to whom):');
-  for (const name of [team.leader, ...team.subtreeOf(team.leader)]) {
+  // depth first, each under its own superior (in the order nearest first, worker-a printed after researcher read
+  // as researcher's: the card showed every agent a wrong chart)
+  const walk = (name: string, depth: number): void => {
     const r = team.roles[name];
-    const depth = team.chainOf(name).length;
     const you = name === me.name ? '  <- you' : '';
     lines.push(`${'  '.repeat(depth)}- ${name} (${r.harness}): ${r.duties || '-'}${you}`);
-  }
+    for (const sub of team.subordinatesOf(name)) walk(sub, depth + 1);
+  };
+  walk(team.leader, team.chainOf(team.leader).length);
   const scope = role ? role.write_scope.join(', ') : 'everything';
   lines.push(`Files you may write: ${scope || 'none - you do not edit files'}`);
   if (me.hub.branches) {

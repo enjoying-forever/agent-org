@@ -200,6 +200,15 @@ test('the role card carries the law and where you left off', (t) => {
   assert.ok(card.includes('[task] tech-lead -> worker-a: Task #1: Build the form'));
 });
 
+test("the role card's chart shows each agent under its own superior", (t) => {
+  // it listed the team nearest first: worker-a and worker-b, after researcher, read as researcher's
+  const { hub } = makeHub(t);
+  const card = roleCard(hub.session('worker-a'));
+  const chart = card.slice(card.indexOf('The whole team'), card.indexOf('Files you may write')).split('\n').slice(1, -1)
+    .map((l) => l.replace(/ \(.*$/, ''));
+  assert.deepEqual(chart, ['  - leader', '    - tech-lead', '      - worker-a', '      - worker-b', '    - researcher']);
+});
+
 test('a new role has nothing to recall', (t) => {
   const { hub } = makeHub(t);
   assert.ok(!roleCard(hub.session('researcher')).includes('WHERE YOU LEFT OFF'));
