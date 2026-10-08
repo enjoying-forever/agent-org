@@ -527,10 +527,10 @@ function renderChart() {
   const owner = h('li', {}, ownerRow);
   $('#chart').replaceChildren(owner, ...rolesUnder(st.owner).map((r) => item(r, 0)));
   const running = st.roles.filter((r) => r.online).length;
-  const spent = st.roles.reduce((sum, r) => sum + totalTokens(r.usage), 0);
+  const spent = st.roles.reduce((sum, r) => sum + costTokens(r.usage), 0);
   $('#rail-summary').textContent = `${running} of ${st.roles.length} running${spent ? ` · ${fmtNum(spent)} tokens` : ''}`;
   $('#rail-summary').title = st.roles.filter((r) => totalTokens(r.usage))
-    .map((r) => `${r.name}: ${fmtNum(totalTokens(r.usage))} tokens`).join('\n');
+    .map((r) => `${r.name}: ${fmtNum(costTokens(r.usage))} tokens (new in and out)`).join('\n');
 }
 
 function focusPane(name) {
@@ -621,7 +621,7 @@ function renderTreeBar(looks) {
     ['waiting', 'waiting'], ['idle', 'idle'], ['off', 'not running']].filter(([k]) => counts[k]);
   const needs = [...st.problems.filter((p) => p.kind !== 'limit'), ...askingProblems().map((p) => ({ ...p, kind: 'asking' }))]
     .sort((a, b) => NEED_ORDER.indexOf(a.kind) - NEED_ORDER.indexOf(b.kind));
-  const spent = st.roles.reduce((sum, r) => sum + totalTokens(r.usage), 0);
+  const spent = st.roles.reduce((sum, r) => sum + costTokens(r.usage), 0);
   const open = L.needsOpen ?? true;
   fill($('#tree-bar'),
     h('div', { class: 'tb-team' },
@@ -1333,18 +1333,21 @@ function fmtNum(n) {
   return String(n);
 }
 
-// An agent's usage over every conversation it has had: tokens in (new), read from the cache (which
-// counts for less on most subscriptions) and out.
+// An agent's usage over every conversation it has had: tokens in (new), read from the cache and out. What is
+// shown is new in and out - what a subscription counts in full; the cache is read again on every model call,
+// so counting it made a small task look like 173k tokens (seen live: 24k new in and out, the rest cache reads).
 const totalTokens = (u) => (u ? u.tokens_in + u.tokens_cached + u.tokens_out : 0);
+const costTokens = (u) => (u ? u.tokens_in + u.tokens_out : 0);
 
 function usageText(u) {
   if (!totalTokens(u)) return `${plural(u.messages, 'message')}${u.model ? ` on ${u.model}` : ''}`;
   const convs = u.conversations > 1 ? ` in ${u.conversations} conversations` : '';
-  return `Used ${fmtNum(totalTokens(u))} tokens${convs}: ${fmtNum(u.tokens_in)} new in, ${fmtNum(u.tokens_cached)} `
-    + `cached in, ${fmtNum(u.tokens_out)} out, over ${plural(u.messages, 'model call')}${u.model ? ` (${u.model})` : ''}`;
+  return `${fmtNum(costTokens(u))} tokens${convs}: ${fmtNum(u.tokens_in)} new in, ${fmtNum(u.tokens_out)} out, over `
+    + `${plural(u.messages, 'model call')}${u.model ? ` (${u.model})` : ''}; and ${fmtNum(u.tokens_cached)} read again from the `
+    + 'cache, which counts for much less';
 }
 
-const shortUsage = (u) => (totalTokens(u) ? `${fmtNum(totalTokens(u))} tok` : `${u.messages} msg`);
+const shortUsage = (u) => (totalTokens(u) ? `${fmtNum(costTokens(u) || totalTokens(u))} tok` : `${u.messages} msg`);
 
 function runningEl(r) {
   if (!r.online) return h('span', { class: 'run off', title: 'No session of this role is running' }, 'not running');
@@ -1463,10 +1466,17 @@ function notifyOwner(list) {
   try {
     if (Notification.permission === 'granted') {
       const m = mine[mine.length - 1];
-      new Notification(`agent-org: ${m.kind === 'help' ? 'question' : 'message'} from ${m.sender}`,
+      const n = new Notification(`agent-org: ${m.kind === 'help' ? 'question' : 'message'} from ${m.sender}`,
         { body: m.text.slice(0, 180) });
+      n.onclick = () => { comeBack(); jumpTo(m.id); };
     }
   } catch { /* notifications unavailable */ }
+}
+
+/** A notification was clicked: the window comes to the front. */
+function comeBack() {
+  window.focus();
+  api('/api/window', { action: 'show' }).catch(() => {}); // a hidden window: agent-org shows it
 }
 
 function visible(m) {
