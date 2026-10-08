@@ -280,7 +280,10 @@ export class Hub {
         gitops.init(root);
         this.event('git', this.baseTeam.owner, 'turned history on: each agent works on its own branch');
       }
-      return gitops.ensureWorktree(root, this.branchRole(role));
+      const [wt, fromMain] = gitops.ensureWorktree(root, this.branchRole(role));
+      // a copy just made from main has main already: its first task needs no merge (it cost eight git calls)
+      if (fromMain) this.store.setSetting(`synced:${this.branchRole(role)}`, fromMain);
+      return wt;
     } catch (e) {
       if (isGitError(e)) throw new HubError(`could not set up ${role}'s copy of the project: ${(e as Error).message}`);
       throw e;

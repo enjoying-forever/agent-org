@@ -51,8 +51,15 @@ export function gitProgram(): [string, Record<string, string>] {
   return program;
 }
 
+/** How many git processes ran, and for how long (each is a process start: some 30-50 ms on Windows); `log`, when an
+ * array, gets each one's arguments - for finding which an operation could do without. */
+export const gitStats: { calls: number; ms: number; log: string[] | null } = { calls: 0, ms: 0, log: null };
+
 export function git(root: string, args: string[], opts: { check?: boolean; env?: Record<string, string>; timeout?: number } = {}): GitResult {
   const [command, env] = gitProgram();
+  const started = performance.now();
+  gitStats.calls += 1;
+  gitStats.log?.push(args.join(' '));
   const r = spawnSync(command, ['-C', root, ...args], {
     encoding: 'utf8', timeout: (opts.timeout ?? 60) * 1000, env: { ...process.env, ...env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 * 1024 * 1024,
@@ -61,6 +68,7 @@ export function git(root: string, args: string[], opts: { check?: boolean; env?:
     const code = (r.error as NodeJS.ErrnoException).code;
     throw new GitError(code === 'ENOENT' ? 'git is not installed' : `git ${args[0]}: ${r.error.message}`);
   }
+  gitStats.ms += performance.now() - started;
   const result = { returncode: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
   if (opts.check && result.returncode !== 0) {
     throw new GitError(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim().slice(0, 400)}`);
@@ -169,6 +177,13 @@ const MARKER = /^(<{7}|>{7})( |$)/m;
 
 /** The branch the project folder has checked out: the team's main line. */
 export function mainBranch(root: string): string {
+  const dir = gitDirOf(root);
+  try { // read from its HEAD file, as mainHead does: no git process
+    const m = dir === null ? null : /^ref: refs\/heads\/(\S+)$/.exec(readFileSync(path.join(dir, 'HEAD'), 'utf8').trim());
+    if (m) return m[1];
+  } catch {
+    // ask git
+  }
   const name = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
   if (!name || name === 'HEAD') throw new GitError(`${root} is not on a branch; check one out (for example: git switch main)`);
   return name;
@@ -194,27 +209,87 @@ export function mainHead(root: string): [string, string] | null {
 }
 
 export function head(root: string, ref = 'HEAD'): string {
+  const read = readRef(root, ref);
+  if (read !== null) return read;
   return git(root, ['rev-parse', '--verify', '--quiet', ref]).stdout.trim();
+}
+
+/** A worktree's (or the main folder's) own git folder: .git itself, or where the .git file of a worktree points. */
+function gitDirOf(root: string): string | null {
+  const dotGit = path.join(root, '.git');
+  try {
+    if (statSync(dotGit).isDirectory()) return dotGit;
+    const m = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+    return m ? path.resolve(root, m[1].trim()) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The commit `ref` names in the repository at `root`, read from git's own files as git would answer - each git
+ * process costs 100 ms or more on Windows, and one task landing asked six times. '' when it does not exist (a
+ * merge head after the merge, an unborn branch); null when the files cannot answer (then ask git). */
+export function readRef(root: string, ref: string): string | null {
+  const dir = gitDirOf(root);
+  if (dir === null) return null;
+  try {
+    const sha = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+    if (ref === 'MERGE_HEAD') { // the worktree's own: there while a merge waits
+      const file = path.join(dir, 'MERGE_HEAD');
+      return existsSync(file) ? readFileSync(file, 'utf8').split(/\r?\n/)[0].trim() : '';
+    }
+    const common = existsSync(path.join(dir, 'commondir')) ? path.resolve(dir, readFileSync(path.join(dir, 'commondir'), 'utf8').trim()) : dir;
+    let name = ref;
+    if (ref === 'HEAD') {
+      const text = readFileSync(path.join(dir, 'HEAD'), 'utf8').trim();
+      if (sha.test(text)) return text; // detached
+      const m = /^ref: (refs\/\S+)$/.exec(text);
+      if (m === null) return null;
+      name = m[1];
+    } else if (!ref.startsWith('refs/')) {
+      if (!/^[\w./-]+$/.test(ref) || ref.includes('..')) return null; // anything fancier (HEAD~1, a hash): git
+      name = `refs/heads/${ref}`;
+    }
+    if (!/^refs\/heads\/[\w./-]+$/.test(name) || name.includes('..')) return null;
+    const loose = path.join(common, ...name.split('/'));
+    if (existsSync(loose)) {
+      const text = readFileSync(loose, 'utf8').trim();
+      return sha.test(text) ? text : null;
+    }
+    const packedFile = path.join(common, 'packed-refs');
+    const packed = existsSync(packedFile) ? readFileSync(packedFile, 'utf8').split(/\r?\n/).find((l) => l.endsWith(` ${name}`)) : undefined;
+    if (packed) return packed.split(' ')[0];
+    return ref === 'HEAD' ? '' : null; // HEAD on a branch with no commit yet: ''; a branch not found: let git say
+  } catch {
+    return null;
+  }
 }
 
 export function worktreePath(root: string, role: string): string {
   return path.join(root, '.agent-org', 'worktrees', role);
 }
 
-/** The role's own copy of the project, on branch agent/<role> (made from main the first time). */
-export function ensureWorktree(root: string, role: string): string {
+/** The role's own copy of the project, on branch agent/<role> (made from main the first time): [its folder, the
+ * main commit it was just made from ('' when it already was there, or was made from its own older branch)]. */
+export function ensureWorktree(root: string, role: string): [string, string] {
   const wt = worktreePath(root, role);
   if (existsSync(path.join(wt, '.git'))) {
     excludeJunk(root);
-    return wt;
+    return [wt, ''];
   }
   const branch = BRANCH_PREFIX + role;
+  let fromMain = '';
   git(root, ['worktree', 'prune']);
-  if (head(root, `refs/heads/${branch}`)) git(root, ['worktree', 'add', wt, branch], { check: true });
-  else git(root, ['worktree', 'add', '-b', branch, wt, mainBranch(root)], { check: true });
+  if (head(root, `refs/heads/${branch}`)) {
+    git(root, ['worktree', 'add', wt, branch], { check: true });
+  } else {
+    const main = mainBranch(root);
+    fromMain = head(root, main);
+    git(root, ['worktree', 'add', '-b', branch, wt, main], { check: true });
+  }
   git(root, ['config', 'merge.conflictStyle', 'zdiff3']); // conflicts show the common base too
   excludeJunk(root);
-  return wt;
+  return [wt, fromMain];
 }
 
 const JUNK = ['__pycache__/', '*.pyc', '*.pyo', '.pytest_cache/', '.mypy_cache/', '.ruff_cache/', 'node_modules/',
@@ -301,7 +376,8 @@ export function sync(wt: string, main: string, abortOnConflict: boolean): [strin
     if (abortOnConflict) git(wt, ['merge', '--abort']);
     return [[], why];
   }
-  const changed = before ? lines(git(wt, ['diff', '--name-only', before, 'HEAD']).stdout) : [];
+  const after = head(wt);
+  const changed = before && after !== before ? lines(git(wt, ['diff', '--name-only', before, 'HEAD']).stdout) : []; // nothing came in: no need to ask
   return [changed, []];
 }
 

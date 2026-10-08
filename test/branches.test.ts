@@ -228,6 +228,46 @@ test("main's head is read from the repository's files, as git would answer", asy
   assert.equal(gitops.mainHead(root), null); // not on a branch: git is asked instead
 });
 
+test("refs are read from git's own files, as git would answer, in the main folder and the copies", async (t) => {
+  const hub = makeHub(t);
+  const a = start(hub, 'worker-a');
+  const b = start(hub, 'worker-b');
+  const root = hub.baseTeam.project_root;
+  const main = gitops.mainBranch(root);
+  const rev = (where: string, ref: string): string => {
+    try {
+      return git(where, 'rev-parse', '--verify', '--quiet', ref).trim();
+    } catch {
+      return ''; // git says it does not exist
+    }
+  };
+  const same = (label: string): void => {
+    for (const [where, ref] of [[root, 'HEAD'], [root, main], [a.wt, 'HEAD'], [b.wt, 'HEAD'], [root, 'refs/heads/agent/worker-a'],
+      [a.wt, main], [a.wt, 'MERGE_HEAD'], [b.wt, 'MERGE_HEAD']] as [string, string][]) {
+      assert.equal(gitops.readRef(where, ref) ?? rev(where, ref), rev(where, ref), `${label}: ${ref} in ${path.basename(where)}`);
+    }
+  };
+  assert.equal(main, git(root, 'rev-parse', '--abbrev-ref', 'HEAD').trim());
+  same('at the start');
+  assert.notEqual(gitops.readRef(a.wt, 'HEAD'), null); // a copy's .git is a file pointing at its own git folder: read too
+  edit(a.wt, 'return 1', "return 'from a'");
+  await hub.session('worker-a').finishTask(a.task.id, 'done'); // main moves on
+  same('after a landing');
+  edit(b.wt, 'return 1', "return 'from b'"); // the same line: merging main into b conflicts
+  gitops.commitAll(b.wt, 'b');
+  gitops.sync(b.wt, main, false);
+  assert.ok(gitops.merging(b.wt));
+  same('during a merge');
+  git(b.wt, 'merge', '--abort');
+  assert.ok(!gitops.merging(b.wt));
+  same('after it');
+  git(root, 'pack-refs', '--all');
+  same('with the refs packed');
+  git(a.wt, 'checkout', '-q', '--detach');
+  same('a copy detached');
+  assert.equal(gitops.readRef(root, 'HEAD~1'), null); // anything fancier is git's to answer
+});
+
 test('a copy whose main has not moved costs no git calls', (t) => {
   const hub = makeHub(t);
   start(hub, 'worker-a');
