@@ -13,6 +13,7 @@
 
 import { SERVER_NAME } from './cards.ts';
 import type { Hub, RoleSession } from './hub.ts';
+import { logFault } from './runtime.ts';
 import type { Terminal, TerminalHost } from './terminals.ts';
 
 export const EVERY = 1.0; // seconds between looks (each costs about a millisecond)
@@ -123,7 +124,7 @@ export class Waker {
       }
       this.typedAt.set(term.id, now);
       this.tries.set(term.id, [oldest, times + 1]);
-      void this.typeLine(term, line);
+      void Promise.resolve(this.typeLine(term, line)).catch((e) => logFault('waker', e)); // its terminal may close meanwhile
       hub.event('agent', name, `woken: ${line.includes('unfinished work') ? 'unfinished work' : 'new messages'}`);
       woken.push(name);
     }

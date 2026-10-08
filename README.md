@@ -473,6 +473,9 @@ the work.
 
 ## Troubleshooting
 
+- **Something went wrong that nothing explains:** faults nothing else caught - in the window or in an
+  agent's tool server - are written to `~/.agent-org/errors.log` (with the time and the process), and
+  the window or server carries on instead of stopping. Include it when you report a problem.
 - **The Setup check shows a ✗:** it says what to run. The most common: Grok not signed
   in (`grok login`), or a Claude Code update that did not finish (the check gives the
   repair command).

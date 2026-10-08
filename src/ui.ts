@@ -25,7 +25,7 @@ import * as gitops from './gitops.ts';
 import { BRANCH_RULE, describeStuck, Hub, HubError, LAW } from './hub.ts';
 import * as launch from './launch.ts';
 import * as presets from './presets.ts';
-import { CODE_DIR, inTest, which } from './runtime.ts';
+import { CODE_DIR, inTest, keepRunningOnFaults, which } from './runtime.ts';
 import type { Lock, Message, Task } from './store.ts';
 import { dumpYaml, HARNESSES, parseYaml, Team, TeamError } from './team.ts';
 import * as templates from './templates.ts';
@@ -1561,4 +1561,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   return 0;
 }
 
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) process.exit(await main());
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
+  keepRunningOnFaults('agent-org');
+  process.exit(await main());
+}

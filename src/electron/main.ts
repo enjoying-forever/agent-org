@@ -8,6 +8,7 @@
 
 import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, session, shell } from 'electron';
 import path from 'node:path';
+import { keepRunningOnFaults } from '../runtime.ts';
 import { TeamError } from '../team.ts';
 import * as ui from '../ui.ts';
 
@@ -165,6 +166,8 @@ async function start(): Promise<void> {
 
   await win.loadURL(control.signIn?.() ?? served.base);
 }
+
+keepRunningOnFaults('window'); // a stray fault goes to errors.log, not an error box over the work
 
 if (!app.requestSingleInstanceLock()) {
   app.quit(); // the first agent-org shows its window instead

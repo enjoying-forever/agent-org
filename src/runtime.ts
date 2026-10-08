@@ -178,6 +178,40 @@ export function registryValues(key: string): Record<string, { type: string; valu
   return values;
 }
 
+const FAULTS_MAX = 1_000_000; // bytes errors.log may grow to before its older half goes
+
+/** Note a fault nothing else caught - a rejected promise nobody awaited, an exception out of a timer - in
+ * <agent-org home>/errors.log (and on stderr), instead of an error box or the process ending. */
+export function logFault(where: string, e: unknown): void {
+  const text = `${new Date().toISOString()} [${where}, pid ${process.pid}] ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`;
+  try {
+    process.stderr.write(text);
+  } catch {
+    // no stderr (a window's main process)
+  }
+  try {
+    const home = process.env.AGENT_ORG_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', '.agent-org');
+    const file = path.join(home, 'errors.log');
+    mkdirSync(home, { recursive: true });
+    let kept = '';
+    try {
+      kept = readFileSync(file, 'utf8');
+    } catch {
+      // the first
+    }
+    if (kept.length > FAULTS_MAX) kept = kept.slice(-FAULTS_MAX / 2);
+    writeFileSync(file, kept + text, 'utf8');
+  } catch {
+    // only stderr has it
+  }
+}
+
+/** In a process that must outlive a fault (the window, an agent's tool server): log what nothing caught. */
+export function keepRunningOnFaults(where: string): void {
+  process.on('unhandledRejection', (e) => logFault(`${where}: unhandled rejection`, e));
+  process.on('uncaughtException', (e) => logFault(`${where}: uncaught exception`, e));
+}
+
 /** Whether this runs inside agent-org's tests, which must never start real agents or change real programs. */
 export function inTest(): boolean {
   return Boolean(process.env.NODE_TEST_CONTEXT || process.env.AGENT_ORG_TESTING);
