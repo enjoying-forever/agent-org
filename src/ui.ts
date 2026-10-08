@@ -506,6 +506,44 @@ export class App {
     return [...this.hosts.values()].flatMap((h) => Object.entries(h.listing()).filter(([, t]) => t.alive).map(([n]) => n));
   }
 
+  // What the page remembers (its theme, each team's pane layout, the terminals' font size...). The browser's own
+  // storage took a second for its first read in a fresh window, before anything was drawn; agent-org keeps
+  // these in its home folder instead and hands them over inside the page.
+
+  private prefsCache: Record<string, string> | null = null;
+
+  /** The page's preferences, and whether any were ever saved. */
+  prefs(): [Record<string, string>, boolean] {
+    if (this.prefsCache === null) {
+      try {
+        const found = JSON.parse(readFileSync(prefsFile(), 'utf8'));
+        this.prefsCache = typeof found === 'object' && found !== null && !Array.isArray(found)
+          ? Object.fromEntries(Object.entries(found).filter(([k, v]) => typeof v === 'string' && !forGoneTeam(k))) as Record<string, string> : {};
+      } catch {
+        return [{}, false];
+      }
+    }
+    return [this.prefsCache, true];
+  }
+
+  /** Remember one preference (a null value forgets it). */
+  setPref(body: Body): Json {
+    const key = str(body, 'key');
+    const value = body.value === null || body.value === undefined ? null : String(body.value);
+    if (!/^agent-org-[^\x00-\x1f]{1,600}$/.test(key)) throw new ApiError('not a preference of this page'); // a team's path is in some
+    if (value !== null && value.length > MAX_PREF) throw new ApiError('too long');
+    if (forGoneTeam(key)) return {}; // a team that is no more (a layout moved over from the browser)
+    const [prefs] = this.prefs();
+    const next = { ...prefs };
+    if (value === null) delete next[key];
+    else next[key] = value;
+    if (Object.keys(next).length > MAX_PREFS) throw new ApiError('too many preferences');
+    mkdirSync(path.dirname(prefsFile()), { recursive: true });
+    writeFileSync(prefsFile(), JSON.stringify(next), 'utf8');
+    this.prefsCache = next;
+    return {};
+  }
+
   windowAction(body: Body): Json {
     const action = str(body, 'action');
     if (action === 'hide') this.window.hide();
@@ -1136,7 +1174,7 @@ export const POST_ROUTES: Record<string, Route> = {
   '/api/role-place': post(App.prototype.rolePlace), '/api/role-reset': post(App.prototype.roleReset),
   '/api/role-restore': post(App.prototype.roleRestore),
   '/api/term-input': post(App.prototype.termInput), '/api/term-resize': post(App.prototype.termResize), '/api/open-url': post(App.prototype.openUrl),
-  '/api/window': post(App.prototype.windowAction),
+  '/api/window': post(App.prototype.windowAction), '/api/prefs': post(App.prototype.setPref),
   '/api/teammate': post(App.prototype.teammateUpdate), '/api/teammate-remove': post(App.prototype.teammateRemove),
 };
 
@@ -1300,6 +1338,12 @@ function handler(app: App, access: Access, port: () => number): http.RequestList
     if (!name || name.includes('/') || name.includes('\\') || name.includes('..') || type === undefined || !isFile(file)) {
       return send(req, res, 404, 'not found', 'text/plain');
     }
+    if (name === 'index.html' && access.cookieOk(header(req, 'Cookie') ?? '')) { // signed in: the page's preferences go in with it
+      const [prefs, saved] = app.prefs(); // as data the page reads (a script there would need the policy loosened)
+      const data = JSON.stringify({ prefs, saved }).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+      const html = readFileSync(file, 'utf8').replace('<head>', `<head>\n  <meta name="agent-org-prefs" content="${data}">`);
+      return send(req, res, 200, html, type);
+    }
     send(req, res, 200, readFileSync(file), type);
   };
 
@@ -1429,6 +1473,16 @@ export function windowGeometry(state: WindowState, screens: [number, number, num
 
 /** Where a running agent-org says how a second start can reach it. */
 export const instanceFile = (): string => path.join(templates.homeDir(), 'instance.json');
+export const prefsFile = (): string => path.join(templates.homeDir(), 'page.json');
+const MAX_PREF = 20_000; // characters in one preference (a team's layout is some hundreds)
+
+/** A preference kept for one team (its layout, a guide hidden: 'agent-org-...:<team.yaml>') whose team.yaml is gone. */
+function forGoneTeam(key: string): boolean {
+  const at = key.indexOf(':');
+  const team = at < 0 ? '' : key.slice(at + 1);
+  return /team\.ya?ml$/i.test(team) && !existsSync(team);
+}
+const MAX_PREFS = 500;
 
 export function writeInstance(port: number, launcher: string): void {
   try {

@@ -60,6 +60,38 @@ function choiceField(value, options, { blank = 'default', onchange = () => {} } 
 // no script (this one included) can read. Every request adds the page's own header.
 const PAGE_HEADERS = { 'X-Agent-Org': '1' };
 
+// What this page remembers - its theme, each team's pane layout, the terminals' font size, a guide hidden - kept
+// by agent-org in its home folder and handed over inside the page. The browser's own storage took a second for
+// its first read in a fresh window, before anything was drawn.
+const PREFS = (() => {
+  try { return JSON.parse(document.querySelector('meta[name="agent-org-prefs"]')?.content || 'null'); } catch { return null; }
+})() ?? { prefs: {}, saved: false };
+const pref = (key) => (Object.hasOwn(PREFS.prefs, key) ? PREFS.prefs[key] : null);
+const prefTimers = {};
+function setPref(key, value) {
+  if (value === null) delete PREFS.prefs[key];
+  else PREFS.prefs[key] = String(value);
+  clearTimeout(prefTimers[key]); // a border being dragged: saved once it settles
+  prefTimers[key] = setTimeout(() => { api('/api/prefs', { key, value }).catch(() => {}); }, 300);
+}
+
+/** Once, for a page that remembered things in the browser's storage before: they move to agent-org. Read after
+ * the page is up, so its slow first read costs nothing at the start. */
+function movePrefs() {
+  if (PREFS.saved || movePrefs.done) return;
+  movePrefs.done = true;
+  setTimeout(() => {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('agent-org-') && pref(key) === null) setPref(key, localStorage.getItem(key));
+      }
+    } catch { /* nothing to move */ }
+    PREFS.saved = true;
+    if (pref('agent-org-theme')) applyTheme(pref('agent-org-theme'));
+  }, 3000);
+}
+
 class NoTeam extends Error {}
 
 async function api(path, body) {
@@ -234,7 +266,7 @@ function applyState(state) {
   renderRoleFilter();
   renderInboxBadge();
   if (S.selected) renderDrawer();
-  if (first) { renderFeed('bottom'); tellWindowTheme(); }
+  if (first) { renderFeed('bottom'); tellWindowTheme(); movePrefs(); }
 }
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
@@ -274,6 +306,7 @@ function enterHome() {
   document.title = 'agent-org';
   renderHome();
   tellWindowTheme();
+  movePrefs();
 }
 
 async function renderHome() {
@@ -431,12 +464,12 @@ function renderGuide() {
   const g = $('#guide');
   const key = `agent-org-guide-hidden:${st.team_file}`;
   let dismissed = false;
-  try { dismissed = localStorage.getItem(key) === '1'; } catch { /* storage off: show it */ }
+  dismissed = pref(key) === '1';
   g.hidden = dismissed || steps.every((s) => s.done);
   g.replaceChildren(
     h('div', { class: 'guide-head' }, h('b', {}, 'Getting started'),
       h('button', { class: 'small', title: 'Hide these steps for this team', onclick: () => {
-        try { localStorage.setItem(key, '1'); } catch { /* shown again next load */ }
+        setPref(key, '1');
         g.hidden = true;
         updateAttention();
       } }, 'Hide')),
@@ -1155,14 +1188,14 @@ const FONT = { normal: 12.5, min: 9, max: 22, step: 0.5, key: 'agent-org-term-fo
 
 function termFont() {
   let v = FONT.normal;
-  try { v = Number(localStorage.getItem(FONT.key)) || FONT.normal; } catch { /* not remembered */ }
+  v = Number(pref(FONT.key)) || FONT.normal;
   return Math.min(FONT.max, Math.max(FONT.min, v));
 }
 
 /** One step bigger (+1) or smaller (-1); 0: back to the normal size. */
 function zoomTerms(dir) {
   const size = dir === 0 ? FONT.normal : Math.min(FONT.max, Math.max(FONT.min, termFont() + dir * FONT.step));
-  try { localStorage.setItem(FONT.key, String(size)); } catch { /* this session only */ }
+  setPref(FONT.key, String(size));
   for (const p of PANES.values()) {
     if (!p.term) continue;
     p.term.options.fontSize = size;
@@ -1304,13 +1337,13 @@ function tellWindowTheme() {
 
 $('#theme-btn').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-  try { localStorage.setItem('agent-org-theme', next); } catch { /* remembered for this visit only */ }
+  setPref('agent-org-theme', next);
   applyTheme(next);
 });
 // As the system is set, until you choose
 const LIGHT_SYSTEM = matchMedia('(prefers-color-scheme: light)');
 const chosenTheme = () => {
-  try { return localStorage.getItem('agent-org-theme'); } catch { return null; }
+  return pref('agent-org-theme');
 };
 applyTheme(chosenTheme() || (LIGHT_SYSTEM.matches ? 'light' : 'dark'));
 LIGHT_SYSTEM.addEventListener('change', () => { if (!chosenTheme()) applyTheme(LIGHT_SYSTEM.matches ? 'light' : 'dark'); });

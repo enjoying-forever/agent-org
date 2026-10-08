@@ -14,7 +14,7 @@ import { Store } from '../src/store.ts';
 import * as usage from '../src/usage.ts';
 import * as watchdog from '../src/watchdog.ts';
 import { cleanup, freshHome, raises, rejects, TEAM, tmpDir } from './helpers.ts';
-import { startServer } from './web.ts';
+import { request, startServer } from './web.ts';
 
 test('the API needs the token', async (t) => {
   const server = await startServer(t);
@@ -602,4 +602,24 @@ test("the page's live stream says when something changed, and only then", async 
   await until(settled + 1);
   assert.equal(lines.length, settled + 1);
   assert.equal((await server.request('/api/live', undefined, { token: null }))[0], 403); // only for the signed-in page
+});
+
+test('the page remembers its preferences in agent-org, and gets them inside the page', async (t) => {
+  freshHome(t);
+  const server = await startServer(t);
+  await server.ok('/api/prefs', { key: 'agent-org-theme', value: 'light' });
+  await server.ok('/api/prefs', { key: `agent-org-layout:${server.teamFile}`, value: '{"mode":"rows","note":"a <b> & \\"c\\""}' });
+  assert.equal((await server.request('/api/prefs', { key: 'theme', value: 'dark' }))[0], 400); // only this page's own keys
+  await server.ok('/api/prefs', { key: String.raw`agent-org-layout:E:\gone\团队\team.yaml`, value: '{}' }); // a team that is no more: not kept
+  const prefsIn = async (cookie: string | null): Promise<any> => {
+    const page = await request(server.port, 'GET', '/', { headers: cookie ? { Cookie: cookie } : {} });
+    const m = /<meta name="agent-org-prefs" content="([^"]*)">/.exec(page.body);
+    return m ? JSON.parse(m[1].replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))) : null;
+  };
+  const signedIn = `${ui.COOKIE}=${server.served.access.session}`;
+  assert.deepEqual(await prefsIn(signedIn), { saved: true, prefs: { 'agent-org-theme': 'light',
+    [`agent-org-layout:${server.teamFile}`]: '{"mode":"rows","note":"a <b> & \\"c\\""}' } });
+  assert.equal(await prefsIn(null), null); // not signed in: nothing of yours in the page
+  await server.ok('/api/prefs', { key: 'agent-org-theme', value: null }); // forgotten
+  assert.ok(!('agent-org-theme' in (await prefsIn(signedIn)).prefs));
 });

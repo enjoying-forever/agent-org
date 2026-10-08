@@ -1,7 +1,7 @@
 // The team workspace's window controls: the agent panes tile the space exactly (the page never
 // scrolls), in one of four arrangements, with draggable borders; a pane can fill the space or be
 // closed (its agent keeps running; click it in the team list to bring it back). The team list and
-// the messages panel can be hidden and resized. All of it is remembered per team, in this browser.
+// the messages panel can be hidden and resized. All of it is remembered per team, by agent-org (see pref in app.js).
 
 const LAYOUTS = [
   { id: 'grid', label: 'Grid', hint: 'Equal tiles, as square as possible' },
@@ -15,7 +15,7 @@ const L = { team: null }; // the open team's layout (see loadLayout)
 
 function loadLayout(team) {
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(`agent-org-layout:${team}`) || '{}'); } catch { /* defaults */ }
+  try { saved = JSON.parse(pref(`agent-org-layout:${team}`) || '{}'); } catch { /* defaults */ }
   const narrow = innerWidth < 1100;
   Object.assign(L, {
     team, mode: 'grid', tree: false, hidden: [], max: null, main: null, order: [], cols: {}, rows: {},
@@ -29,7 +29,7 @@ function loadLayout(team) {
 function saveLayout() {
   if (!L.team) return;
   const { team, max, ...keep } = L;
-  try { localStorage.setItem(`agent-org-layout:${team}`, JSON.stringify(keep)); } catch { /* not remembered */ }
+  setPref(`agent-org-layout:${team}`, JSON.stringify(keep));
 }
 
 /** Show or hide the sidebar and the messages panel, at their widths. */
