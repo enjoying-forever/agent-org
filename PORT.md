@@ -91,7 +91,9 @@ Before this branch becomes main:
   rewrites ~/.grok/hooks/agent-org.json for the new command), Antigravity (it replaces the user-level
   plugin) and a DeepSeek task. Each changes something of the owner's, so the owner starts those.
 
-Start-up (measured 2026-10-08): the server is up 185 ms after launch and the window is made at 240 ms; the
-page shows at about 1.4 s. Of that, about 1 s is Chromium starting a fresh page process on Windows: with a
-warm one the page is interactive in 190 ms. Letting the page's files be cached (for compiled scripts),
-GPU on or off: no difference, so neither was kept.
+Start-up (measured 2026-10-08): the server is up about 240 ms after launch. The page then waited about
+a second before drawing anything; this was first taken for Chromium starting a fresh page process, but a
+trace of the first load in a fresh window showed it was the page's first read of the browser's own storage
+(localStorage, for the theme): 0.9-1.0 s, once per window, on a reload nothing. What the page remembers now
+comes from agent-org inside the page (page.json in its home folder): the team is drawn about 0.70 s after
+launch instead of 1.65 s. Letting the page's files be cached, GPU on or off: no difference.
