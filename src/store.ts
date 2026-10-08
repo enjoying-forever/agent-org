@@ -224,7 +224,6 @@ export interface Task {
 
 /** Not finished yet: the assignee owes work, or the assigner owes a review. */
 export const isOpen = (t: Task): boolean => !(CLOSED as readonly string[]).includes(t.state);
-export const owesWork = (t: Task): boolean => (ACTIVE as readonly string[]).includes(t.state);
 
 export interface Status {
   readonly role: string;
