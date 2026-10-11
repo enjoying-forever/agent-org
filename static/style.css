@@ -996,3 +996,5 @@ button.primary.send svg { width: 16px; height: 16px; }
 #team-tree[data-only="waiting"] .node:not(.owner):not(.st-waiting),
 #team-tree[data-only="idle"] .node:not(.owner):not(.st-idle),
 #team-tree[data-only="off"] .node:not(.owner):not(.st-off) { opacity: 0.28; }
+/* in a column the cards stack up: what each did before is left to the side-by-side cards (and the terminal) */
+.tree ul.stack .node .acts { display: none; }
