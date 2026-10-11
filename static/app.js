@@ -629,7 +629,7 @@ function renderTree() {
   }
   S.treeShape = shape;
   drawTree(looks, false);
-  if (!fitTree()) { // too wide even drawn smaller: people with nobody under them go in a column
+  if (!fitTree(TREE_SIDE_ZOOM)) { // too wide at (nearly) full size: people with nobody under them go in a column
     drawTree(looks, true);
     fitTree();
   }
@@ -789,17 +789,18 @@ function folded(r, below, looks) {
 }
 
 const TREE_MIN_ZOOM = 0.85; // smaller is hard to read: wider than that, the tree scrolls
+const TREE_SIDE_ZOOM = 0.95; // side by side only this little smaller: else a column at full size reads better
 
-/** A team wider than the view is drawn smaller to fit it, down to TREE_MIN_ZOOM. False when even that is too wide. */
-function fitTree() {
+/** A team wider than the view is drawn smaller to fit it, down to `min`. False when even that is too wide. */
+function fitTree(min = TREE_MIN_ZOOM) {
   const tree = $('#team-tree');
   const box = $('#tree-view');
   if ($('#tree-wrap').hidden || !box.clientWidth) return true;
   tree.style.zoom = '';
-  const room = box.clientWidth - 40; // its padding
+  const room = box.clientWidth - 28; // its padding
   const wide = tree.scrollWidth;
-  if (wide > room) tree.style.zoom = String(Math.max(TREE_MIN_ZOOM, Math.floor((room / wide) * 100) / 100));
-  return wide * TREE_MIN_ZOOM <= room;
+  if (wide > room) tree.style.zoom = String(Math.max(min, Math.floor((room / wide) * 100) / 100));
+  return wide * min <= room;
 }
 let treeWidth = 0;
 new ResizeObserver(() => {
