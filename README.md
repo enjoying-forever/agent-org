@@ -88,8 +88,9 @@ agent carries on where it stopped.
   secrets in commands hidden (Antigravity reports only its edits). Stopped agents get a small card
   with ▶. Click a card for that agent's terminal. A manager's ▴ folds everyone under it into one
   card saying how they are doing. Roles dropped from **+** and teammates dragged onto a card change
-  the team, as in the sidebar. A team wider than the view is drawn smaller to fit, and if that is
-  not enough, agents with nobody under them go in a column below their manager. While the Tree (or
+  the team, as in the sidebar. A team wider than the view keeps its cards full size: agents with
+  nobody under them go in a column below their manager, the biggest group first and only as many
+  groups as it takes; only if that is not enough is the tree drawn smaller. While the Tree (or
   any other page) shows, the terminals are not read; what they wrote meanwhile is drawn when they
   show again. The choice of view, and what is folded, is remembered for each team.
 - **A pane is its terminal:** one thin title line (its name, a badge you click to change it, its
