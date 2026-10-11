@@ -998,3 +998,6 @@ button.primary.send svg { width: 16px; height: 16px; }
 #team-tree[data-only="off"] .node:not(.owner):not(.st-off) { opacity: 0.28; }
 /* in a column the cards stack up: what each did before is left to the side-by-side cards (and the terminal) */
 .tree ul.stack .node .acts { display: none; }
+/* write to an agent from its card: shown on hover or keyboard focus, so the cards stay quiet */
+.tree-view .node .card-msg { opacity: 0; }
+.tree-view .node:hover .card-msg, .tree-view .node:focus-within .card-msg, .tree-view .node .card-msg:focus-visible { opacity: 1; }

@@ -87,7 +87,8 @@ agent carries on where it stopped.
   actions, its last message, the files it writes and its usage; a ring shows it at work (green),
   asking you (amber) or stuck (red). Actions come from the hooks every tool call goes through, with
   secrets in commands hidden (Antigravity reports only its edits). Stopped agents get a small card
-  with ▶. Click a card for that agent's terminal. A manager's ▴ folds everyone under it into one
+  with ▶. Click a card for that agent's terminal, or its speech bubble (on hover) to write to it
+  without leaving the tree. A manager's ▴ folds everyone under it into one
   card saying how they are doing. Roles dropped from **+** and teammates dragged onto a card change
   the team, as in the sidebar. A team wider than the view keeps its cards full size: agents with
   nobody under them go in a column below their manager, the biggest group first and only as many

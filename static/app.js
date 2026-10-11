@@ -494,6 +494,7 @@ function renderGuide() {
 
 const ICON_PATHS = {
   play: 'M7 4.5v15l12-7.5z',
+  message: 'M4 5h16v11H9.5L5 20v-4H4z',
   stop: 'M6.5 6.5h11v11h-11z',
   restart: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
@@ -842,6 +843,7 @@ function treeNode(r, looks, reports) {
   const head = h('div', { class: 'name' }, runningDot(r), badge(r), h('span', { class: 'nm' }, r.name),
     h('span', { class: 'grow' }),
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
+    iconBtn('message', `Write to ${r.name}`, () => writeTo(r.name), 'card-msg'),
     reports ? iconBtn(L.collapsed?.includes(r.name) ? 'unfold' : 'fold',
       L.collapsed?.includes(r.name) ? `Show the ${plural(reports, 'agent')} under ${r.name}` : `Fold the agents under ${r.name} into one card`,
       () => toggleFold(r.name)) : null,
@@ -1771,6 +1773,16 @@ function setCompose(mode) {
   $('#send-btn').setAttribute('aria-label', task ? 'Give the task' : 'Send');
   if (task) clearReply();
   if (S.state) renderRecipients();
+}
+
+/** From the Tree: the message box, addressed to `name`, without leaving the chart. */
+function writeTo(name) {
+  if (!L.side) { L.side = true; applyChrome(); saveLayout(); }
+  showTab('messages');
+  clearReply();
+  setCompose('message');
+  $('#to').value = name;
+  $('#text').focus();
 }
 
 function composeTo(name, mode) {
