@@ -104,3 +104,9 @@ trace of the first load in a fresh window showed it was the page's first read of
 (localStorage, for the theme): 0.9-1.0 s, once per window, on a reload nothing. What the page remembers now
 comes from agent-org inside the page (page.json in its home folder): the team is drawn about 0.70 s after
 launch instead of 1.65 s. Letting the page's files be cached, GPU on or off: no difference.
+
+A split task, live (2026-10-11; a Claude leader, coder and tester on Sonnet; the team's check runs the tester's
+test against the coder's code): before, neither part could close as done (the check needed the other one), the
+coder ended blocked, and the leader reported the owner's task done with one part blocked and one in work. Now a
+part closes while its sibling parts are open (its result says the checks wait for them), and a task is done only
+once its parts are settled: the leader accepted or cancelled all four parts, the check passed, done in 69 s.
