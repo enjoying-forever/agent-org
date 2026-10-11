@@ -198,6 +198,28 @@ export function claudeModel(model: string): string {
   return model.toLowerCase().startsWith('claude-') ? model.replace(/(?<=\d)\.(?=\d)/g, '-') : model;
 }
 
+// Claude Code draws parts of its screen in exact colors of its own theme, which the terminals' light palette cannot
+// change: in its dark theme the line typed into it sits on a near-black bar, heavy in a light window. So a Claude
+// agent starts in the window's theme, kept in agent-org's home (where a tool server hiring an agent finds it too).
+// A running one keeps the theme it started with (seen: Claude Code does not take a new one from its settings).
+const THEME_FILE = 'terminal-theme';
+
+export function agentTheme(): 'light' | 'dark' {
+  try {
+    return readFileSync(path.join(templates.homeDir(), THEME_FILE), 'utf8').trim() === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+/** The window now shows `theme`: agents started from now on draw in it. */
+export function setAgentTheme(theme: 'light' | 'dark'): void {
+  const file = path.join(templates.homeDir(), THEME_FILE);
+  if (existsSync(file) && agentTheme() === theme) return;
+  mkdirSync(templates.homeDir(), { recursive: true });
+  writeFileSync(file, theme, 'utf8');
+}
+
 type Builder = (hub: Hub, teamFile: string, role: string, out: string, resume: string | null, newId: string | null, quiet: boolean) => Launch;
 
 const writeJson = (file: string, value: unknown): void => writeFileSync(file, JSON.stringify(value, null, 2), 'utf8');
@@ -214,7 +236,7 @@ export const claudeLaunch: Builder = (hub, teamFile, role, out, resume = null, n
   const config = path.join(out, 'mcp.json');
   writeJson(config, { mcpServers: { [SERVER_NAME]: { type: 'stdio', command, args, env } } });
   const settings = path.join(out, 'settings.json');
-  writeJson(settings, { ...AGENT_CLAUDE_SETTINGS, hooks: claudeHooks() });
+  writeJson(settings, { ...AGENT_CLAUDE_SETTINGS, theme: agentTheme(), hooks: claudeHooks() });
   const cli = ['--mcp-config', config, '--strict-mcp-config', '--allowedTools', `mcp__${SERVER_NAME}`,
     '--tools', AGENT_CLAUDE_TOOLS.join(','), '--no-chrome', '--append-system-prompt-file', card, '--settings', settings];
   if (spec.model) cli.push('--model', claudeModel(spec.model));

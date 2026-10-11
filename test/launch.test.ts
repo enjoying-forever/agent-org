@@ -219,6 +219,16 @@ test('a Claude agent runs without your mods and tips', async (t) => {
   assert.equal(settings.spinnerTipsEnabled, false);
 });
 
+test("a Claude agent starts in the window's theme", async (t) => {
+  // in Claude Code's dark theme the line typed into it sits on a near-black bar: heavy in a light window
+  const file = teamFile(t);
+  const theme = async () => JSON.parse(read(path.join(await runDry(file, 'leader'), 'leader', 'settings.json'))).theme;
+  launch.setAgentTheme('light');
+  assert.equal(await theme(), 'light');
+  launch.setAgentTheme('dark');
+  assert.equal(await theme(), 'dark');
+});
+
 test('Codex gets the hooks through config overrides', (t) => {
   const file = teamFile(t);
   const built = launch.codexLaunch(openHub(t, file), file, 'worker-a', tmpDir(t), null, null, false);

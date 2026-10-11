@@ -72,7 +72,8 @@ agent carries on where it stopped.
   blue for what you act on and what is new, each page and each program in its own color (the
   badges C, X, G, A, D and a stripe on each pane), pill buttons, one plain sans, and the window's
   own buttons in its top bar. Light or dark follows Windows until you choose with the button at
-  the top.
+  the top. Claude agents start in the same theme (one already running keeps its own until it
+  restarts).
 - **Team:** one pane per agent: its **live terminal** - click in it and type, exactly as in its own
   console - with buttons to give it a task, start, restart or stop it, and its details (notes,
   files, usage). An agent that is not running shows a summary instead: its program and model, what

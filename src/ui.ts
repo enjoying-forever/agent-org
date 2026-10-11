@@ -549,7 +549,10 @@ export class App {
     if (action === 'hide') this.window.hide();
     else if (action === 'quit') this.window.quit();
     else if (action === 'show') this.window.show();
-    else if (action === 'theme') this.window.shell?.theme?.(body.dark === true); // nothing to do without a window
+    else if (action === 'theme') {
+      this.window.shell?.theme?.(body.dark === true); // nothing to do without a window
+      launch.setAgentTheme(body.dark === true ? 'dark' : 'light'); // Claude agents start in it
+    }
     else throw new ApiError('action must be hide, quit, show or theme');
     return {};
   }
