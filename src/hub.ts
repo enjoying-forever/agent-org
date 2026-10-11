@@ -59,7 +59,8 @@ export const LAW: [string, string][] = [
     + 'Whoever assigned it is told. Never drop a task silently.'],
   ['Results are checked', "When a task you gave is done, check it against its 'done when' "
     + 'and review_task it: accept it, or send it back with specific feedback. After three '
-    + 'send-backs, decide differently: accept, cancel, or assign a new task.'],
+    + 'send-backs, decide differently: accept, cancel, or assign a new task. A task you split is done only once every part '
+    + 'you gave out of it is settled.'],
   ['Help goes up one level', 'ask_help goes to your direct superior, who must answer it, '
     + 'pass it up, or summon a consultant. A question left unanswered is passed up for you.'],
   ['Say it once, say it all', 'Every message wakes its receiver. Send only what they need to '
@@ -628,12 +629,23 @@ export class RoleSession {
     if (!(OUTCOMES as readonly string[]).includes(outcome)) throw new HubError(`outcome must be one of: ${OUTCOMES.join(', ')}`);
     if (task.state === 'waiting') throw new HubError(`task #${taskId} has not started: it waits for #${task.depends_on.join(', #')}`);
     if (!['open', 'working', 'blocked'].includes(task.state)) throw new HubError(`task #${taskId} is already ${task.state}`);
+    if (outcome === 'done') { // seen: a leader reported the owner's task done with one part blocked and one still in work
+      const open = this.store.parts(taskId).filter((t) => !(CLOSED as readonly string[]).includes(t.state));
+      if (open.length) {
+        throw new HubError(`task #${taskId} is not done yet: parts of it are not finished: `
+          + `${open.map((t) => `#${t.id} [${t.state}] ${t.assignee}: ${t.title}`).join('; ')}. `
+          + 'review_task the done ones, and see the others through, move them (reassign_task) or cancel_task them first.');
+      }
+    }
     result = checkText(result);
+    // The other parts of the same bigger task still in work: a team check may need them (seen: a test written by
+    // one agent for code written by another), so until they are done a failing check does not hold this part back.
+    const siblings = outcome === 'done' ? this.openSiblings(task) : [];
     let checks = '';
     let landed: string | null = null;
     if (this.hub.branches && outcome === 'done') {
       [landed, checks] = await this.integrate(`task #${task.id}: ${task.title}`, this.store.taskFiles(taskId),
-        `task #${taskId} is not done yet`, task.id);
+        `task #${taskId} is not done yet`, task.id, siblings);
     } else if (this.hub.branches) {
       this.saveWork(`task #${task.id} (${outcome})`);
     } else if (outcome === 'done') {
@@ -642,7 +654,11 @@ export class RoleSession {
       if (files.length && this.team.settings.scan_secrets && this.team.settings.commit_on_accept) {
         this.noSecrets(gitops.diff(root, files), `task #${taskId} is not done yet`, task.id);
       }
-      checks = await this.runChecks(files, root, `task #${taskId} is not done yet`, task.id);
+      checks = await this.runChecks(files, root, `task #${taskId} is not done yet`, task.id, siblings);
+    }
+    if (checks.includes('FAILED')) {
+      result += `\n\n(The team's checks do not pass yet: ${checks}. Other parts of #${task.parent_id} are still open `
+        + `(${siblings.map((t) => `#${t.id} ${t.assignee}: ${t.title}`).join('; ')}), which may be why; they run again when those finish.)`;
     }
     task = this.store.updateTask(taskId, { state: outcome, result, checks, ...(landed ? { commit_id: landed } : {}) });
     const head = { done: 'is DONE - please review it', blocked: 'is BLOCKED', failed: 'FAILED', rejected: 'was REJECTED' }[outcome];
@@ -678,13 +694,16 @@ export class RoleSession {
     return released;
   }
 
-  /** Run the team's checks that apply to `files` in `cwd`; refuse with their output if one fails. */
-  private async runChecks(files: string[], cwd: string, refusal: string, taskId: number | null): Promise<string> {
+  /** Run the team's checks that apply to `files` in `cwd`; refuse with their output if one fails - unless other
+   * parts of the same bigger task (`siblings`) are still open: then the summary says FAILED and the task goes on. */
+  private async runChecks(files: string[], cwd: string, refusal: string, taskId: number | null, siblings: Task[] = []): Promise<string> {
     if (!this.team.checks.length) return '';
     const outcomes = await verify.run(this.team, files, cwd);
     const failed = outcomes.filter((o) => !o.ok);
     const checks = verify.summary(outcomes);
-    if (failed.length) {
+    if (failed.length && siblings.length) {
+      this.hub.event('check', this.name, `checks failed: ${checks} (#${siblings.map((t) => t.id).join(', #')} of the same task still open)`, taskId);
+    } else if (failed.length) {
       this.hub.event('check', this.name, `checks failed: ${checks}`, taskId);
       const details = failed.map((o) => `--- ${o.name}: \`${o.command}\` (run in ${cwd}) ---\n${o.output}`).join('\n\n');
       throw new HubError(`${refusal}: ${checks}.\n\n${details}\n\nRun the command yourself to see what it `
@@ -704,7 +723,8 @@ export class RoleSession {
 
   /** Branch mode: commit this role's work, merge the latest main into it, run the checks on the result, and put
    * it into main. Returns [commit in main, checks summary]. */
-  private async integrate(message: string, files: string[], refusal: string, taskId: number | null): Promise<[string, string]> {
+  private async integrate(message: string, files: string[], refusal: string, taskId: number | null,
+    siblings: Task[] = []): Promise<[string, string]> {
     const hub = this.hub;
     const root = hub.baseTeam.project_root;
     const wt = hub.rootOf(this.name);
@@ -729,7 +749,7 @@ export class RoleSession {
       const changed = gitops.git(wt, ['diff', '--name-only', `${main}...HEAD`]).stdout.split(/\s+/).filter((x) => x);
       if (!gitops.git(wt, ['rev-list', '--count', `${main}..HEAD`]).stdout.trim().replace(/^0+|0+$/g, '')) return ['', '']; // nothing of its own
       this.landingChecks(wt, main, changed, refusal, taskId);
-      checks = await this.runChecks([...new Set([...files, ...changed])].sort(), wt, refusal, taskId);
+      checks = await this.runChecks([...new Set([...files, ...changed])].sort(), wt, refusal, taskId, siblings);
       landedAs = gitops.withLandLock(root, () => {
         let [commit, why] = gitops.land(root, branch, message);
         if (commit === null) { // main moved on while the checks ran: take it in and try once more
@@ -1141,6 +1161,12 @@ export class RoleSession {
     const failed = outcomes.filter((o) => !o.ok);
     this.hub.event('check', this.name, `ran the checks: ${verify.summary(outcomes) || 'none applied'}`, taskId);
     return [verify.summary(outcomes), failed.map((o) => `--- ${o.name}: \`${o.command}\` (run in ${cwd}) ---\n${o.output}`).join('\n\n')];
+  }
+
+  /** The other parts of the bigger task that `task` is part of, still in work. */
+  openSiblings(task: Task): Task[] {
+    return task.parent_id === null ? []
+      : this.store.parts(task.parent_id).filter((t) => t.id !== task.id && (ACTIVE as readonly string[]).includes(t.state));
   }
 
   /** Tasks you are working on or should start (not the ones still waiting for others). */

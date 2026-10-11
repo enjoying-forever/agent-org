@@ -209,7 +209,10 @@ what they still owe.
 5. **Every task ends with a result:** done, blocked (with what is needed), failed
    (with why), or rejected. Whoever gave it is told. Nothing is dropped silently.
 6. **Results are checked.** Whoever gave a task reviews a done result against its
-   "done when": accept, or send back with feedback (three times at most).
+   "done when": accept, or send back with feedback (three times at most). A task that was
+   split into parts is done only once every part is settled. While other parts are still
+   open, a part may close although the team's checks fail (they may need those parts; its
+   result says so); the last part and the whole task must pass them as always.
 7. **Help goes up one level.** A question goes to your direct superior, who must answer
    it, pass it up, or summon a consultant. An unanswered question is passed up for you.
 8. **Say it once, say it all.** Every message wakes its receiver: no "thanks" or "ok"

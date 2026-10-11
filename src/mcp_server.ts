@@ -329,16 +329,26 @@ export class Tools {
 
   private async checks(args: Args): Promise<string> {
     if (!this.me.team.checks.length) return 'This team has no checks: run the tests you know of yourself.';
-    const [summary, failed] = await this.me.checkWork(args.task_id == null ? null : int(args.task_id));
+    const taskId = args.task_id == null ? null : int(args.task_id);
+    const [summary, failed] = await this.me.checkWork(taskId);
     if (!summary) return 'No check applies to the files of that task.';
-    return failed ? `${summary}.\n\n${failed}\n\nFix it before finish_task.` : `${summary}. finish_task will pass them.`;
+    if (!failed) return `${summary}. finish_task will pass them.`;
+    const task = taskId === null ? null : this.me.store.getTask(taskId);
+    const siblings = task ? this.me.openSiblings(task) : [];
+    if (siblings.length) {
+      return `${summary}.\n\n${failed}\n\nOther parts of #${task!.parent_id} are still open (${siblings.map((t) => `#${t.id} ${t.assignee}: ${t.title}`).join('; ')}). `
+        + 'If a check fails only for want of them, finish_task(done) still closes your task and says so; fix anything that is yours first.';
+    }
+    return `${summary}.\n\n${failed}\n\nFix it before finish_task.`;
   }
 
   private async finish(args: Args): Promise<string> {
     const task = await this.me.finishTask(int(need(args, 'task_id')), str(args, 'result'), opt(args, 'outcome') || 'done');
     const told = task.assigner === this.me.team.owner ? 'the owner' : task.assigner; // the owner may be called "you"
     const freed = this.me.released.length ? ` Your files are released (${this.me.released.join(', ')}).` : '';
-    return `Task #${task.id} is ${task.state}; ${told} has been told.${freed}`;
+    const waiting = task.checks.includes('FAILED')
+      ? ` The team's checks do not pass yet (${task.checks}); they run again when the other parts of #${task.parent_id} are done.` : '';
+    return `Task #${task.id} is ${task.state}; ${told} has been told.${waiting}${freed}`;
   }
 
   private hired(role: Role): string {

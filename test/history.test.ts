@@ -91,6 +91,46 @@ test('passing checks are recorded', async (t) => {
   assert.deepEqual([done.state, done.checks], ['done', 'tests passed']); // lint skipped: no .js file changed
 });
 
+test('a part of a bigger task closes while the other parts are open, even if a check needs them', async (t) => {
+  // seen live: the team's test was one agent's task and the code it tests another's: neither could pass alone
+  const needsB = `${NODE} -e "require('fs').readFileSync('b.txt')"`;
+  const hub = makeHub(t, tmpDir(t), { checks: [{ name: 'tests', run: needsB }] });
+  const whole = hub.session('leader').assignTask('tech-lead', 'Build a and b');
+  const lead = hub.session('tech-lead');
+  lead.readInbox();
+  const a = lead.assignTask('worker-a', 'Write a', '', whole.id);
+  const b = lead.assignTask('worker-b', 'Write b', '', whole.id);
+  hub.session('worker-a').readInbox();
+  hub.session('worker-b').readInbox();
+  const doneA = await hub.session('worker-a').finishTask(a.id, 'a is written');
+  assert.deepEqual([doneA.state, doneA.checks], ['done', 'tests FAILED']);
+  assert.match(doneA.result, /checks do not pass yet: tests FAILED\. Other parts of #1 are still open \(#3 worker-b: Write b\)/);
+  // the last part has no one left to wait for: its checks hold it back as always
+  await rejects(() => hub.session('worker-b').finishTask(b.id, 'b is written'), HubError, /is not done yet: tests FAILED/);
+  writeFileSync(path.join(hub.baseTeam.project_root, 'b.txt'), 'b');
+  assert.equal((await hub.session('worker-b').finishTask(b.id, 'b is written')).checks, 'tests passed');
+});
+
+test('a task is not done while parts of it are unfinished', async (t) => {
+  // seen live: a leader reported the owner's task done with one part blocked and another still in work
+  const hub = makeHub(t, tmpDir(t));
+  const whole = hub.session('leader').assignTask('tech-lead', 'Build a and b');
+  const lead = hub.session('tech-lead');
+  lead.readInbox();
+  const a = lead.assignTask('worker-a', 'Write a', '', whole.id);
+  const b = lead.assignTask('worker-b', 'Write b', '', whole.id);
+  hub.session('worker-a').readInbox();
+  await hub.session('worker-a').finishTask(a.id, 'a is written');
+  const refused = await rejects(() => lead.finishTask(whole.id, 'all built'), HubError);
+  assert.match(refused.message, /parts of it are not finished: #2 \[done\] worker-a: Write a; #3 \[open\] worker-b: Write b\. review_task/);
+  await lead.finishTask(whole.id, 'b is not possible yet', 'blocked'); // anything but done may close it
+  lead.reviewTask(a.id, true);
+  lead.cancelTask(b.id, 'not needed after all');
+  const whole2 = hub.session('leader').assignTask('tech-lead', 'Build c');
+  lead.readInbox();
+  assert.equal((await lead.finishTask(whole2.id, 'c built')).state, 'done'); // no parts: nothing to wait for
+});
+
 test('checks run in the project folder', async (t) => {
   const dir = tmpDir(t);
   const hub = makeHub(t, dir);

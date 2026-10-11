@@ -455,3 +455,21 @@ test('run_checks tries the checks without closing the task; task_changes shows t
   [text] = await worker.tool('run_checks');
   assert.equal(text, 'unit passed, docs passed. finish_task will pass them.'); // without a task: every check
 });
+
+test('a part whose checks wait for the other parts hears so from run_checks and finish_task', async (t) => {
+  const node = JSON.stringify(process.execPath);
+  const { hub } = makeHub(t, { ...team(), checks: [{ name: 'unit', run: `${node} -e "require('fs').readFileSync('b.txt')"` }] });
+  const worker = new Client(hub, 'worker-a');
+  cleanup(t, async () => { await worker.close(); });
+  const whole = hub.session('leader').assignTask('tech-lead', 'Build a and b');
+  hub.session('tech-lead').readInbox();
+  const a = hub.session('tech-lead').assignTask('worker-a', 'Write a', '', whole.id);
+  hub.session('tech-lead').assignTask('worker-b', 'Write b', '', whole.id);
+  hub.session('worker-a').readInbox();
+  let [text, err] = await worker.tool('run_checks', { task_id: a.id });
+  assert.ok(!err && text.startsWith('unit FAILED') && text.includes('Other parts of #1 are still open (#3 worker-b: Write b)')
+    && text.includes('finish_task(done) still closes your task'), text);
+  [text, err] = await worker.tool('finish_task', { task_id: a.id, result: 'a is written' });
+  assert.ok(!err && text.startsWith('Task #2 is done; tech-lead has been told.')
+    && text.includes("The team's checks do not pass yet (unit FAILED); they run again when the other parts of #1 are done."), text);
+});

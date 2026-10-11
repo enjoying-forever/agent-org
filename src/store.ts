@@ -174,6 +174,7 @@ CREATE INDEX IF NOT EXISTS messages_task ON messages(task_id) WHERE task_id IS N
 CREATE INDEX IF NOT EXISTS messages_sent ON messages(sent_at);
 CREATE INDEX IF NOT EXISTS messages_kind ON messages(recipient, kind, id);
 CREATE INDEX IF NOT EXISTS actions_role ON actions(role, id);
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id) WHERE parent_id IS NOT NULL;
 `;
 
 const UPGRADES: Record<string, Record<string, string>> = {
@@ -539,6 +540,11 @@ export class Store {
 
   taskFiles(taskId: number): string[] {
     return this.all('SELECT path FROM task_files WHERE task_id = ? ORDER BY path', taskId).map((r) => r.path as string);
+  }
+
+  /** The tasks given as parts of `parentId`. */
+  parts(parentId: number): Task[] {
+    return this.all('SELECT * FROM tasks WHERE parent_id = ? ORDER BY id', parentId).map(toTask);
   }
 
   /** Tasks that wait for `taskId`. */
