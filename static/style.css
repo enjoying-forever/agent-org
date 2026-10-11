@@ -984,3 +984,15 @@ button.primary.send svg { width: 16px; height: 16px; }
   .composer .urgent { font-size: 0; gap: 0; padding: 3px 6px; }
   .composer .urgent::after { content: "!"; font-size: 13px; font-weight: 700; margin-left: 3px; }
 }
+/* a count above the chart picks out its agents: the others fade */
+.tb-count.state { border: 0; background: none; padding: 2px 8px; margin: 0 -8px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer; }
+.tb-count.state:hover { background: var(--sheet-2); }
+.tb-count.state[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent-ink); }
+#team-tree[data-only="working"] .node:not(.owner):not(.st-working),
+#team-tree[data-only="asking"] .node:not(.owner):not(.st-asking),
+#team-tree[data-only="stuck"] .node:not(.owner):not(.st-stuck),
+#team-tree[data-only="blocked"] .node:not(.owner):not(.st-blocked),
+#team-tree[data-only="paused"] .node:not(.owner):not(.st-paused),
+#team-tree[data-only="waiting"] .node:not(.owner):not(.st-waiting),
+#team-tree[data-only="idle"] .node:not(.owner):not(.st-idle),
+#team-tree[data-only="off"] .node:not(.owner):not(.st-off) { opacity: 0.28; }

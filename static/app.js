@@ -680,7 +680,7 @@ function agentLook(r) {
 
 function renderTreeBar(looks) {
   const st = S.state;
-  const key = JSON.stringify([st.roles.map((r) => looks[r.name].cls), st.roles.map((r) => costTokens(r.usage))]);
+  const key = JSON.stringify([st.roles.map((r) => looks[r.name].cls), st.roles.map((r) => costTokens(r.usage)), S.treeOnly]);
   if (key === S.treeBarKey) return;
   S.treeBarKey = key;
   const counts = {};
@@ -688,9 +688,19 @@ function renderTreeBar(looks) {
   const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'], ['paused', 'paused'],
     ['waiting', 'waiting'], ['idle', 'idle'], ['off', 'not running']].filter(([k]) => counts[k]);
   const spent = st.roles.reduce((sum, r) => sum + costTokens(r.usage), 0);
+  if (S.treeOnly && !counts[S.treeOnly]) S.treeOnly = null; // nobody is in that state any more
+  $('#team-tree').dataset.only = S.treeOnly || '';
+  // A count picks out its agents on the chart (the others fade); again, and everyone shows.
+  const pick = (k) => {
+    S.treeOnly = S.treeOnly === k ? null : k;
+    S.treeBarKey = '';
+    renderTreeBar(looks);
+    if (S.treeOnly) $(`#team-tree .node.st-${S.treeOnly}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  };
   fill($('#tree-bar'),
     h('div', { class: 'tb-team' },
-      shown.map(([k, word]) => h('span', { class: `tb-count state ${k}` }, h('b', {}, counts[k]), ` ${word}`)),
+      shown.map(([k, word]) => h('button', { class: `tb-count state ${k}`, 'aria-pressed': String(S.treeOnly === k),
+        title: S.treeOnly === k ? 'Show everyone' : `Pick out who is ${word}`, onclick: () => pick(k) }, h('b', {}, counts[k]), ` ${word}`)),
       h('span', { class: 'grow' }),
       spent ? h('span', { class: 'tb-spent', title: 'Tokens the team has used, over every conversation' }, `${fmtNum(spent)} tokens`) : null));
 }
