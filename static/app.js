@@ -628,10 +628,21 @@ function renderTree() {
     return;
   }
   S.treeShape = shape;
-  drawTree(looks, false);
-  if (!fitTree(TREE_SIDE_ZOOM)) { // too wide at (nearly) full size: people with nobody under them go in a column
-    drawTree(looks, true);
-    fitTree();
+  // Too wide at (nearly) full size: the people with nobody under them go in a column below their manager - the
+  // biggest such group first, then the next, only as many as it takes to fit.
+  const stacked = new Set();
+  drawTree(looks, stacked);
+  if (!fitTree(TREE_SIDE_ZOOM)) {
+    const groups = st.roles.filter((r) => !L.collapsed?.includes(r.name)).map((r) => [r.name, rolesUnder(r.name)])
+      .filter(([, kids]) => kids.length > 1 && kids.every((k) => !rolesUnder(k.name).length))
+      .sort((a, b) => b[1].length - a[1].length);
+    let fits = false;
+    for (const [name] of groups) {
+      stacked.add(name);
+      drawTree(looks, stacked);
+      if ((fits = fitTree(TREE_SIDE_ZOOM))) break;
+    }
+    if (!fits) fitTree(); // still too wide: smaller, down to the least that reads, then it scrolls
   }
   if (first) box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2; // you and the leader in view
   else [box.scrollLeft, box.scrollTop] = [left, scrollTop];
@@ -686,7 +697,7 @@ function renderTreeBar(looks) {
 
 // ---------- the chart ----------
 
-function drawTree(looks, stacked) {
+function drawTree(looks, stacked = new Set()) {
   const st = S.state;
   S.treeCards = new Map(); // role -> { key, el }
   S.treeFolded = new Map(); // manager -> its folded card
@@ -702,7 +713,7 @@ function drawTree(looks, stacked) {
       S.treeFolded.set(r.name, fold);
       return h('li', {}, treeCard(r, looks, kids.length), h('ul', {}, h('li', {}, fold)));
     }
-    const column = stacked && kids.length > 1 && kids.every((k) => !rolesUnder(k.name).length);
+    const column = stacked.has(r.name);
     return h('li', {}, treeCard(r, looks, kids.length), kids.length ? h('ul', { class: column ? 'stack' : '' }, kids.map(branch)) : null);
   };
   const top = rolesUnder(st.owner).map(branch);
