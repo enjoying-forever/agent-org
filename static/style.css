@@ -545,18 +545,6 @@ dialog.wide { width: min(780px, calc(100vw - 32px)); }
 .tb-count.state { color: var(--muted); font-weight: 500; font-size: 13px; }
 .tb-count b { color: var(--ink); font-weight: 650; }
 .tb-spent { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.tb-calm { font-size: 12.5px; }
-.tb-needs { display: flex; flex-direction: column; gap: 6px; }
-.tb-needs-head { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0;
-  color: var(--signal); font: inherit; font-size: 13px; cursor: pointer; }
-.tb-needs-head .chev { color: var(--faint); font-size: 11px; }
-.tb-list { display: flex; flex-direction: column; gap: 4px; max-height: clamp(80px, 30vh - 50px, 240px); /* a short window keeps room for the tree */ overflow-y: auto; }
-.tb-need { --kind: var(--idle); display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; font-size: 13px;
-  color: var(--ink); background: var(--term); border: 1px solid var(--edge); border-left: 3px solid var(--kind); border-radius: 10px; padding: 7px 12px; cursor: pointer; }
-.tb-need:hover { background: var(--sheet-2); }
-.tb-need:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tb-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tb-go { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--accent-ink); }
 .k-asking, .k-question { --kind: var(--signal); }
 .k-review { --kind: var(--done); }
 .k-stuck, .k-limit, .k-duplicate, .k-blocked { --kind: var(--danger); }

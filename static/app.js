@@ -591,7 +591,7 @@ function focusPane(name) {
 }
 
 // ---------- the team as a tree ----------
-// For whoever would rather not watch every terminal: at the top, how the team is doing and what needs you; below,
+// For whoever would rather not watch every terminal: at the top, how the team is doing; below,
 // each agent as a card in the org chart saying what it is doing right now (the command it runs, its own words
 // for it), its task and its last message. A card opens the agent's terminal.
 
@@ -665,58 +665,23 @@ function agentLook(r) {
   return { cls, label, now, shown };
 }
 
-// ---------- the bar: the team at a glance, and what needs you ----------
-
-const NEED_ORDER = ['asking', 'question', 'review', 'stuck', 'limit', 'blocked', 'duplicate', 'stopped', 'stalled', 'loop'];
+// ---------- the bar: the team at a glance ----------
 
 function renderTreeBar(looks) {
   const st = S.state;
-  const key = JSON.stringify([st.roles.map((r) => looks[r.name].cls), st.problems, askingProblems(), st.roles.map((r) => costTokens(r.usage)), L.needsOpen]);
+  const key = JSON.stringify([st.roles.map((r) => looks[r.name].cls), st.roles.map((r) => costTokens(r.usage))]);
   if (key === S.treeBarKey) return;
   S.treeBarKey = key;
   const counts = {};
   for (const r of st.roles) counts[looks[r.name].cls] = (counts[looks[r.name].cls] || 0) + 1;
   const shown = [['working', 'working'], ['asking', 'asking you'], ['stuck', 'stuck'], ['blocked', 'blocked'], ['paused', 'paused'],
     ['waiting', 'waiting'], ['idle', 'idle'], ['off', 'not running']].filter(([k]) => counts[k]);
-  const needs = [...st.problems.filter((p) => p.kind !== 'limit'), ...askingProblems().map((p) => ({ ...p, kind: 'asking' }))]
-    .sort((a, b) => NEED_ORDER.indexOf(a.kind) - NEED_ORDER.indexOf(b.kind));
   const spent = st.roles.reduce((sum, r) => sum + costTokens(r.usage), 0);
-  const open = L.needsOpen ?? true;
   fill($('#tree-bar'),
     h('div', { class: 'tb-team' },
       shown.map(([k, word]) => h('span', { class: `tb-count state ${k}` }, h('b', {}, counts[k]), ` ${word}`)),
       h('span', { class: 'grow' }),
-      spent ? h('span', { class: 'tb-spent', title: 'Tokens the team has used, over every conversation' }, `${fmtNum(spent)} tokens`) : null),
-    needs.length ? h('div', { class: 'tb-needs' },
-      h('button', { class: 'tb-needs-head', 'aria-expanded': String(open), onclick: () => { L.needsOpen = !open; saveLayout(); S.treeBarKey = ''; renderTreeBar(looks); } },
-        h('b', {}, needs.length === 1 ? 'One thing needs you' : `${needs.length} things need you`), h('span', { class: 'chev' }, open ? '▾' : '▸')),
-      open ? h('div', { class: 'tb-list' }, needs.slice(0, 8).map(needItem),
-        needs.length > 8 ? h('span', { class: 'muted small' }, `and ${needs.length - 8} more`) : null) : null)
-      : h('div', { class: 'tb-calm muted' }, 'Nothing needs you right now.'));
-}
-
-/** One thing that needs the owner, as a button that does what it asks. */
-function needItem(p) {
-  const r = findRole(p.role);
-  const go = {
-    asking: () => { setTeamMode(false); focusPane(p.role); },
-    answer: () => {
-      const m = S.messages.find((x) => x.id === p.message_id);
-      if (!L.side) { L.side = true; applyChrome(); saveLayout(); }
-      if (m) { jumpTo(m.id); replyTo(m); } else { showTab('messages'); setFilter('me'); }
-    },
-    review: () => openTask(p.task_id),
-    'open-task': () => openTask(p.task_id),
-    start: () => r && startRole(r),
-    restart: () => restartRole(p.role),
-    stop: () => stopRoles(p.role),
-    reassign: () => openDrawer(p.role),
-  }[p.kind === 'asking' ? 'asking' : p.action] || (() => openDrawer(p.role));
-  const verb = { asking: 'Answer it', answer: 'Reply', review: 'Review', 'open-task': 'Open task', start: 'Start', restart: 'Restart',
-    stop: 'Stop', reassign: 'Details' }[p.kind === 'asking' ? 'asking' : p.action] || 'Details';
-  return h('button', { class: `tb-need k-${p.kind}`, title: p.text, onclick: go },
-    h('span', { class: 'tb-text' }, p.kind === 'asking' ? `${p.role}'s terminal asks you something` : p.text),
-    h('span', { class: 'tb-go' }, verb));
+      spent ? h('span', { class: 'tb-spent', title: 'Tokens the team has used, over every conversation' }, `${fmtNum(spent)} tokens`) : null));
 }
 
 // ---------- the chart ----------

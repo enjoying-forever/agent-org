@@ -79,10 +79,7 @@ agent carries on where it stopped.
   it does, and its recent messages.
 - **Terminals or Tree:** the switch at the top of the Team page (or Ctrl+Alt+T) shows either every agent's terminal
   or the team as a tree, for when you would rather not watch them all. Above the tree, the team at a
-  glance (how many work, wait, ask you or are not running) and **what needs you**: a question for
-  you, a task waiting for your review, a terminal asking something, a stuck agent, one with work
-  that is not running - each with its button (*Reply*, *Review*, *Answer it*, *Start*, *Restart*).
-  Below, each agent is a card under whom it reports to. Its highlighted line says what it does
+  glance: how many work, wait, ask you or are not running, and the tokens used. Below, each agent is a card under whom it reports to. Its highlighted line says what it does
   right now: the command it runs with how long it has been running (`$ npm test` 1m 20s), or
   what it says it is doing, or what it did last. Then its task and for how long, its earlier
   actions, its last message, the files it writes and its usage; a ring shows it at work (green),
