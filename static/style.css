@@ -775,6 +775,7 @@ button.taskc { text-align: left; cursor: pointer; }
 .builder-row .role-icon { width: 32px; height: 32px; font-size: 16px; border-radius: 8px; }
 .builder-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .builder-row input, .builder-row select { padding: 5px 8px; font-size: 13px; }
+.builder-row input.invalid { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
 .pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
 .pick-item { display: flex; gap: 12px; align-items: center; border: 1px solid var(--edge); border-radius: 10px; padding: 10px 12px; background: var(--well); }
 .pick-item .grow { flex: 1; min-width: 0; }
@@ -1015,3 +1016,6 @@ button.primary.send svg { width: 16px; height: 16px; }
 .checks-fine > .checks { margin-top: 10px; }
 /* what an agent says it is about (set_about): one line under its model */
 .node .about { font-size: 12.5px; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+
+/* a send on its way: a second click does nothing (see sendOnce) */
+button[aria-busy="true"] { opacity: 0.55; cursor: progress; }

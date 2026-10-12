@@ -120,18 +120,20 @@ agent carries on where it stopped.
   (a running agent uses them from its next start; *Save and restart* applies them now) or
   *Remove* (whoever reported to it then reports to its superior).
 - **In a terminal:** Ctrl+C copies when text is selected (otherwise it interrupts the agent),
-  Ctrl+V pastes, right-click copies or pastes, and links open in your browser. A pane's program
+  Ctrl+V pastes (a long text goes in parts, up to 1 MiB), right-click copies or pastes, and links open in your browser. A pane's program
   badge lights up while it writes. Ctrl+Alt+1-9, Ctrl+Alt+arrows and Ctrl+Alt+Enter move between
   panes and go full screen; Ctrl+wheel or Ctrl+Alt+= / - / 0 makes the terminals' text bigger,
   smaller or normal (*More* > *Keyboard shortcuts* lists them all).
 - **Messages:** the whole team's conversation, live (a task shows without the lines that tell its
   agent how to close it). Write to anyone, reply, mark a
   message urgent, or write to everyone at once. Questions the leader asks you have
-  *Reply* and *Summon consultant* buttons.
+  *Reply* and *Summon consultant* buttons. A message is sent once however often you click,
+  and what you start typing while it goes stays. What you were writing in a team waits for you
+  when you switch to another one and back.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
   "done" means, what it waits for, which files it changed (with the diff; click one to show it in File Explorer), whether the
-  checks passed, and to accept or send back a result.
+  checks passed, and to accept or send back a result. An open task follows along as it changes.
 - **What needs you** shows where it is, not in a list of its own: a stuck agent or a second
   session on its pane's title, an agent asking something as an amber outline, questions for
   you and results to review as messages, a stopped agent with work on its card (with *Start*).

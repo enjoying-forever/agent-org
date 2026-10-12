@@ -188,11 +188,16 @@ const S = {
 
 async function refresh() {
   try {
-    const [state, fresh] = await Promise.all([api('/api/state'), api(`/api/messages?after=${S.lastId}`)]);
+    let [state, fresh] = await Promise.all([api('/api/state'), api(`/api/messages?after=${S.lastId}`)]);
     setConn(true);
+    if (S.state && state.team_file !== S.state.team_file) { // another team opened (here or elsewhere): start over with it
+      leaveTeam();
+      fresh = await api('/api/messages?after=0');
+    }
     enterTeam();
     applyState(state);
     if (fresh.messages.length) addMessages(fresh.messages);
+    refreshOpenTask();
   } catch (e) {
     if (e instanceof NoTeam) enterHome();
     else setConn(false, e.message);
@@ -263,6 +268,7 @@ function applyState(state) {
   const first = S.state === null;
   S.state = state;
   S.stateKey = key;
+  if (first) S.drafts = { ...TEAM_DRAFTS.get(state.team_file)?.panes };
   const folder = state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
   $('#project').textContent = folder;
   $('#project').title = `Open the project folder in File Explorer\n\nproject: ${state.project_root}\nteam file: ${state.team_file}`;
@@ -280,7 +286,7 @@ function applyState(state) {
   renderRoleFilter();
   renderInboxBadge();
   if (S.selected) renderDrawer();
-  if (first) { renderFeed('bottom'); tellWindowTheme(); movePrefs(); }
+  if (first) { restoreDraft(state.team_file); renderFeed('bottom'); tellWindowTheme(); movePrefs(); }
 }
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
@@ -301,13 +307,45 @@ function enterTeam() {
   showView('team');
 }
 
-function enterHome() {
-  if (S.mode === 'home') return;
-  S.mode = 'home';
-  Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0, focus: null, drafts: {} });
+const TEAM_DRAFTS = new Map(); // team file -> what you were writing in it, back when you open it again
+
+/** Leave the team the page shows: what you were writing in it is kept for it, everything else of it goes (seen:
+ * "Replying to #1" of the last team was still there in the next). */
+function leaveTeam() {
+  const team = S.state?.team_file;
+  if (team) {
+    TEAM_DRAFTS.set(team, { compose: S.compose, to: $('#to').value, text: $('#text').value, title: $('#task-title').value,
+      done: $('#task-done').value, panes: { ...S.drafts },
+      task: ['#nt-title', '#nt-details', '#nt-done', '#nt-priority'].map((id) => $(id).value) });
+  }
+  clearReply();
+  for (const id of ['#text', '#task-title', '#task-done']) $(id).value = '';
+  $('#urgent').checked = false;
+  clearNewTask();
+  for (const id of ['#task-dialog', '#new-task']) if ($(id).open) $(id).close();
+  searchSeq += 1; // an answer still coming is for the last team
+  $('#search').value = '';
+  Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0, focus: null, drafts: {},
+    taskShown: null, boardKey: '', problemsSeen: undefined });
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
+}
+
+/** Back in a team: what you were writing there when you left it. */
+function restoreDraft(team) {
+  const d = TEAM_DRAFTS.get(team);
+  if (!d) return;
+  setCompose(d.compose);
+  $('#to').value = d.to;
+  [$('#text').value, $('#task-title').value, $('#task-done').value] = [d.text, d.title, d.done];
+  ['#nt-title', '#nt-details', '#nt-done', '#nt-priority'].forEach((id, i) => { $(id).value = d.task[i]; });
+}
+
+function enterHome() {
+  if (S.mode === 'home') return;
+  S.mode = 'home';
+  leaveTeam();
   for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template',
     '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
@@ -396,7 +434,10 @@ $('#create-go').addEventListener('click', async () => {
   const folder = $('#create-path').value.trim();
   const template = document.querySelector('#templates input:checked')?.value;
   if (!folder) { toast('Choose the project folder first.', true); return; }
-  const body = template === BUILD ? { folder, roles: builderRoles() } : { folder, template };
+  let body;
+  try {
+    body = template === BUILD ? { folder, roles: builderRoles() } : { folder, template };
+  } catch (e) { toast(e.message, true); return; }
   if (template === BUILD && !body.roles.length) { toast('Pick at least one role from the market first.', true); return; }
   const note = document.querySelector('#templates input:checked')?.closest('label')?.querySelector('.programs');
   const lacking = note ? note.dataset.programs.split(',').filter((p) => MISSING.has(p)).map((p) => PROGRAM[p] || p) : [];
@@ -1077,11 +1118,15 @@ function renderSummary(p, r) {
       class: 'pane-prompt',
       onsubmit: (e) => {
         e.preventDefault();
-        const input = e.target.querySelector('input');
-        const text = input.value.trim();
+        const text = e.target.querySelector('input').value.trim();
         if (!text) return;
-        act(api('/api/send', { to: r.name, text }).then((res) => { S.drafts[r.name] = ''; input.value = ''; return res; }),
-          () => `Sent to ${r.name}.`);
+        sendOnce(`pane:${r.name}`, e.target, () => act(api('/api/send', { to: r.name, text }).then((res) => {
+          // the pane may have been drawn again meanwhile: its input now, and the draft, only if still what was sent
+          const input = document.querySelector(`.pane-prompt input[data-pane="${CSS.escape(r.name)}"]`);
+          if (input) clearSent(input, text);
+          if ((S.drafts[r.name] || '').trim() === text) S.drafts[r.name] = '';
+          return res;
+        }), () => `Sent to ${r.name}.`));
       },
     },
     h('span', { 'aria-hidden': 'true' }, '›'),
@@ -1327,15 +1372,31 @@ function fitAllTerms() {
   for (const p of PANES.values()) fitTerm(p);
 }
 
+const KEYS_PART = 16384; // characters per request: a long paste goes in parts (seen: 80 KiB sent nothing)
+const PASTE_MAX = 1024 * 1024; // more than this is a file's work, not a terminal's
+
 /** Keystrokes go one request at a time, so they arrive in the order they were typed. */
 async function sendKeys(p, data) {
+  if (p.pending.length + data.length > PASTE_MAX) {
+    toast(`That is too much to type into ${p.name}'s terminal (${Math.round(data.length / 1024)} KiB). Save it in a file in the project and tell ${p.name} where it is.`, true);
+    return;
+  }
   p.pending += data;
   if (p.sending) return;
   p.sending = true;
   while (p.pending) {
-    const chunk = p.pending;
-    p.pending = '';
-    try { await api('/api/term-input', { role: p.name, data: chunk }); } catch (e) { toast(e.message, true); p.pending = ''; }
+    let cut = Math.min(p.pending.length, KEYS_PART);
+    const high = p.pending.charCodeAt(cut - 1);
+    if (cut < p.pending.length && high >= 0xd800 && high <= 0xdbff) cut -= 1; // not between the halves of a character
+    const chunk = p.pending.slice(0, cut);
+    p.pending = p.pending.slice(cut);
+    try {
+      await api('/api/term-input', { role: p.name, data: chunk });
+    } catch (e) {
+      const left = p.pending.length;
+      p.pending = '';
+      toast(`Not all of it reached ${p.name}: ${e.message}${left ? ` (${Math.round(left / 1024)} KiB not sent)` : ''}`, true);
+    }
   }
   p.sending = false;
 }
@@ -1959,17 +2020,20 @@ for (const b of document.querySelectorAll('#filter-seg button')) b.addEventListe
 for (const b of document.querySelectorAll('#mode-seg button')) b.addEventListener('click', () => setCompose(b.dataset.mode));
 $('#filter-role').addEventListener('change', (e) => { S.roleFilter = e.target.value; renderFeed('bottom'); });
 let searchTimer;
+let searchSeq = 0; // the latest search: an answer to an earlier one that comes after it is dropped
 $('#search').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
+  const seq = ++searchSeq;
   searchTimer = setTimeout(async () => {
     if (!q) { renderFeed('bottom'); return; }
     try {
       const { messages } = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      if (seq !== searchSeq) return; // seen: a slow earlier answer covered the newer one
       $('#feed').replaceChildren(h('div', { class: 'muted small' }, `${plural(messages.length, 'message')} with "${q}"`),
         ...messages.map((m) => messageEl(m)));
       $('#feed').dataset.list = ''; // search results: cleared, the conversation is drawn whole again
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { if (seq === searchSeq) toast(err.message, true); }
   }, 250);
 });
 $('#reply-chip button').addEventListener('click', clearReply);
@@ -1990,28 +2054,55 @@ function renderLaunch() {
 }
 $('#launch-all').addEventListener('click', () => launchRoles([])); // starting stops nothing: no question first
 $('#stop-all').addEventListener('click', () => stopRoles('@all'));
+const sending = new Set(); // what is on its way: 'composer', 'pane:<role>', 'new-task'
+
+/** Send once: another Send of the same `key` while it is on its way does nothing (seen: a double click sent the
+ * message twice). The form's send button says it is busy meanwhile. */
+async function sendOnce(key, form, request) {
+  if (sending.has(key)) return null;
+  sending.add(key);
+  const button = form.querySelector('button.primary, button.send, button[value=ok]');
+  button?.setAttribute('aria-busy', 'true');
+  try {
+    return await request();
+  } finally {
+    sending.delete(key);
+    button?.removeAttribute('aria-busy');
+  }
+}
+
+/** Empty a field once what it held was sent - unless it changed meanwhile: that is the next message being typed
+ * (seen: the answer to one send cleared the draft of the next). */
+function clearSent(field, sent) {
+  if (field.value.trim() === sent.trim()) field.value = '';
+}
+
 $('#composer').addEventListener('submit', (e) => {
   e.preventDefault();
   const to = $('#to').value;
   const text = $('#text').value.trim();
   if (S.compose === 'task') {
     const title = $('#task-title').value.trim();
+    const doneWhen = $('#task-done').value;
     if (!title) { toast('Give the task a one-line title.', true); return; }
-    act(api('/api/task', { to, title, details: text, done_when: $('#task-done').value }).then((t) => {
-      $('#task-title').value = '';
-      $('#task-done').value = '';
-      $('#text').value = '';
+    sendOnce('composer', e.target, () => act(api('/api/task', { to, title, details: text, done_when: doneWhen }).then((t) => {
+      clearSent($('#task-title'), title);
+      clearSent($('#task-done'), doneWhen);
+      clearSent($('#text'), text);
       return t;
-    }), (t) => `Task #${t.id} given to ${t.assignee}.`);
+    }), (t) => `Task #${t.id} given to ${t.assignee}.`));
     return;
   }
   if (!text) return;
-  act(api('/api/send', { to, text, reply_to: S.replyTo, urgent: $('#urgent').checked }).then((r) => {
-    $('#text').value = '';
-    $('#urgent').checked = false;
-    clearReply();
+  const reply = S.replyTo;
+  const team = S.state?.team_file;
+  sendOnce('composer', e.target, () => act(api('/api/send', { to, text, reply_to: reply, urgent: $('#urgent').checked }).then((r) => {
+    if (S.state?.team_file !== team) return r; // another team opened meanwhile: its composer is not this one's
+    clearSent($('#text'), text);
+    if ($('#text').value === '') $('#urgent').checked = false;
+    if (S.replyTo === reply) clearReply();
     return r;
-  }));
+  })));
 });
 $('#text').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#composer').requestSubmit();

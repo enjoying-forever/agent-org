@@ -41,6 +41,7 @@ export const STATIC = path.join(CODE_DIR, '..', 'static');
 const CONTENT_TYPES: Record<string, string> = dict({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' });
 export const MAX_BODY = 1_000_000;
+export const TERM_INPUT_MAX = 65536; // characters of terminal input per request
 export const NO_TEAM = 'no_team'; // error the page answers by showing the welcome screen
 export const WATCH_EVERY = 30; // seconds between watchdog patrols
 export const AUTOSTART_GAP = 600; // seconds before the same agent is started automatically again
@@ -306,8 +307,18 @@ export class App {
     this.hubOrNull?.close();
     this.hubOrNull = hub;
     this.teamFile = teamFile;
-    this.resumable.clear();
+    this.forgetTeam();
     rememberRecent(teamFile);
+  }
+
+  /** What was kept about the team that was open: the next one has its own (seen: a team just opened showed the
+   * last one's Setup checks and problems for a while). */
+  private forgetTeam(): void {
+    this.checksCache = null;
+    this.problemsCache = [0, []];
+    this.historyCache = [0, false];
+    this.resumable.clear();
+    this.autostarted.clear();
   }
 
   /** The terminals of the open team's agents. */
@@ -391,7 +402,9 @@ export class App {
   termInput(body: Body): Json {
     const term = this.terminals.get(str(body, 'role'));
     const data = body.data;
-    if (term === undefined || typeof data !== 'string' || data.length > 65536) throw new ApiError('That agent has no terminal here.');
+    if (term === undefined) throw new ApiError('That agent has no terminal here.');
+    if (typeof data !== 'string') throw new ApiError('send the keys as text');
+    if (data.length > TERM_INPUT_MAX) throw new ApiError(`At most ${TERM_INPUT_MAX} characters at a time (the page sends a long paste in parts).`);
     term.typed(data);
     return {};
   }
@@ -523,6 +536,7 @@ export class App {
     this.hubOrNull?.close();
     this.hubOrNull = null;
     this.teamFile = null;
+    this.forgetTeam();
   }
 
   /** Agents running in this window's terminals, in any team. */
@@ -633,11 +647,15 @@ export class App {
   /** A team.yaml built from market roles: [{id, name, superior}], superiors by name ('you' = leader). */
   static teamFromRoles(picked: unknown): Body {
     if (!Array.isArray(picked) || !picked.length) throw new ApiError('Pick at least one role for the team.');
-    const roles: Body = {};
+    const roles: Body = dict();
+    const taken = new Set<string>();
     for (const item of picked) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ApiError('Each picked role needs an id, a name and whom it reports to.');
       try {
         const name = String(item.name ?? '').trim() || presets.roleName(String(item.id), new Set(Object.keys(roles)));
+        // seen: two roles given the same name, and the second silently took the first one's place
+        if (taken.has(name.toLowerCase())) throw new ApiError(`Two roles are named '${name}': give each its own name.`);
+        taken.add(name.toLowerCase());
         roles[name] = presets.teamRole(String(item.id), String(item.superior || 'you'));
       } catch (e) {
         if (e instanceof presets.KeyError) throw new ApiError(`There is no role '${item.id}' in the market.`);

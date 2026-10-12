@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import * as doctor from '../src/doctor.ts';
 import { lookup } from '../src/runtime.ts';
 import { parseYaml, Team } from '../src/team.ts';
+import type * as terminals from '../src/terminals.ts';
 import * as templates from '../src/templates.ts';
 import * as ui from '../src/ui.ts';
 import * as sessions from '../src/sessions.ts';
@@ -664,4 +665,41 @@ test('more than 200 unfinished tasks: none drops off the Board, and each agent c
   const state = server.app.state() as { tasks: { id: number }[]; roles: { name: string; open_tasks: number }[] };
   assert.ok(state.tasks.some((x) => x.id === first.id), 'the oldest open task is there');
   assert.equal(state.roles.find((r) => r.name === 'worker-a')?.open_tasks, 201);
+});
+
+test('two picked roles with one name: the new team is refused, not built with one of them', async (t) => {
+  // reported: three roles picked, two named alike by hand, and the team was made with two
+  const dir = tmpDir(t);
+  const server = await startServer(t);
+  const folder = path.join(dir, 'twins');
+  const [status, data] = await server.request('/api/create', { folder, roles: [{ id: 'planner', name: 'lead', superior: 'you' },
+    { id: 'coder', name: 'dev', superior: 'lead' }, { id: 'reviewer', name: 'Dev', superior: 'lead' }] });
+  assert.ok(status === 400 && data.error.includes("Two roles are named 'Dev'"), JSON.stringify(data));
+  assert.ok(!existsSync(path.join(folder, 'team.yaml')));
+});
+
+test("a team just opened has its own Setup checks and problems, not the last one's", async (t) => {
+  // reported: the next team showed the last team's Setup checks and problem notes for a while
+  const dir = tmpDir(t);
+  const server = await startServer(t);
+  let ran = 0;
+  server.app.runChecks = async () => { ran += 1; return []; };
+  await server.ok('/api/checks');
+  await server.ok('/api/checks'); // kept for a minute
+  assert.equal(ran, 1);
+  await server.ok('/api/create', { folder: path.join(dir, 'other'), template: templates.ids()[0] });
+  await server.ok('/api/checks');
+  assert.equal(ran, 2, 'checked again for the team now open');
+});
+
+test('terminal input says what is wrong with it', async (t) => {
+  // reported: an 80 KiB paste sent nothing and was answered "That agent has no terminal here"
+  const server = await startServer(t);
+  const [, none] = await server.request('/api/term-input', { role: 'leader', data: 'x' });
+  assert.match(none.error, /no terminal here/);
+  const term = { typed: () => {} } as unknown as terminals.Terminal;
+  server.app.terminals.get = () => term;
+  const [status, long] = await server.request('/api/term-input', { role: 'leader', data: 'x'.repeat(ui.TERM_INPUT_MAX + 1) });
+  assert.ok(status === 400 && /At most 65536 characters at a time/.test(long.error), JSON.stringify(long));
+  await server.ok('/api/term-input', { role: 'leader', data: 'x'.repeat(ui.TERM_INPUT_MAX) });
 });

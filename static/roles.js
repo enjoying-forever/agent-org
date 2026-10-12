@@ -258,7 +258,7 @@ async function renderBuilder() {
     const others = B.picked.filter((y) => y !== x).map((y) => y.name);
     return h('div', { class: `builder-row h-${p.harness}` }, roleIcon(p),
       h('div', {}, h('b', {}, p.title), h('div', { class: 'muted small' }, `${p.harness}${p.model ? `, ${p.model}` : ''}`)),
-      h('input', { value: x.name, title: 'Its name in the team', oninput: (e) => { x.name = e.target.value.trim(); } ,
+      h('input', { value: x.name, title: 'Its name in the team', 'data-builder-name': '', oninput: (e) => renameBuilt(x, e.target.value.trim()),
         onchange: () => renderBuilder() }),
       h('select', { title: 'Reports to', onchange: (e) => { x.superior = e.target.value; } },
         h('option', { value: 'you', selected: x.superior === 'you' }, i === 0 ? 'you (leader)' : 'you'),
@@ -269,6 +269,35 @@ async function renderBuilder() {
     rows.length ? rows : h('div', { class: 'muted small' }, 'No roles yet. The first one you add leads the team; '
       + 'each other one reports to someone.'),
     h('div', { class: 'row' }, h('button', { type: 'button', onclick: openPicker }, '+ Add roles from the market')));
+  markDuplicates();
+}
+
+/** A new name for a picked role: whoever reported to it still does (seen: they went to the leader instead). */
+function renameBuilt(x, name) {
+  for (const y of B.picked) if (y !== x && y.superior === x.name) y.superior = name;
+  x.name = name;
+  markDuplicates();
+}
+
+/** Names two picked roles share (the team would keep only one of them). */
+function duplicateNames() {
+  const seen = new Set();
+  const twice = new Set();
+  for (const x of B.picked) {
+    const key = x.name.toLowerCase();
+    if (seen.has(key)) twice.add(key);
+    seen.add(key);
+  }
+  return twice;
+}
+
+function markDuplicates() {
+  const twice = duplicateNames();
+  document.querySelectorAll('#builder [data-builder-name]').forEach((input, i) => {
+    const dup = Boolean(B.picked[i]) && twice.has(B.picked[i].name.toLowerCase());
+    input.classList.toggle('invalid', dup);
+    input.title = dup ? 'Another role has this name: give each its own' : 'Its name in the team';
+  });
 }
 
 function fixSuperiors() {
@@ -280,6 +309,9 @@ function fixSuperiors() {
 }
 
 function builderRoles() {
+  const twice = [...duplicateNames()];
+  if (twice.length) throw new Error(`Two roles are named ${twice.map((n) => `'${n}'`).join(', ')}: give each its own name.`);
+  if (B.picked.some((x) => !x.name)) throw new Error('Every role needs a name.');
   fixSuperiors();
   return B.picked.map((x) => ({ id: x.id, name: x.name, superior: x.superior }));
 }

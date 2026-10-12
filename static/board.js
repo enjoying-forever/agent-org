@@ -62,10 +62,31 @@ function stuckOn(t) {
 
 // ---------- one task ----------
 
+/** What the page knows of a task that its dialog shows: when it changes (its state, a result, a message about
+ * it), the open dialog is drawn again. null for a task the board does not have. */
+function taskShownKey(id) {
+  const t = S.state?.tasks.find((x) => x.id === id);
+  return t ? JSON.stringify([t.state, t.updated_at, t.assignee, S.messages.filter((m) => m.task_id === id).length]) : null;
+}
+
+/** Keep the open task's dialog up to date (seen: the Board said Review while the dialog still said working). */
+function refreshOpenTask() {
+  const shown = S.taskShown;
+  if (!shown || !$('#task-dialog').open) return;
+  const key = taskShownKey(shown.id);
+  if (key === null || key === shown.key) return;
+  shown.key = key; // once, however many updates come while it loads
+  openTask(shown.id);
+}
+
 async function openTask(id) {
   let d;
   try { d = await api(`/api/task?id=${id}`); } catch (e) { toast(e.message, true); return; }
   const t = d.task;
+  // drawn again: the review you are writing stays as it is, and where you are in the dialog
+  const old = S.taskShown?.id === id && $('#task-dialog').open ? $('#task-body .review textarea') : null;
+  const kept = old && { text: old.value, focused: document.activeElement === old, from: old.selectionStart, to: old.selectionEnd };
+  const scrolled = S.taskShown?.id === id ? [$('#task-dialog').scrollTop, $('#task-body').scrollTop] : [0, 0];
   const closed = ['accepted', 'failed', 'rejected', 'cancelled'].includes(t.state);
   const byId = (x) => S.state.tasks.find((y) => y.id === x);
   const feedback = h('textarea', { rows: 3, placeholder: 'What has to change (needed to send it back)' });
@@ -105,7 +126,13 @@ async function openTask(id) {
       !closed && h('button', { class: 'danger', onclick: () => cancelTask(t) }, 'Cancel task')),
     h('h3', {}, `Conversation (${d.thread.length})`),
     d.thread.length ? d.thread.map((m) => messageEl(m, true)) : h('div', { class: 'muted' }, 'No messages yet.'));
+  if (kept) {
+    feedback.value = kept.text;
+    if (kept.focused) { feedback.focus(); feedback.setSelectionRange(kept.from, kept.to); }
+  }
   if (!$('#task-dialog').open) $('#task-dialog').showModal();
+  [$('#task-dialog').scrollTop, $('#task-body').scrollTop] = scrolled;
+  S.taskShown = { id, key: taskShownKey(id) };
   loadChanges(t.id);
 }
 
@@ -146,6 +173,7 @@ Why (${to} reads this):`,
 /** Every unfinished task of one agent, each with its own Move control. */
 async function openMoveTasks(name) {
   await refresh();
+  S.taskShown = null;
   const r = findRole(name);
   const tasks = S.state.tasks.filter((t) => t.assignee === name && ['waiting', 'open', 'working', 'blocked'].includes(t.state));
   fill($('#task-body'),
@@ -228,25 +256,38 @@ function openNewTask(to) {
   $('#nt-after-box').open = false;
   $('#nt-after').replaceChildren(...candidates.map((t) => h('label', { class: 'inline' },
     h('input', { type: 'checkbox', value: t.id }), `#${t.id} ${t.title} (${t.assignee}, ${t.state})`)));
-  for (const id of ['#nt-title', '#nt-details', '#nt-done']) $(id).value = '';
-  $('#nt-priority').value = '2';
+  // what was typed and not given yet stays (a failed try, a closed dialog): it is emptied once the task is given
   $('#new-task').returnValue = '';
   $('#new-task').showModal();
   $('#nt-title').focus();
 }
 
 $('#new-task-btn').addEventListener('click', () => openNewTask());
+/** The new-task form emptied, for the next one. */
+function clearNewTask() {
+  for (const id of ['#nt-title', '#nt-details', '#nt-done']) $(id).value = '';
+  $('#nt-priority').value = '2';
+}
+
 $('#new-task-form').addEventListener('submit', (e) => {
   if (e.submitter?.value !== 'ok') return;
+  e.preventDefault(); // it closes once the task is given: a refusal leaves it open, as typed, to fix and try again
   const body = {
     to: $('#nt-to').value, title: $('#nt-title').value.trim(), details: $('#nt-details').value,
     done_when: $('#nt-done').value, priority: Number($('#nt-priority').value),
     after: [...document.querySelectorAll('#nt-after input:checked')].map((x) => Number(x.value)),
   };
   if (!body.title) { toast('A task needs a one-line title.', true); return; }
-  act(api('/api/task', body), (t) => (t.state === 'waiting'
-    ? `Task #${t.id} will start when #${t.after.join(', #')} ${t.after.length > 1 ? 'are' : 'is'} done.`
-    : `Task #${t.id} given to ${t.assignee}.`));
+  const team = S.state.team_file;
+  sendOnce('new-task', e.target, async () => {
+    const t = await act(api('/api/task', body), (x) => (x.state === 'waiting'
+      ? `Task #${x.id} will start when #${x.after.join(', #')} ${x.after.length > 1 ? 'are' : 'is'} done.`
+      : `Task #${x.id} given to ${x.assignee}.`));
+    if (t && S.state?.team_file === team) {
+      clearNewTask();
+      $('#new-task').close('ok');
+    }
+  });
 });
 $('#board-role').addEventListener('change', renderBoard);
 
