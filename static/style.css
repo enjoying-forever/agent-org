@@ -1004,3 +1004,5 @@ button.primary.send svg { width: 16px; height: 16px; }
 .tree-view .node .card-msg { opacity: 0; }
 .tree-view .node:hover .card-msg, .tree-view .node:focus-within .card-msg, .tree-view .node .card-msg:focus-visible { opacity: 1; }
 #launch-all[data-idle="1"] { display: none; } /* every agent runs: nothing to start */
+/* a task's changed files: each shows itself in File Explorer */
+.task-files { display: flex; flex-wrap: wrap; gap: 4px 14px; }

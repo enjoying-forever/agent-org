@@ -541,6 +541,18 @@ test("the project folder opens: the team's own, whatever the page asks", async (
   assert.deepEqual(await server.ok('/api/open-folder', { path: 'C:\\Windows' }), { opened: root }); // no path from the page
 });
 
+test('a project file is shown in File Explorer, and only one inside the project', async (t) => {
+  const server = await startServer(t);
+  const root = server.app.hub.baseTeam.project_root;
+  mkdirSync(path.join(root, 'docs'), { recursive: true });
+  writeFileSync(path.join(root, 'docs', 'notes.md'), 'x');
+  assert.deepEqual(await server.ok('/api/reveal', { path: 'docs/notes.md' }), { shown: path.join(root, 'docs', 'notes.md') });
+  assert.equal((await server.request('/api/reveal', { path: 'docs/gone.md' }))[0], 404);
+  for (const outside of ['../team.yaml', String.raw`C:\Windows\notepad.exe`, '', '.']) {
+    assert.equal((await server.request('/api/reveal', { path: outside }))[0], 400, outside);
+  }
+});
+
 test('the folder picker answers with what was chosen', async (t) => {
   const server = await startServer(t);
   server.app.pickFolderWith = async (title) => (title === 'Where?' ? 'C:\\work\\app' : '');

@@ -130,7 +130,7 @@ agent carries on where it stopped.
   *Reply* and *Summon consultant* buttons.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
-  "done" means, what it waits for, which files it changed (with the diff), whether the
+  "done" means, what it waits for, which files it changed (with the diff; click one to show it in File Explorer), whether the
   checks passed, and to accept or send back a result.
 - **What needs you** shows where it is, not in a list of its own: a stuck agent or a second
   session on its pane's title, an agent asking something as an amber outline, questions for

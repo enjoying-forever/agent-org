@@ -404,6 +404,20 @@ export class App {
     return { opened: folder };
   }
 
+  /** Show one of the project's files in File Explorer, selected: it is not opened, nothing runs. Only a file inside
+   * the project folder (a task's changed file, as the page lists them). */
+  revealFile(body: Body): Json {
+    const root = path.resolve(this.hub.baseTeam.project_root);
+    const file = path.resolve(root, str(body, 'path'));
+    const rel = path.relative(root, file);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new ApiError('Only files in the project folder can be shown.');
+    if (!existsSync(file)) throw new ApiError(`${rel} is not in the project folder (any more).`, 404);
+    if (!inTest()) {
+      spawn('explorer.exe', [`/select,"${file}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
+    }
+    return { shown: file };
+  }
+
   /** Open a web link from an agent's terminal in the owner's own browser (a sign-in page, say). */
   openUrl(body: Body): Json {
     const url = str(body, 'url').trim();
@@ -1186,7 +1200,7 @@ export const POST_ROUTES: Record<string, Route> = {
   '/api/role-place': post(App.prototype.rolePlace), '/api/role-reset': post(App.prototype.roleReset),
   '/api/role-restore': post(App.prototype.roleRestore),
   '/api/term-input': post(App.prototype.termInput), '/api/term-resize': post(App.prototype.termResize), '/api/open-url': post(App.prototype.openUrl),
-  '/api/open-folder': post(App.prototype.openFolder),
+  '/api/open-folder': post(App.prototype.openFolder), '/api/reveal': post(App.prototype.revealFile),
   '/api/window': post(App.prototype.windowAction), '/api/prefs': post(App.prototype.setPref),
   '/api/teammate': post(App.prototype.teammateUpdate), '/api/teammate-remove': post(App.prototype.teammateRemove),
 };
