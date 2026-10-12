@@ -638,6 +638,15 @@ export class App {
       default: templates.defaultTemplate() };
   }
 
+  /** What a folder the owner typed or picked holds: a team to open, or room for a new one. */
+  folder(p: string): Json {
+    const folder = unquote(p.trim());
+    if (!folder) return { folder: '', exists: false, team_file: '', name: '' };
+    const full = path.resolve(folder);
+    const teamFile = path.join(full, 'team.yaml');
+    return { folder: full, absolute: path.isAbsolute(folder), exists: isDir(full), team_file: isFile(teamFile) ? teamFile : '', name: path.basename(full) };
+  }
+
   openTeam(body: Body): Json {
     let file = unquote(str(body, 'path'));
     if (isDir(file)) file = path.join(file, 'team.yaml');
@@ -787,6 +796,7 @@ export class App {
     const s = team.settings;
     return {
       owner: team.owner, leader: team.leader, project_root: team.project_root, team_file: this.teamFile, roles,
+      team_name: path.basename(path.dirname(this.teamFile ?? '')), // the folder its team.yaml is in: two projects named alike stay apart
       tiers: Object.values(team.tiers).map((t) => ({ name: t.name, harness: t.harness, model: t.model, effort: t.effort, use_for: t.use_for,
         max_active: t.max_active, active: roles.filter((r) => r.tier === t.name).length })),
       locks: locks.map(lockJson),
@@ -1254,6 +1264,7 @@ export const GET_ROUTES: Record<string, Route> = {
   '/api/state': (app) => app.state(),
   '/api/messages': (app, query: Query) => app.messages(int(q(query, 'after', '0'), 'after')),
   '/api/previews': (app) => app.previews(),
+  '/api/folder': (app, query: Query) => app.folder(q(query, 'path', '')),
   '/api/team': (app) => app.teamConfig(),
   '/api/law': (app) => app.law(),
   '/api/checks': (app, query: Query) => app.checks(q(query, 'fresh', '0') === '1'),

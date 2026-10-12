@@ -724,3 +724,17 @@ test("the page's scripts share one scope: no name is declared twice", () => {
     }
   }
 });
+
+test('the welcome page asks what a folder holds; a team is named by its folder', async (t) => {
+  const dir = tmpDir(t);
+  const server = await startServer(t);
+  const state = await server.ok('/api/state');
+  assert.equal(state.team_name, path.basename(path.dirname(server.teamFile)));
+  const team = await server.ok(`/api/folder?path=${encodeURIComponent(path.dirname(server.teamFile))}`);
+  assert.ok(team.exists && team.team_file === server.teamFile, JSON.stringify(team));
+  const empty = await server.ok(`/api/folder?path=${encodeURIComponent(dir)}`);
+  assert.ok(empty.exists && empty.team_file === '' && empty.absolute);
+  const none = await server.ok(`/api/folder?path=${encodeURIComponent(path.join(dir, 'not-yet'))}`);
+  assert.ok(!none.exists && none.team_file === '');
+  assert.equal((await server.ok('/api/folder?path=my-app')).absolute, false);
+});

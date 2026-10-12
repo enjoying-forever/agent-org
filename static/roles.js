@@ -168,13 +168,13 @@ async function duplicateRole(p) {
 
 async function deleteRole(p) {
   const again = p.mine ? '' : ' You can bring it back from the bottom of this page.';
-  if (!confirm(`Delete "${p.title}" from the market? Teams that already use it keep their copy.${again}`)) return;
+  if (!(await ask(`Delete "${p.title}" from the market? Teams that already use it keep their copy.${again}`, { ok: 'Delete', danger: true }))) return;
   const res = await act(api('/api/role-delete', { id: p.id }), () => `Deleted "${p.title}".`);
   if (res) { await loadRoles(); }
 }
 
 async function resetRole(p) {
-  if (!confirm(`Undo your edits to "${p.title}" and go back to the original?`)) return;
+  if (!(await ask(`Undo your edits to "${p.title}" and go back to the original?`))) return;
   const res = await act(api('/api/role-reset', { id: p.id }), () => `"${p.title}" is back to the original.`);
   if (res) { R.list = res.roles; renderMarket(true); }
 }

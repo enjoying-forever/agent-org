@@ -1036,7 +1036,7 @@ body.dragging-x .br-view > * { pointer-events: none; } /* the gutter keeps the p
 .br-note p { margin: 0; line-height: 1.5; max-width: 60ch; }
 .br-found { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; }
 .br-found .link { font-size: 13px; text-align: left; }
-.msg-link { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; cursor: pointer; }
+.msg-link { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; cursor: pointer; }
 .task-files .link + .link.small { margin-left: -2px; }
 
 /* ---------- compact title bar: small icons, the side panel chosen by them ---------- */
@@ -1119,3 +1119,36 @@ button.primary.launch { height: 28px; padding: 0 12px 0 10px; font-size: 12.5px;
 .model-hint { display: block; margin-top: 6px; font-size: 12.5px; font-weight: 400; color: var(--muted); line-height: 1.45; }
 .model-hint b { color: var(--ink); font-weight: 600; }
 .role-tile .spec .link { font-size: inherit; }
+
+/* the page's own question (instead of confirm and prompt) */
+dialog.ask { width: min(460px, calc(100vw - 32px)); }
+#ask-title { margin: 0 0 8px; font-size: 17px; }
+#ask-text { margin: 0 0 14px; white-space: pre-line; line-height: 1.5; }
+#ask-input { width: 100%; margin-bottom: 14px; }
+#ask-ok.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+
+/* an icon button that opens a menu is still an icon button: its icon in the middle of its box (seen: the
+   arrange and More buttons drew their hover box 6px off the icon - a menu's summary laid them out from the left) */
+.menu > summary.icon-btn { display: inline-grid; place-items: center; gap: 0; padding: 0; }
+.icon-btn.toggle { display: inline-grid; place-items: center; gap: 0; padding: 0; margin: 0; }
+.dot-btn::after { top: 3px; right: 3px; width: 7px; height: 7px; }
+
+/* your teams, from the team's name */
+.sb-head { position: relative; }
+.team-switch { left: 8px; right: auto; top: calc(100% - 4px); width: 320px; gap: 4px; padding: 8px; }
+.ts-now { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px 8px; border-bottom: 1px solid var(--edge); }
+.ts-now .mono, .ts-item .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ts-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.ts-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; border: 0;
+  background: none; padding: 7px 8px; border-radius: 8px; color: var(--ink); font-size: 13.5px; }
+.ts-item:hover { background: var(--sheet-2); }
+.team-switch hr { border: 0; border-top: 1px solid var(--edge); margin: 2px 4px; }
+.team-switch p { margin: 6px 8px; }
+.sb-head #project::after { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 2px 3px 7px;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); }
+
+/* the welcome page: one folder, and what it holds */
+.folder-status { margin: 10px 0 2px; font-size: 13.5px; color: var(--muted); }
+.folder-status.has-team { color: var(--working); font-weight: 600; }
+#folder-card #start-team { margin-top: 10px; }
+#folder-card #create-go { margin-top: 14px; }

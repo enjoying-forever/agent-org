@@ -194,8 +194,8 @@ function closeCard() {
 async function removeTeammate(name) {
   const subs = rolesUnder(name).map((x) => x.name);
   const sup = findRole(name)?.superior;
-  if (!confirm(`Remove ${name} from the team?${subs.length ? ` ${subs.join(', ')} will report to ${sup}.` : ''} `
-    + 'Its messages and finished tasks stay in the history.')) return;
+  if (!(await ask(`Remove ${name} from the team?${subs.length ? ` ${subs.join(', ')} will report to ${sup}.` : ''} `
+    + 'Its messages and finished tasks stay in the history.'))) return;
   const r = await act(api('/api/teammate-remove', { name }), () => `${name} left the team.`);
   if (r) closeCard();
 }

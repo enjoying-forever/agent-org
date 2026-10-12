@@ -158,6 +158,36 @@ function showBlocker() {
   b.hidden = false;
 }
 
+/**
+ * A question in the page, for the browser's confirm() and prompt(): agent-org's window has no prompt() at all
+ * (seen: Cancel task, Move task and "Save as my team" did nothing there), and confirm() is a system box that
+ * stops the whole page. Resolves to true or false; with `input` (its starting text), to the text, or null.
+ */
+function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const d = $('#ask');
+    const field = $('#ask-input');
+    $('#ask-title').textContent = title;
+    $('#ask-title').hidden = !title;
+    $('#ask-text').textContent = text;
+    field.hidden = input === null;
+    field.value = input ?? '';
+    $('#ask-ok').textContent = ok;
+    $('#ask-cancel').textContent = no;
+    $('#ask-ok').classList.toggle('danger', danger);
+    $('#ask-ok').classList.toggle('primary', !danger);
+    d.returnValue = '';
+    d.addEventListener('close', () => {
+      const yes = d.returnValue === 'ok';
+      resolve(input === null ? yes : yes ? field.value : null);
+    }, { once: true });
+    d.showModal();
+    if (input === null) $('#ask-ok').focus(); else { field.focus(); field.select(); }
+  });
+}
+// Enter in the text is OK (a form's Enter would take its first button, Cancel)
+$('#ask-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#ask').close('ok'); } });
+
 function showInfo(title, ...body) {
   $('#info-title').textContent = title;
   $('#info-body').replaceChildren(...body);
@@ -269,9 +299,8 @@ function applyState(state) {
   S.state = state;
   S.stateKey = key;
   if (first) S.drafts = { ...TEAM_DRAFTS.get(state.team_file)?.panes };
-  const folder = state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
-  $('#project').textContent = folder;
-  $('#project').title = `Open the project folder in File Explorer\n\nproject: ${state.project_root}\nteam file: ${state.team_file}`;
+  $('#project').textContent = state.team_name || state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
+  $('#project').title = `Your teams: switch to another\n\nproject: ${state.project_root}\nteam file: ${state.team_file}`;
   if (!S.focus || !findRole(S.focus)) S.focus = state.leader;
   renderChart();
   renderLaunch();
@@ -308,7 +337,7 @@ function enterTeam() {
   $('#view-home').hidden = true;
   $('#view-roles').hidden = true;
   $('#market-btn').hidden = true;
-  for (const id of ['#sidebar', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template', '#stop-all', '#launch-all', '#rail-toggle']) $(id).hidden = false;
+  for (const id of ['#sidebar', '#views', '#conn', '#folder-btn', '#save-template', '#stop-all', '#launch-all', '#rail-toggle']) $(id).hidden = false;
   document.body.dataset.mode = 'team';
   showView('team');
 }
@@ -353,7 +382,7 @@ function enterHome() {
   if (S.mode === 'home') return;
   S.mode = 'home';
   leaveTeam();
-  for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template',
+  for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#folder-btn', '#save-template',
     '#stop-all', '#launch-all', '#rail-toggle', '#panel-btns', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
@@ -374,7 +403,7 @@ async function renderHome() {
   const recent = home.recent.filter((r) => r.exists);
   $('#recent-card').hidden = !recent.length;
   $('#recent').replaceChildren(...recent.map((r) => h('div', { class: 'recent-row' },
-    h('button', { class: 'list-item', title: r.path, onclick: () => openTeam(r.path) },
+    h('button', { class: 'list-item', title: `Open ${r.path}`, onclick: () => openTeam(r.path) },
       h('b', {}, r.name), h('span', { class: 'muted mono' }, r.path)),
     h('button', { class: 'icon-btn forget', title: 'Take it off this list (its files stay)',
       onclick: () => act(api('/api/forget-recent', { path: r.path })).then(renderHome) }, icon('close')))));
@@ -395,6 +424,7 @@ async function renderHome() {
         'Delete')))), buildChoice); // the ready-made teams first, simplest on top; building your own last
   renderChecks($('#home-checks'), false, true);
   renderBuilder();
+  lookAtFolder();
 }
 
 /** "Uses Claude Code, OpenAI Codex." - and, once the Setup check has looked, which of them this computer lacks. */
@@ -418,7 +448,7 @@ function markMissing(note) {
 }
 
 async function templateAction(kind, t) {
-  if (kind === 'delete' && !confirm(`Delete your saved team "${t.title}"? Projects made from it keep their team.`)) return;
+  if (kind === 'delete' && !(await ask(`Delete your saved team "${t.title}"? Projects made from it keep their team.`, { ok: 'Delete', danger: true }))) return;
   await act(api(`/api/${kind}-template`, { id: t.id }),
     () => (kind === 'delete' ? `Deleted "${t.title}".` : `"${t.title}" is now the default for new projects.`));
   renderHome();
@@ -434,11 +464,41 @@ async function browse(input, title) {
   if (r && r.path) input.value = r.path;
 }
 
-$('#open-browse').addEventListener('click', () => browse($('#open-path'), 'Choose the folder that has team.yaml'));
-$('#create-browse').addEventListener('click', () => browse($('#create-path'), 'Choose the project folder'));
-$('#open-go').addEventListener('click', () => openTeam($('#open-path').value));
+// ---------- one folder, open or start: what it holds decides ----------
+
+const FOLDER = { asked: '', info: null }; // the folder typed, and what agent-org says it holds
+
+/** The folder field: a folder with a team opens it; any other gets a new one (seen: two cards, each a folder
+ * and Browse, one to open and one to create - which one was yours to know). */
+async function lookAtFolder() {
+  const text = $('#create-path').value.trim();
+  FOLDER.asked = text;
+  let info = null;
+  if (text) {
+    try { info = await api(`/api/folder?path=${encodeURIComponent(text)}`); } catch { info = null; }
+  }
+  if ($('#create-path').value.trim() !== text) return; // typed on meanwhile: that answer is for an older folder
+  FOLDER.info = info;
+  const status = $('#folder-status');
+  const hasTeam = Boolean(info?.team_file);
+  status.hidden = !text;
+  status.className = `folder-status${hasTeam ? ' has-team' : ''}`;
+  status.textContent = !info ? '' : hasTeam ? `This folder has a team (${info.name}): open it.`
+    : !info.absolute ? 'Give the whole path, for example E:\\projects\\my-app.'
+      : info.exists ? 'No team here yet. Pick how it starts:' : 'This folder does not exist yet: it is made with the team. Pick how it starts:';
+  $('#start-team').hidden = hasTeam;
+  $('#create-go').textContent = hasTeam ? 'Open team' : 'Create team';
+}
+let folderTimer;
+$('#create-path').addEventListener('input', () => { clearTimeout(folderTimer); folderTimer = setTimeout(lookAtFolder, 250); });
+$('#create-browse').addEventListener('click', async () => {
+  await browse($('#create-path'), 'Choose the project folder');
+  lookAtFolder();
+});
 $('#create-go').addEventListener('click', async () => {
   const folder = $('#create-path').value.trim();
+  if (folder && FOLDER.asked !== folder) await lookAtFolder(); // pressed before the look answered
+  if (FOLDER.info?.team_file) { await openTeam(FOLDER.info.team_file); return; }
   const template = document.querySelector('#templates input:checked')?.value;
   if (!folder) { toast('Choose the project folder first.', true); return; }
   let body;
@@ -448,22 +508,43 @@ $('#create-go').addEventListener('click', async () => {
   if (template === BUILD && !body.roles.length) { toast('Pick at least one role from the market first.', true); return; }
   const note = document.querySelector('#templates input:checked')?.closest('label')?.querySelector('.programs');
   const lacking = note ? note.dataset.programs.split(',').filter((p) => MISSING.has(p)).map((p) => PROGRAM[p] || p) : [];
-  if (lacking.length && !confirm(`${lacking.join(' and ')} ${lacking.length > 1 ? 'are' : 'is'} not installed on this `
+  if (lacking.length && !(await ask(`${lacking.join(' and ')} ${lacking.length > 1 ? 'are' : 'is'} not installed on this `
     + 'computer, so the agents that use it could not start. Create the team anyway? (You can switch an agent to '
-    + 'another program on its card.)')) return;
+    + 'another program on its card.)'))) return;
   await act(api('/api/create', body), () => 'Team created. Click a teammate to change it, then Launch team.');
 });
-$('#shortcut-btn').addEventListener('click', () =>
+$('#shortcut-btn').addEventListener('click', () => ($('#more-menu').open = false) ||
   act(api('/api/desktop-shortcut', {}), () => 'Shortcut added: double-click "agent-org" on your desktop next time.'));
-$('#switch-btn').addEventListener('click', () => act(api('/api/close', {})));
 const openFolder = () => api('/api/open-folder', {}).catch((e) => toast(e.message, true));
 $('#folder-btn').addEventListener('click', openFolder);
-$('#project').addEventListener('click', openFolder);
+
+// ---------- your teams, behind the team's name at the top of the sidebar ----------
+
+async function toggleTeamSwitch() {
+  const box = $('#team-switch');
+  if (!box.hidden) { box.hidden = true; return; }
+  let home;
+  try { home = await api('/api/home'); } catch (e) { toast(e.message, true); return; }
+  const others = home.recent.filter((r) => r.exists && r.path !== S.state?.team_file);
+  fill(box,
+    h('div', { class: 'ts-now' }, h('b', {}, S.state?.team_name || ''), h('span', { class: 'muted small mono' }, S.state?.project_root || '')),
+    others.length ? h('div', { class: 'ts-list' }, others.map((r) => h('button', { class: 'ts-item', role: 'menuitem', title: r.path,
+      onclick: () => { box.hidden = true; openTeam(r.path); } }, h('b', {}, r.name), h('span', { class: 'muted small mono' }, r.path))))
+      : h('p', { class: 'muted small' }, 'No other team yet.'),
+    h('hr'),
+    h('button', { class: 'ts-item', role: 'menuitem', onclick: () => { box.hidden = true; act(api('/api/close', {})); } },
+      'Open or start another team…'));
+  box.hidden = false;
+}
+$('#project').addEventListener('click', (e) => { e.stopPropagation(); toggleTeamSwitch(); });
+document.addEventListener('click', (e) => { if (!$('#team-switch').hidden && !$('#team-switch').contains(e.target)) $('#team-switch').hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#team-switch').hidden = true; });
 $('#save-template').addEventListener('click', async () => {
   $('#more-menu').open = false;
-  const name = prompt('Name for this team (it will be offered for every new project):', 'My team');
+  const name = await ask('A name for this team. It is offered whenever you create a project.',
+    { title: 'Save as my team', input: 'My team', ok: 'Save' });
   if (name === null || !name.trim()) return;
-  const makeDefault = confirm(`Use "${name.trim()}" as the default for new projects?`);
+  const makeDefault = await ask(`Use "${name.trim()}" as the default for new projects?`, { ok: 'Make it the default' });
   await act(api('/api/save-template', { name: name.trim(), default: makeDefault }),
     () => `Saved "${name.trim()}"${makeDefault ? ' as your default team' : ''}. Choose it when you create a team.`);
 });
@@ -501,8 +582,8 @@ async function renderChecks(box, fresh = false, compact = false) {
 }
 
 async function installGrokHooks() {
-  if (!confirm('Install agent-org hooks for Grok in your Grok settings folder (~/.grok/hooks)? '
-    + 'They only act inside agent-org tabs.')) return;
+  if (!(await ask('Install agent-org hooks for Grok in your Grok settings folder (~/.grok/hooks)? '
+    + 'They only act inside agent-org tabs.'))) return;
   await act(api('/api/install-grok-hooks', {}), () => 'Grok hooks installed.');
   renderChecks($('#home-checks'), true);
 }
@@ -801,7 +882,7 @@ function ownerCard() {
   const st = S.state;
   const owner = h('button', {
     class: 'node owner', title: 'Messages to you',
-    onclick: () => { showTab('messages'); setFilter('me'); if (!L.side) { L.side = true; applyChrome(); saveLayout(); } },
+    onclick: () => { showTab('messages'); setFilter('me'); },
   },
   h('div', { class: 'name', style: { justifyContent: 'center' } }, h('span', { class: 'nm' }, st.owner),
     st.owner_unread ? h('span', { class: 'pill hot', title: `${st.owner_unread} unread` }, st.owner_unread) : null),
@@ -1632,9 +1713,9 @@ function renderDrawer() {
   $('#drawer').hidden = false;
 }
 
-function startFresh(r) {
-  if (!confirm(`Start ${r.name} with a new, empty conversation?\n\nIt keeps its notes, tasks and messages in the hub, `
-    + 'but forgets the conversation it had. Usually "Start" (resume) is what you want.')) return;
+async function startFresh(r) {
+  if (!(await ask(`Start ${r.name} with a new, empty conversation?\n\nIt keeps its notes, tasks and messages in the hub, `
+    + 'but forgets the conversation it had. Usually "Start" (resume) is what you want.'))) return;
   launchRoles([r.name], r.online > 0, true);
 }
 
@@ -1871,7 +1952,6 @@ function setCompose(mode) {
 
 /** From the Tree: the message box, addressed to `name`, without leaving the chart. */
 function writeTo(name) {
-  if (!L.side) { L.side = true; applyChrome(); saveLayout(); }
   showTab('messages');
   clearReply();
   setCompose('message');
@@ -1890,6 +1970,7 @@ function composeTo(name, mode) {
 }
 
 function replyTo(m) {
+  showTab('messages'); // where the reply is written, even with the panel closed
   setCompose('message');
   S.replyTo = m.id;
   $('#to').value = m.sender;
@@ -1941,34 +2022,34 @@ function launchRoles(roles, force = false, fresh = false) {
     + (r.skipped.length ? `\nSkipped: ${r.skipped.join('; ')}` : ''));
 }
 
-function startRole(r) {
+async function startRole(r) {
   if (r.stuck?.kind === 'limit' && r.stuck.until > Date.now() / 1000
-    && !confirm(`${r.name} is ${r.stuck.describe}; it will fail again until then. Start it anyway?`)) return;
+    && !(await ask(`${r.name} is ${r.stuck.describe}; it will fail again until then. Start it anyway?`))) return;
   launchRoles([r.name]);
 }
 
-function restartRole(name) {
-  if (!confirm(`Restart ${name}? Its program is stopped and started again on the same conversation, `
-    + 'and it carries on with its work.')) return;
+async function restartRole(name) {
+  if (!(await ask(`Restart ${name}? Its program is stopped and started again on the same conversation, `
+    + 'and it carries on with its work.'))) return;
   act(api('/api/restart', { role: name }), (r) => (r.opening.length ? `Restarting ${name}.` : `Could not start ${name}: ${r.skipped.join('; ')}`));
 }
 
-function stopRoles(role) {
+async function stopRoles(role) {
   const what = role === '@all' ? 'every running agent' : role;
-  if (!confirm(`Stop ${what}? Its conversation is kept: "Start" resumes it later.`)) return;
+  if (!(await ask(`Stop ${what}? Its conversation is kept: "Start" resumes it later.`, { ok: 'Stop', danger: true }))) return;
   act(api('/api/stop', { role }), (r) => {
     const n = Object.values(r.stopped).reduce((a, b) => a + b, 0);
     return n ? `Stopped ${plural(n, 'agent')}.` : 'Nothing was running.';
   });
 }
 
-function release(path) {
-  if (!confirm(`Release ${path}? Whoever holds it can no longer write it.`)) return;
+async function release(path) {
+  if (!(await ask(`Release ${path}? Whoever holds it can no longer write it.`, { ok: 'Release' }))) return;
   act(api('/api/release', { path }), (l) => `Released ${l.path}.`);
 }
 
-function dismiss(name) {
-  if (!confirm(`Dismiss ${name}? Its files go back to the agent it helps.`)) return;
+async function dismiss(name) {
+  if (!(await ask(`Dismiss ${name}? Its files go back to the agent it helps.`, { ok: 'Dismiss' }))) return;
   act(api('/api/dismiss', { name }), (r) =>
     `Dismissed ${r.name}.` + (r.returned.length ? ` Files returned: ${r.returned.join(', ')}` : ''));
 }
@@ -2021,7 +2102,11 @@ function showView(v) {
   termsMoved();
 }
 
+/** The side panel on page `t`, in view: what asks for a page (a reply, "you" in the sidebar, a link to a message)
+ * wants to see it (seen: with the panel closed, Reply did nothing you could see). */
 function showTab(t) {
+  if ($('#view-team').hidden && S.mode === 'team') showView('team');
+  if (!L.side) { L.side = true; saveLayout(); }
   for (const tab of document.querySelectorAll('.side > .tab')) tab.hidden = tab.id !== `tab-${t}`;
   S.sideTab = t;
   applyChrome(); // which icon is lit; the browser has its own, wider width

@@ -160,10 +160,8 @@ function moveControl(t, after) {
 
 async function moveTask(t, to, after) {
   const stuck = findRole(t.assignee)?.stuck;
-  const reason = prompt(`Move #${t.id} (${t.title}) from ${t.assignee} to ${to}?
-
-Why (${to} reads this):`,
-    stuck ? `${t.assignee} is ${stuck.describe}.` : '');
+  const reason = await ask(`Move #${t.id} (${t.title}) from ${t.assignee} to ${to}? Say why: ${to} reads it.`,
+    { title: 'Move the task', input: stuck ? `${t.assignee} is ${stuck.describe}.` : '', ok: `Move to ${to}` });
   if (reason === null) return;
   if (await act(api('/api/reassign', { task_id: t.id, to, reason }), () => `#${t.id} is now ${to}'s.`)) {
     if (after) after(); else openTask(t.id);
@@ -226,8 +224,8 @@ function diffEl(text) {
 }
 
 async function turnOnHistory(id) {
-  if (!confirm('Turn on history? This creates a git repository in the project folder and saves everything '
-    + 'as a starting point. From then on each accepted task becomes a commit.')) return;
+  if (!(await ask('Turn on history? This creates a git repository in the project folder and saves everything '
+    + 'as a starting point. From then on each accepted task becomes a commit.'))) return;
   if (await act(api('/api/history', {}), () => 'History is on.')) loadChanges(id);
 }
 
@@ -238,8 +236,9 @@ async function review(t, accept, feedback = '') {
   if (r) openTask(t.id);
 }
 
-function cancelTask(t) {
-  const reason = prompt(`Cancel task #${t.id} (${t.title})? ${t.assignee} will be told to stop.\n\nReason (optional):`, '');
+async function cancelTask(t) {
+  const reason = await ask(`Cancel #${t.id} (${t.title})? ${t.assignee} is told to stop. A reason, if you like:`,
+    { title: 'Cancel the task', input: '', ok: 'Cancel the task', no: 'Keep it', danger: true });
   if (reason === null) return;
   act(api('/api/cancel-task', { task_id: t.id, reason }), () => `Task #${t.id} cancelled.`)
     .then((r) => { if (r && $('#task-dialog').open) openTask(t.id); });
