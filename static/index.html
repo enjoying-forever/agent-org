@@ -138,6 +138,7 @@
         <button data-tab="messages" class="active">Messages <span id="inbox-badge" class="badge" hidden></span></button>
         <button data-tab="activity">Activity</button>
         <button data-tab="files">Files <span id="files-count" class="muted"></span></button>
+        <button data-tab="browser" title="Look at what the team builds: a local server, a page in the project, any address (Ctrl+Alt+W)">Browser</button>
       </div>
       <div id="tab-messages" class="tab">
         <div class="filters">
@@ -174,6 +175,19 @@
       </div>
       <div id="tab-files" class="tab" hidden>
         <div class="feed" style="padding:0"><table class="locks"><thead><tr><th>File</th><th>Being written by</th><th>Since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
+      </div>
+      <div id="tab-browser" class="tab browser" hidden>
+        <form id="br-bar" class="br-bar" autocomplete="off">
+          <button type="button" id="br-back" class="icon-btn" title="Back" aria-label="Back" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <button type="button" id="br-forward" class="icon-btn" title="Forward" aria-label="Forward" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+          <button type="button" id="br-reload" class="icon-btn" title="Reload (F5)" aria-label="Reload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg></button>
+          <input id="br-url" list="br-found" spellcheck="false" aria-label="Address"
+            placeholder="localhost:5173, index.html in the project, or any address">
+          <datalist id="br-found"></datalist>
+          <button type="button" id="br-inspect" class="icon-btn" title="Inspect the page (developer tools)" aria-label="Inspect the page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13.5 6l-3 12"/></svg></button>
+          <button type="button" id="br-external" class="icon-btn" title="Open in your browser" aria-label="Open in your browser"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
+        </form>
+        <div id="br-view" class="br-view"><div id="br-note" class="br-note" hidden></div></div>
       </div>
     </aside>
   </main>
@@ -329,6 +343,7 @@
   <script src="/static/addon-web-links.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/board.js"></script>
+  <script src="/static/browser.js"></script>
   <script src="/static/roles.js"></script>
   <script src="/static/layout.js"></script>
   <script src="/static/teammates.js"></script>

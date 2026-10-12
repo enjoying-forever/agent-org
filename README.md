@@ -130,6 +130,12 @@ agent carries on where it stopped.
   *Reply* and *Summon consultant* buttons. A message is sent once however often you click,
   and what you start typing while it goes stays. What you were writing in a team waits for you
   when you switch to another one and back.
+- **Browser** (beside Messages; Ctrl+Alt+W): look at what the team builds without leaving agent-org - type
+  a port (`5173`), a file in the project (`index.html`) or any address. It offers the local addresses the
+  team's work shows (a dev server's in an agent's terminal, a link in a message), and a local link clicked in a
+  terminal or a message opens here; any other link opens in your own browser, where your accounts are. A page
+  of a task's changes has a *preview* link. A page there runs in a session of its own - without Node, agent-org's
+  sign-in or its permissions - and its developer tools are one click away.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
   "done" means, what it waits for, which files it changed (with the diff; click one to show it in File Explorer), whether the

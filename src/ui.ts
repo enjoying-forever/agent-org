@@ -36,6 +36,7 @@ import * as wake from './wake.ts';
 import * as waker from './waker.ts';
 import * as watchdog from './watchdog.ts';
 import { dict } from './dict.ts';
+import { localUrls } from './preview.ts';
 
 export const STATIC = path.join(CODE_DIR, '..', 'static');
 const CONTENT_TYPES: Record<string, string> = dict({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -268,6 +269,7 @@ export class App {
   // Agents run in terminals inside the agent-org window when it can host them (Windows with node-pty);
   // otherwise, or with AGENT_ORG_TABS=1, each opens in a Windows Terminal tab.
   inWindow = terminals.available() && !process.env.AGENT_ORG_TABS && !inTest();
+  ownPort = 0; // agent-org's own address, which is not the team's work
   private readonly hosts = new Map<string, terminals.TerminalHost>(); // one per team: switching teams keeps them running
   readonly window = new WindowControl();
   readonly waker = new waker.Waker();
@@ -855,6 +857,16 @@ export class App {
     return { messages: this.me.search(words, 60).map(messageJson) };
   }
 
+  /** Local web addresses the team's work shows, newest first, for the page's browser: in the agents' terminals
+   * here (a dev server says where it listens) and in the latest messages. */
+  previews(): Json {
+    const seen = this.hub.store.messagesAfter(0, 200).map((m) => ({ text: m.text, at: m.sent_at }));
+    if (this.inWindow) {
+      for (const [, t] of this.terminals.items()) seen.push({ text: t.chunk(Math.max(0, t.end - 100_000)).data, at: t.lastOutput });
+    }
+    return { urls: localUrls(seen, this.ownPort) };
+  }
+
   messages(after: number): Json {
     return { messages: this.hub.store.messagesAfter(after).map(messageJson) };
   }
@@ -1214,6 +1226,7 @@ export const GET_ROUTES: Record<string, Route> = {
   '/api/home': (app) => app.home(),
   '/api/state': (app) => app.state(),
   '/api/messages': (app, query: Query) => app.messages(int(q(query, 'after', '0'), 'after')),
+  '/api/previews': (app) => app.previews(),
   '/api/team': (app) => app.teamConfig(),
   '/api/law': (app) => app.law(),
   '/api/checks': (app, query: Query) => app.checks(q(query, 'fresh', '0') === '1'),
@@ -1256,7 +1269,7 @@ export const PAGE_HEADER = 'X-Agent-Org'; // the page sends it; a form or a plai
 const LIVE_EVERY_MS = 250; // how often the live stream looks for a change
 export const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-    + "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    + "connect-src 'self'; frame-src http: https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -1495,6 +1508,7 @@ export async function serve(teamFile: string | null, port: number, opts: { token
   }
   bound = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${bound}/`;
+  app.ownPort = bound;
   app.window.signIn = () => `${base}?code=${access.newCode()}`;
   return {
     server, app, access, port: bound, base,

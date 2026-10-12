@@ -38,9 +38,15 @@ function applyChrome() {
   $('#app').classList.toggle('no-rail', !L.rail); // the sidebar is the whole app's
   $('#app').style.setProperty('--rail-w', `${L.railW}px`);
   view.classList.toggle('no-side', !L.side);
-  view.style.setProperty('--side-w', `${Math.max(320, L.sideW)}px`); // older layouts allowed 280
+  view.style.setProperty('--side-w', `${S.sideTab === 'browser' ? browserWidth() : Math.max(320, L.sideW)}px`); // older layouts allowed 280
   $('#rail-toggle').classList.toggle('on', L.rail);
   $('#side-toggle').classList.toggle('on', L.side);
+}
+
+/** The panel's width while it shows the browser: wider than for messages (a page needs room), as you left it. */
+function browserWidth() {
+  const most = Math.max(360, innerWidth * 0.75);
+  return Math.round(Math.min(Math.max(L.browserW || innerWidth * 0.45, 360), most));
 }
 
 /** Where each visible pane goes: a grid of `cols` x `rows`, each pane at (c, r) spanning (cs, rs). */
@@ -214,6 +220,7 @@ function dragEdge(e) {
   const move = (ev) => {
     const d = ev.clientX - start;
     if (edge === 'rail') L.railW = Math.min(Math.max(base + d, 160), 420);
+    else if (S.sideTab === 'browser') L.browserW = Math.min(Math.max(base - d, 360), Math.max(360, innerWidth * 0.75));
     else L.sideW = Math.min(Math.max(base - d, 320), Math.max(320, innerWidth * 0.5)); // narrower, the message box no longer fits
     applyChrome();
   };
@@ -394,6 +401,7 @@ const SHORTCUTS = [
   ['Ctrl+Alt+T', 'Terminals or Tree'],
   ['Ctrl+Alt+B', 'Show or hide the sidebar'],
   ['Ctrl+Alt+M', 'Show or hide the messages'],
+  ['Ctrl+Alt+W', 'The browser beside the team, or back to the messages'],
   ['Ctrl+Alt+= / - / 0', 'Bigger, smaller or normal text in the terminals (or Ctrl+wheel over one)'],
   ['Ctrl+C / Ctrl+V', 'In a terminal: copy the selection (without one, Ctrl+C interrupts) / paste'],
   ['Right-click', 'In a terminal: copy the selection, or paste'],
@@ -401,7 +409,7 @@ const SHORTCUTS = [
 
 function isShortcut(e) {
   return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey
-    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyT', 'KeyB', 'KeyM', 'Equal', 'Minus',
+    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyT', 'KeyB', 'KeyM', 'KeyW', 'Equal', 'Minus',
       'NumpadAdd', 'NumpadSubtract'].includes(e.code));
 }
 
@@ -424,6 +432,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { showView('team'); setTeamMode(!L.tree); if (!L.tree && S.focus) goToPane(S.focus); return; }
   if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
   if (e.code === 'KeyM') { L.side = !L.side; applyChrome(); saveLayout(); return; }
+  if (e.code === 'KeyW') { toggleBrowser(); return; }
   if (['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0'].includes(e.code)) {
     zoomTerms(e.code === 'Digit0' ? 0 : ['Equal', 'NumpadAdd'].includes(e.code) ? 1 : -1);
     return;

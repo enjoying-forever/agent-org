@@ -4,6 +4,9 @@
  * The window stays as light as Electron allows: one window, one page, no Node in the page (it only talks to its
  * own local server, signed in with a one-time code). Closing it while agents run asks first - keep them running
  * in the background, or stop them; starting agent-org again brings a hidden window back.
+ *
+ * The page's browser (to look at what the team builds) is a <webview>: a page of its own, in a session of its own -
+ * no Node, none of agent-org's cookies or permissions, web addresses and files only.
  */
 
 import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, session, shell } from 'electron';
@@ -15,6 +18,8 @@ import * as ui from '../ui.ts';
 const MIN_WIDTH = 900;
 const MIN_HEIGHT = 600;
 const BAR_HEIGHT = 52; // the page's title bar, which the window's own buttons sit in
+const BROWSER = 'persist:agent-org-browser'; // the page's browser's own cookies and storage (kept between starts)
+const WEB = /^(?:https?|file):/i;
 
 /** The colors of the window's own parts, matching the page's paper and ink. */
 function chrome(dark: boolean): { color: string; symbolColor: string; height: number } {
@@ -70,8 +75,9 @@ async function start(): Promise<void> {
     title: 'agent-org', width: geometry.width, height: geometry.height, x: geometry.x, y: geometry.y,
     minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT, backgroundColor: chrome(nativeTheme.shouldUseDarkColors).color, show: false, autoHideMenuBar: true,
     titleBarStyle: 'hidden', titleBarOverlay: chrome(nativeTheme.shouldUseDarkColors), // no separate title bar: the page's is it
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, webviewTag: true },
   });
+  guardBrowser(win);
   if (geometry.maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
 
@@ -165,6 +171,27 @@ async function start(): Promise<void> {
   });
 
   await win.loadURL(control.signIn?.() ?? served.base);
+}
+
+/** What the page's browser may be and do, whatever the page asks for. */
+function guardBrowser(win: BrowserWindow): void {
+  win.webContents.on('will-attach-webview', (event, prefs, params) => {
+    delete prefs.preload;
+    Object.assign(prefs, { nodeIntegration: false, nodeIntegrationInSubFrames: false, contextIsolation: true, sandbox: true,
+      webSecurity: true, allowRunningInsecureContent: false });
+    params.partition = BROWSER;
+    if (params.src && params.src !== 'about:blank' && !WEB.test(params.src)) event.preventDefault();
+  });
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => { // a link to a new window opens in the same view
+      if (WEB.test(url)) void guest.loadURL(url);
+      return { action: 'deny' };
+    });
+  });
+  const browsing = session.fromPartition(BROWSER);
+  const allowed = ['clipboard-sanitized-write', 'fullscreen']; // copying from a page, a video full screen; nothing else
+  browsing.setPermissionRequestHandler((_contents, permission, callback) => callback(allowed.includes(permission)));
+  browsing.setPermissionCheckHandler((_contents, permission) => allowed.includes(permission));
 }
 
 keepRunningOnFaults('window'); // a stray fault goes to errors.log, not an error box over the work

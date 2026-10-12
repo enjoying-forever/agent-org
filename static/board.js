@@ -203,10 +203,11 @@ async function loadChanges(id) {
   }
   fill(box,
     h('b', {}, c.files.length ? `Changes (${plural(c.files.length, 'file')})` : 'Changes'),
-    c.files.length ? h('div', { class: 'task-files' }, c.files.map((f) => h('button', {
+    c.files.length ? h('div', { class: 'task-files' }, c.files.map((f) => [h('button', {
       class: 'link mono small', title: `Show ${f} in File Explorer`,
       onclick: () => api('/api/reveal', { path: f }).catch((e) => toast(e.message, true)),
-    }, f))) : null,
+    }, f), /\.html?$/i.test(f) && h('button', { class: 'link small', title: `Look at ${f} in the browser beside the team`,
+      onclick: () => { $('#task-dialog').close(); openInBrowser(toAddress(f)); } }, 'preview')])) : null,
     c.history
       ? (c.diff ? diffEl(c.diff) : h('div', { class: 'muted small' }, 'No differences from the last commit.'))
       : h('div', { class: 'history-off' },

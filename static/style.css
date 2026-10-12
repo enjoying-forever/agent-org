@@ -1019,3 +1019,22 @@ button.primary.send svg { width: 16px; height: 16px; }
 
 /* a send on its way: a second click does nothing (see sendOnce) */
 button[aria-busy="true"] { opacity: 0.55; cursor: progress; }
+
+/* ---------- the browser beside the team ---------- */
+.br-bar { display: flex; gap: 2px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--edge); }
+.br-bar .icon-btn { width: 28px; height: 28px; flex-shrink: 0; }
+.br-bar .icon-btn:disabled { opacity: 0.35; cursor: default; }
+#br-url { flex: 1; min-width: 0; margin: 0 4px; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; }
+#br-reload.loading svg { animation: br-spin 0.9s linear infinite; }
+@keyframes br-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #br-reload.loading svg { animation: none; opacity: 0.5; } }
+.br-view { flex: 1; min-height: 0; position: relative; background: var(--sheet); }
+.br-view > webview, .br-view > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: flex; background: #ffffff; }
+body.dragging-x .br-view > * { pointer-events: none; } /* the gutter keeps the pointer while it is dragged over the page */
+.br-note { position: absolute; inset: 0; z-index: 1; overflow-y: auto; padding: 28px 22px; display: flex; flex-direction: column; gap: 10px;
+  background: var(--sheet); color: var(--ink); }
+.br-note p { margin: 0; line-height: 1.5; max-width: 60ch; }
+.br-found { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; }
+.br-found .link { font-size: 13px; text-align: left; }
+.msg-link { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; cursor: pointer; }
+.task-files .link + .link.small { margin-left: -2px; }

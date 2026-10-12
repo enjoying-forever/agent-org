@@ -181,7 +181,7 @@ async function act(promise, done) {
 const S = {
   state: null, stateKey: '', messages: [], lastId: 0, mode: null,
   filter: 'all', roleFilter: '', replyTo: null, selected: null, summonFor: null,
-  compose: 'message', notified: 0,
+  compose: 'message', notified: 0, sideTab: 'messages',
   focus: null, // the agent pane in front (highlighted in the rail)
   drafts: {}, // what you are typing to each agent, kept across re-renders
 };
@@ -286,7 +286,13 @@ function applyState(state) {
   renderRoleFilter();
   renderInboxBadge();
   if (S.selected) renderDrawer();
-  if (first) { restoreDraft(state.team_file); renderFeed('bottom'); tellWindowTheme(); movePrefs(); }
+  if (first) {
+    restoreDraft(state.team_file);
+    renderFeed('bottom');
+    tellWindowTheme();
+    movePrefs();
+    if (S.sideTab === 'browser') browserShown();
+  }
 }
 
 const rolesUnder = (name) => S.state.roles.filter((r) => r.superior === name);
@@ -330,6 +336,7 @@ function leaveTeam() {
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
+  browserLeave();
 }
 
 /** Back in a team: what you were writing there when you left it. */
@@ -1257,8 +1264,15 @@ async function copyText(text) {
   }
 }
 
+/** A link in a terminal or a message: a local page (what the team builds) opens beside the team, any other - a
+ * sign-in, documentation - in your own browser, where your accounts are. */
 function openLink(uri) {
   if (!/^https?:\/\//i.test(uri)) return;
+  if (LOCAL_LINK.test(uri) && S.mode === 'team') openInBrowser(uri.replace(/^(https?:\/\/)(?:0\.0\.0\.0|\[::\])/i, '$1localhost'));
+  else openExternal(uri);
+}
+
+function openExternal(uri) {
   act(api('/api/open-url', { url: uri }), () => 'Opened in your browser.');
 }
 
@@ -1752,7 +1766,7 @@ function messageEl(m, compact = false) {
   const toMe = m.recipient === S.state.owner;
   const shown = shownText(m);
   const long = shown.length > 600 || shown.split('\n').length > 8;
-  const text = h('div', { class: 'text' + (long ? ' clamped' : '') }, shown);
+  const text = h('div', { class: 'text' + (long ? ' clamped' : '') }, linkText(shown));
   const cls = ['msg', m.kind, toMe && 'to-me', toMe && !m.read && 'unread', m.urgent && 'urgent'];
   return h('div', { class: cls.filter(Boolean).join(' '), id: compact ? null : `m${m.id}` },
     h('div', { class: 'head' },
@@ -2008,10 +2022,12 @@ function showView(v) {
 
 function showTab(t) {
   for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === t);
-  $('#tab-messages').hidden = t !== 'messages';
-  $('#tab-activity').hidden = t !== 'activity';
-  $('#tab-files').hidden = t !== 'files';
+  for (const tab of document.querySelectorAll('.side > .tab')) tab.hidden = tab.id !== `tab-${t}`;
+  const was = S.sideTab;
+  S.sideTab = t;
+  if ((was === 'browser') !== (t === 'browser')) applyChrome(); // the browser has its own, wider width
   if (t === 'messages') stickFeed();
+  if (t === 'browser') browserShown();
 }
 
 for (const b of document.querySelectorAll('.views button')) b.addEventListener('click', () => showView(b.dataset.view));
