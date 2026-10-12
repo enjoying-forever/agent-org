@@ -278,7 +278,8 @@ Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
 
 ## Memory: agents remember across restarts
 
-- **Launch team** (or *Start* on a card) resumes each agent's last conversation, so
+- **Launch team** (with some already running it reads *Start 2 more*, and it goes once all run;
+  or *Start* on a card) resumes each agent's last conversation, so
   it remembers everything it was doing. In the window it is told nothing unless it has
   unfinished tasks or new messages (then one line); in terminal tabs it is told the team
   was restarted and picks up its open tasks and messages.

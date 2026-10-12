@@ -268,6 +268,7 @@ function applyState(state) {
   $('#project').title = `Open the project folder in File Explorer\n\nproject: ${state.project_root}\nteam file: ${state.team_file}`;
   if (!S.focus || !findRole(S.focus)) S.focus = state.leader;
   renderChart();
+  renderLaunch();
   renderPanes();
   renderTree();
   renderGuide();
@@ -1962,9 +1963,17 @@ $('#mark-read').addEventListener('click', () => act(api('/api/inbox/read', {}), 
   renderFeed();
   return 'Marked as read.';
 }));
-$('#launch-all').addEventListener('click', () => {
-  if (confirm('Start every agent that is not running yet? Each resumes its last conversation.')) launchRoles([]);
-});
+/** The top bar's start button says what it does: start the team, start the ones not running, or (all running) it goes. */
+function renderLaunch() {
+  const st = S.state;
+  const off = st.roles.filter((r) => !r.online && !r.tier && st.launchable.includes(r.harness));
+  const none = st.roles.every((r) => !r.online);
+  const b = $('#launch-all');
+  b.textContent = none ? 'Launch team' : `Start ${off.length} more`;
+  b.title = `Start ${none ? 'every agent' : off.map((r) => r.name).join(', ')}: each resumes its last conversation`;
+  b.dataset.idle = off.length ? '' : '1';
+}
+$('#launch-all').addEventListener('click', () => launchRoles([])); // starting stops nothing: no question first
 $('#stop-all').addEventListener('click', () => stopRoles('@all'));
 $('#composer').addEventListener('submit', (e) => {
   e.preventDefault();
