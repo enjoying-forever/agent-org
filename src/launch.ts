@@ -30,7 +30,7 @@ import { dict } from './dict.ts';
 
 export { HOOK_TOOL };
 export const WINDOW = 'agent-org';
-export const WAIT_LIMIT = 3600; // seconds a single wait_for_messages call may take; harness tool timeouts are set to this
+export const WAIT_LIMIT = 3600; // seconds a single org tool call may take (the team's checks); harness tool timeouts are set to this
 export const TAB_COLORS: Record<string, string> = dict({ claude: '#D97757', codex: '#10A37F', grok: '#8B8B8B', antigravity: '#4285F4',
   deepseek: '#4D6BFE', owner: '#F2C94C' });
 
@@ -252,10 +252,9 @@ export const claudeLaunch: Builder = (hub, teamFile, role, out, resume = null, n
   // the others run it, and leaves a broken install behind.
   // ENABLE_TOOL_SEARCH=false: the org tools are there from the start; deferred, each first use cost a ToolSearch
   // step (seen: three in one short task).
-  // A wait_for_messages call is a quiet wait by design. Claude Code moves a tool call still running after 2
-  // minutes to the background (seen: the leader called it again every 2 minutes - a model call each - with four
-  // waits piling up, each able to take the result), and aborts one silent for 30 minutes (the default wait is
-  // 30 minutes): neither for an agent's own org tools.
+  // An org tool call can be long and quiet (the team's checks before finish_task). Claude Code moves a tool call
+  // still running after 2 minutes to the background (seen: a call made again every 2 minutes - a model call each -
+  // piling up), and aborts one silent for 30 minutes: neither for an agent's own org tools.
   return launch(role, 'claude', 'claude', cli, {
     MCP_TOOL_TIMEOUT: String(WAIT_LIMIT * 1000), CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: '0',
     CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(WAIT_LIMIT * 1000), DISABLE_AUTOUPDATER: '1', ENABLE_TOOL_SEARCH: 'false',

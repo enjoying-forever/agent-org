@@ -134,7 +134,7 @@ test('a misnamed argument is not lost', async (t) => {
   assert.ok(err && text.includes('Unknown argument colour') && text.includes('to, text'));
 });
 
-const BASIC_TOOLS = ['my_role', 'team_tree', 'set_about', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view', 'view_page',
+const BASIC_TOOLS = ['my_role', 'team_tree', 'set_about', 'send_message', 'ask_help', 'read_inbox', 'set_status', 'view', 'view_page',
   'claim_file', 'release_file', 'list_locks', 'hand_over_file', 'list_tasks', 'finish_task', 'save_notes', 'task_details', 'search_messages',
   'task_changes', 'run_checks'];
 
@@ -251,44 +251,55 @@ test('missing arguments and unknown tools are errors', async (t) => {
   assert.deepEqual(await worker.tool('task_details', { task_id: 'seven' }), ['Bad argument: invalid literal for int() with base 10: "seven"', true]);
 });
 
-test('wait_for_messages delivers while other calls still work', async (t) => {
-  const { hub, client } = setup(t);
-  const worker = client('worker-a');
-  const waitId = worker.request('tools/call', { name: 'wait_for_messages', arguments: { timeout_seconds: 10 } });
+/** A worker whose run_checks takes a while: a long tool call, as the team's checks are. */
+function slowSetup(t: TestContext): { hub: Hub; worker: Client } {
+  const config = { ...team(), checks: [{ name: 'slow', run: `"${process.execPath}" -e "setTimeout(() => {}, 1500)"` }] };
+  const { hub } = makeHub(t, config);
+  const worker = new Client(hub, 'worker-a');
+  cleanup(t, () => worker.close());
+  return { hub, worker };
+}
+
+test('a long call does not hold up the others', async (t) => {
+  const { worker } = slowSetup(t);
+  const checksId = worker.request('tools/call', { name: 'run_checks', arguments: {} });
   await pause(200);
-  // the wait is still open, but the server keeps answering
-  assert.deepEqual((await worker.call('ping')).result, {});
-  assert.equal(hub.session('leader').view('worker-a').status?.state, 'waiting');
-  hub.session('tech-lead').send('worker-a', 'please add tests');
-  const reply = await worker.response();
-  assert.equal(reply?.id, waitId);
-  assert.ok(reply.result.content[0].text.includes('please add tests'));
+  assert.deepEqual((await worker.call('ping')).result, {}); // the checks still run, the server keeps answering
+  const reply = await worker.response(5000);
+  assert.equal(reply?.id, checksId);
+  assert.ok(reply.result.content[0].text.includes('slow passed'), reply.result.content[0].text);
 });
 
-test('a cancelled wait leaves messages unread', async (t) => {
-  const { hub, client } = setup(t);
-  const worker = client('worker-a');
-  const waitId = worker.request('tools/call', { name: 'wait_for_messages', arguments: { timeout_seconds: 10 } });
+test('a cancelled call gets no answer', async (t) => {
+  const { worker } = slowSetup(t);
+  const checksId = worker.request('tools/call', { name: 'run_checks', arguments: {} });
   await pause(200);
-  worker.notify('notifications/cancelled', { requestId: waitId });
-  await pause(800); // longer than one poll, so the cancelled wait has stopped
-  hub.session('tech-lead').send('worker-a', 'still there?');
-  await pause(800);
-  assert.equal(await worker.response(200), null); // no reply to a cancelled request
-  assert.deepEqual(hub.session('worker-a').readInbox().map((m) => m.text), ['still there?']);
+  worker.notify('notifications/cancelled', { requestId: checksId });
+  assert.equal(await worker.response(2500), null);
 });
 
-test('closing stdin stops waits but finishes other calls', async (t) => {
-  const { hub, client } = setup(t);
-  const worker = client('worker-a');
-  const waitId = worker.request('tools/call', { name: 'wait_for_messages', arguments: { timeout_seconds: 10 } });
+test('closing stdin lets running calls finish', async (t) => {
+  const { worker } = slowSetup(t);
+  const checksId = worker.request('tools/call', { name: 'run_checks', arguments: {} });
   const statusId = worker.request('tools/call', { name: 'set_status', arguments: { state: 'done' } });
   await worker.close();
   const replies: unknown[] = [];
   for (let r = await worker.response(200); r !== null; r = await worker.response(200)) replies.push(r.id);
-  assert.ok(replies.includes(statusId) && !replies.includes(waitId));
-  hub.session('tech-lead').send('worker-a', 'after shutdown');
-  assert.deepEqual(hub.session('worker-a').readInbox().map((m) => m.text), ['after shutdown']);
+  assert.ok(replies.includes(statusId) && replies.includes(checksId));
+});
+
+test('no tool to wait with: an agent waits by ending its turn', async (t) => {
+  // seen: "org - wait_for_messages" in one terminal and not the next - the models waited either way
+  const { hub, client } = setup(t);
+  const worker = client('worker-a');
+  const { result } = await worker.call('tools/list');
+  assert.ok(!result.tools.some((x: { name: string }) => x.name === 'wait_for_messages'));
+  // a session started with it in its list still finds it, whatever it passes, and it does not wait
+  let [text, err] = await worker.tool('wait_for_messages', { timeout_seconds: 600 });
+  assert.ok(!err && text.includes('end your turn'), text);
+  hub.session('tech-lead').send('worker-a', 'please add tests');
+  [text, err] = await worker.tool('wait_for_messages', {});
+  assert.ok(!err && text.includes('please add tests'), text);
 });
 
 test('unknown methods get an error', async (t) => {

@@ -3,7 +3,7 @@
  *
  * Each harness starts its own copy over stdio, bound to one role. It speaks the small part of MCP that tools
  * need (initialize, tools/list, tools/call, ping, cancellation) with nothing but Node. Tool calls run
- * concurrently, so a long wait_for_messages never blocks pings or other calls.
+ * concurrently, so a long one (the team's checks, a page viewed) never blocks pings or other calls.
  */
 
 import path from 'node:path';
@@ -20,7 +20,6 @@ import { dict } from './dict.ts';
 import { pageAddress, viewInWindow } from './preview.ts';
 
 export const FALLBACK_PROTOCOL = '2025-06-18';
-export const DEFAULT_WAIT = 1800; // seconds; launchers raise each harness's tool timeout above this
 export const HEARTBEAT = 10; // seconds between presence check-ins; the hub counts a role as running for 30
 const DIFF_CHARS = 30_000; // the most of a diff task_changes returns
 
@@ -138,8 +137,10 @@ export class Tools {
       const messages = me.readInbox();
       return fmtMessages(messages, 'No new messages.') + this.aboutHint(messages);
     });
-    this.add('wait_for_messages', 'Wait for your next message and return it - while you wait for results (no cost meanwhile).',
-      { timeout_seconds: { type: 'integer', description: `default ${DEFAULT_WAIT}` } }, [], (a, signal) => this.wait(a, signal));
+    // No tool to wait with: an agent waits by ending its turn, and its Stop hook (DeepSeek: its loop) brings the next
+    // message. With both, the models waited either way (seen: "org - wait_for_messages" in one terminal and not the
+    // next), and a wait that ran out cost a model turn to call it again. A session started with the tool in its
+    // list still finds it (see call): it hands over mail that is there and says how to wait.
     this.add('set_status', 'Say what you are doing, if it is more than your task (the hub sets that by itself when you read a task '
       + 'and when you finish it).', { state: { type: 'string', enum: ['idle', 'working', 'waiting', 'blocked', 'done'] }, task: text },
       ['state'], (a) => {
@@ -319,13 +320,10 @@ export class Tools {
     return { text: lines.join('\n'), pictures };
   }
 
-  private async wait(args: Args, signal: AbortSignal | null): Promise<string> {
-    const timeout = Math.max(1, args.timeout_seconds == null ? DEFAULT_WAIT : int(args.timeout_seconds) || DEFAULT_WAIT);
-    const before = this.me.store.getStatus(this.me.name);
-    this.me.setStatus('waiting', before ? before.task : '');
-    const messages = await this.me.waitForMessages(timeout, 0.5, signal);
-    if (messages.length) this.me.backToWork();
-    return fmtMessages(messages, `No messages in ${timeout} seconds. Call wait_for_messages again.`) + this.aboutHint(messages);
+  private noWait(): string {
+    const messages = this.me.readInbox();
+    if (messages.length) return fmtMessages(messages, '') + this.aboutHint(messages);
+    return 'No new messages. To wait for them, end your turn: the next one is delivered to you as soon as it arrives.';
   }
 
   /** Once per agent, with its first task: its line in the team tree has no about of its own yet (seen: told so only
@@ -496,6 +494,7 @@ export class Tools {
   async call(name: string, rawArgs: unknown, signal: AbortSignal | null = null): Promise<[string, boolean, Picture[]?]> {
     const given = typeof rawArgs === 'object' && rawArgs !== null && !Array.isArray(rawArgs) ? (rawArgs as Args) : {};
     if (name === HOOK_TOOL) return [await this.hook(given), false]; // not a tool of the model's: no argument checks, no mail line
+    if (name === 'wait_for_messages') return [this.noWait(), false]; // the tool it was (whatever its arguments): see the constructor
     const handler = this.handlers.get(name);
     if (handler === undefined) return [`Unknown tool: ${name}`, true];
     const [args, unknown] = this.fitArgs(name, given);
@@ -543,7 +542,6 @@ export class Server {
   private readonly output: Writable;
   private readonly inFlight = new Map<unknown, AbortController>();
   private readonly running = new Set<Promise<void>>();
-  private readonly waits = new Set<unknown>();
 
   constructor(me: RoleSession, input: Readable = process.stdin, output: Writable = process.stdout) {
     this.me = me;
@@ -552,8 +550,7 @@ export class Server {
     this.output = output;
   }
 
-  /** Serve until the harness closes stdin; then stop open waits (leaving their messages unread) and let other
-   * running calls finish. */
+  /** Serve until the harness closes stdin; then let running calls finish (for up to 5 seconds). */
   async serve(): Promise<void> {
     const lines = createInterface({ input: this.input, crlfDelay: Infinity });
     for await (const raw of lines) {
@@ -570,7 +567,6 @@ export class Server {
         if (typeof item === 'object' && item !== null) this.dispatch(item as Msg);
       }
     }
-    for (const id of this.waits) this.inFlight.get(id)?.abort();
     await Promise.race([Promise.allSettled([...this.running]), new Promise((r) => setTimeout(r, 5000).unref())]);
   }
 
@@ -595,7 +591,6 @@ export class Server {
     } else if (method === 'tools/call') {
       const control = new AbortController();
       this.inFlight.set(id, control);
-      if (params.name === 'wait_for_messages') this.waits.add(id);
       const run = this.call(id, params, control).finally(() => this.running.delete(run));
       this.running.add(run);
     } else {
@@ -613,7 +608,6 @@ export class Server {
       [text, isError] = [`Internal error:\n${e instanceof Error ? e.stack : String(e)}`, true];
     } finally {
       this.inFlight.delete(id);
-      this.waits.delete(id);
     }
     const content = [{ type: 'text', text }, ...(pictures ?? []).map((p) => ({ type: 'image', data: p.data, mimeType: p.mimeType }))];
     if (!control.signal.aborted) this.reply(id, { content, isError }); // MCP: no answer to a cancelled request

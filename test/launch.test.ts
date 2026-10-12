@@ -363,7 +363,7 @@ test('DeepSeek runs headless with the org tools, shown live, and again until sto
   assert.ok(tools.name === '@deepseek-ai/dsh-mcp-client' && tools.config.serverName === 'org');
   assert.deepEqual(tools.config.args.slice(-2), ['--role', 'worker-a']);
   assert.equal(tools.config.env.AGENT_ORG_ROLE, 'worker-a');
-  assert.ok(tools.config.toolCallTimeoutMs > launch.WAIT_LIMIT * 1000); // a long wait_for_messages fits
+  assert.ok(tools.config.toolCallTimeoutMs > launch.WAIT_LIMIT * 1000); // a long call (the team's checks) fits
   assert.deepEqual(patch[1], { id: 'agent-default-model', config: { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'high' } });
   const script = read(path.join(out, 'start.ps1'));
   // each run: JSON events shown live by runview, continuing the conversation kept in dsh.session
