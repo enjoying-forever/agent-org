@@ -56,6 +56,10 @@ test('scope', () => {
   assert.deepEqual(safety.outsideScope(['src/a.py', 'README.md', 'tests/t.py'], ['src/*', 'tests/*']), ['README.md']);
   assert.deepEqual(safety.scopeWithin(['src/api/*', 'tests/*', '*'], ['src/*']), ['tests/*', '*']);
   assert.deepEqual(safety.scopeWithin(['src/*'], ['*']), []);
+  // what a pattern reaches, not its text: src/*.ts reaches src/long-file.ts, which src/?.ts does not
+  assert.deepEqual(safety.scopeWithin(['src/*.ts', 'src/a.ts', 'src/[ab].ts', 'src/[a-z].ts'], ['src/?.ts', 'src/[abc].ts']),
+    ['src/*.ts']); // [a-z] is within ?
+  assert.deepEqual(safety.scopeWithin(['src/x/*.ts', 'docs/*.md', 'src/*.tsx'], ['src/*.ts', '*.md']), ['src/*.tsx']);
 });
 
 test('git push with options before it', () => {

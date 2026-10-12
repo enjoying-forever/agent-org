@@ -368,6 +368,12 @@ export class Store {
     return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
   }
 
+  /** `body` in one transaction, for a caller that decides from what it reads (no store method in it may start
+   * its own transaction). */
+  atomically<T>(body: () => T): T {
+    return this.transaction(body);
+  }
+
   /** BEGIN IMMEDIATE ... COMMIT around `body`: other processes wait, nothing interleaves. */
   private transaction<T>(body: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -531,7 +537,10 @@ export class Store {
     if (opts.assigner != null) { query += ' AND assigner = ?'; args.push(opts.assigner); }
     if (opts.openOnly) query += ` AND state NOT IN (${CLOSED.map((s) => `'${s}'`).join(', ')})`;
     if (opts.states?.length) { query += ` AND state IN (${opts.states.map(() => '?').join(', ')})`; args.push(...opts.states); }
-    return this.all(`${query} ORDER BY id DESC LIMIT ?`, ...args, opts.limit ?? 200).reverse().map(toTask);
+    // Unfinished tasks all (they are the work there is: seen, the oldest dropped off the Board past 200), and the
+    // latest 200 of a whole history. -1: no limit.
+    const limit = opts.limit ?? (opts.openOnly || opts.states?.length ? -1 : 200);
+    return this.all(`${query} ORDER BY id DESC LIMIT ?`, ...args, limit).reverse().map(toTask);
   }
 
   addTaskFile(taskId: number, file: string): void {

@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { withFileLock } from './filelock.ts';
+import { withFileLockAsync } from './filelock.ts';
 import { fnmatchcase } from './fnmatch.ts';
 import { which } from './runtime.ts';
 
@@ -419,6 +419,6 @@ export function commitDiff(root: string, commitId: string): string {
 }
 
 /** One landing into main at a time, across every agent's process. */
-export function withLandLock<T>(root: string, body: () => T, timeout = 120): T {
-  return withFileLock(path.join(root, '.agent-org', LAND_LOCK), body, timeout, 'another agent is putting its work into main');
+export function withLandLock<T>(root: string, body: () => T, timeout = 120): Promise<T> {
+  return withFileLockAsync(path.join(root, '.agent-org', LAND_LOCK), body, timeout, 'another agent is putting its work into main');
 }

@@ -17,6 +17,7 @@ import { fnmatchcase } from './fnmatch.ts';
 import type { CheckSpec, Team } from './team.ts';
 
 const TAIL = 1500; // characters of a failing check's output passed back to the agent
+const KEPT = 64 * 1024; // bytes of a check's output kept while it runs: its end, enough for the TAIL
 
 export interface Outcome {
   name: string;
@@ -56,19 +57,29 @@ export async function run(team: Team, files: readonly string[], cwd: string | nu
  *
  * The hub runs inside an agent's tool server, whose stdin is the harness's pipe: a child that inherits it
  * can hang on Windows before it even starts, so it gets an empty stdin. When time runs out the whole
- * process tree goes, so no grandchild keeps the output open.
+ * process tree goes, so no grandchild keeps the output open. Of the output only its last `kept` bytes are kept
+ * (seen: a check that wrote 8 MiB was held whole, for the 1500 characters passed on).
  */
-export function command(line: string, cwd: string, timeout: number): Promise<{ code: number | null; output: string }> {
+export function command(line: string, cwd: string, timeout: number, kept = KEPT): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(line, { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-    const chunks: Buffer[] = [];
-    child.stdout.on('data', (d: Buffer) => chunks.push(d));
-    child.stderr.on('data', (d: Buffer) => chunks.push(d));
+    let chunks: Buffer[] = [];
+    let size = 0;
+    const take = (d: Buffer): void => {
+      chunks.push(d);
+      size += d.length;
+      if (size > 2 * kept) { // now and then, not on every piece
+        chunks = [Buffer.concat(chunks).subarray(-kept)];
+        size = kept;
+      }
+    };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       killTree(child.pid);
-      setTimeout(() => resolve({ code: null, output: Buffer.concat(chunks).toString('utf8') }), 10_000).unref();
+      setTimeout(() => resolve({ code: null, output: Buffer.concat(chunks).subarray(-kept).toString('utf8') }), 10_000).unref();
     }, timeout * 1000);
     child.on('error', (e) => {
       clearTimeout(timer);
@@ -76,7 +87,7 @@ export function command(line: string, cwd: string, timeout: number): Promise<{ c
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code: timedOut ? null : (code ?? 1), output: Buffer.concat(chunks).toString('utf8') });
+      resolve({ code: timedOut ? null : (code ?? 1), output: Buffer.concat(chunks).subarray(-kept).toString('utf8') });
     });
   });
 }

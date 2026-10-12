@@ -181,7 +181,9 @@ continues the same conversation (*Start fresh* begins a new one); only the first
 is told to read its role.
 It gets agent-org's tools through DeepSeek's MCP client plugin, added for that role by a patch
 file (your own DeepSeek settings are not changed). *Stop* ends the run or the wait, and it stays
-stopped until you start it again. Its terminal mode prints only the final answer, so agent-org
+stopped until you start it again. A run in which the model did nothing (a sign-in or start that
+failed, also one that only reports an error) is not started again at once: the loop waits 10
+seconds, twice as long after each such run, up to 5 minutes. Its terminal mode prints only the final answer, so agent-org
 runs it with JSON output and shows it like an interactive program: a banner, then each step -
 thinking, tool calls and results, answers - as it happens. While it waits, its pane has an input
 line: type a message for it and press Enter, and it starts working on it.
@@ -288,7 +290,9 @@ Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
   recent messages.
 - *Start fresh* on a card begins a new conversation on purpose (the hub's memory is
   kept).
-- *Stop* ends an agent's program; its conversation is kept for the next start.
+- *Stop* ends an agent's program; its conversation is kept for the next start. In the window
+  this also works for an agent still starting (at a trust prompt or a sign-in), before it
+  has connected to the hub.
 
 ## Consultants
 
@@ -466,14 +470,15 @@ pre-approved). On top of that, agent-org holds every agent to these limits:
   (`sk-...`, AWS, GitHub, Google, Slack keys, passwords in code) is refused, with the file
   and line but never the value, until it reads them from the environment instead. With git
   branches, a secret written and taken out again does not reach main through the earlier
-  commit either: that agent's work lands as one commit.
+  commit, or through a merge that added it, either: that agent's work lands as one commit.
 - **Nobody gives more than they have.** A manager can only hire or change agents with files
-  it may write itself, and the team cannot grow past `max_agents` in `team.yaml` (12 by
+  it may write itself (by what a pattern reaches: with `src/?.ts` it cannot give `src/*.ts`), and the team cannot grow past `max_agents` in `team.yaml` (12 by
   default). A new hire does not start past the running limit.
 - **With git branches, scope is checked at the door:** work only reaches main if every file
   it changed is in the agent's write scope - including files written through the shell. What
   lands is what the checks passed: if main moved on while they ran, they run again on the new
-  combination; a task cancelled meanwhile does not land.
+  combination; a task cancelled meanwhile does not land, and a cancel or move that comes while
+  its merge runs is turned away for that moment (try again once the task is done).
 - Every refusal is recorded in *Activity* (kind "safety"). The command guard and the secret
   check can be turned off in `team.yaml` (`guard_commands`, `scan_secrets`) if a project really needs it.
 

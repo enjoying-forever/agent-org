@@ -155,6 +155,8 @@ export function isPattern(p: string): boolean {
 }
 
 const windows = process.platform === 'win32';
+const LANDING_FOR = 600; // seconds: a task marked as going into main longer than this is from a process that died
+const landingKey = (taskId: number): string => `landing:${taskId}`;
 const fold = (s: string): string => (windows ? s.toLowerCase() : s);
 
 export class Hub {
@@ -663,13 +665,17 @@ export class RoleSession {
       }
       checks = await this.runChecks(files, root, `task #${taskId} is not done yet`, task.id, siblings);
     }
-    // seen: a task cancelled while its checks ran was set back to done, and its work merged
-    if (outcome === 'done') this.stillOpen(taskId, `task #${taskId} is not done`);
-    if (checks.includes('FAILED')) {
-      result += `\n\n(The team's checks do not pass yet: ${checks}. Other parts of #${task.parent_id} are still open `
-        + `(${siblings.map((t) => `#${t.id} ${t.assignee}: ${t.title}`).join('; ')}), which may be why; they run again when those finish.)`;
+    try {
+      // seen: a task cancelled while its checks ran was set back to done, and its work merged
+      if (outcome === 'done') this.stillOpen(taskId, `task #${taskId} is not done`);
+      if (checks.includes('FAILED')) {
+        result += `\n\n(The team's checks do not pass yet: ${checks}. Other parts of #${task.parent_id} are still open `
+          + `(${siblings.map((t) => `#${t.id} ${t.assignee}: ${t.title}`).join('; ')}), which may be why; they run again when those finish.)`;
+      }
+      task = this.store.updateTask(taskId, { state: outcome, result, checks, ...(landed ? { commit_id: landed } : {}) });
+    } finally {
+      if (landed) this.unclaim(taskId); // done now: it can be cancelled or moved again
     }
-    task = this.store.updateTask(taskId, { state: outcome, result, checks, ...(landed ? { commit_id: landed } : {}) });
     const head = { done: 'is DONE - please review it', blocked: 'is BLOCKED', failed: 'FAILED', rejected: 'was REJECTED' }[outcome];
     this.store.addMessage(this.name, task.assigner, 'result', `Task #${task.id} ${head}: ${task.title}\n\n${result}`,
       task.message_id, false, task.id);
@@ -755,31 +761,39 @@ export class RoleSession {
       let landed: string | null = null;
       checks = '';
       for (let round = 1; landed === null; round++) {
-        const [, conflicts] = gitops.sync(wt, main, false);
+        // main by its commit, read before it is taken in: what is checked is that, even if main moves on
+        // meanwhile (seen: main moved between taking it in and reading it, and the newer one passed as checked)
+        const base = gitops.head(root, main);
+        const [, conflicts] = gitops.sync(wt, base, false);
         if (conflicts.length) {
           hub.event('git', this.name, `conflicts with main in ${conflicts.join(', ')}`, taskId);
           throw new HubError(`${refusal}. ${conflictText(conflicts)}`);
         }
-        if (!gitops.git(wt, ['rev-list', '--count', `${main}..HEAD`]).stdout.trim().replace(/^0+|0+$/g, '')) return ['', '']; // nothing of its own
-        const base = gitops.head(root, main);
-        const changed = gitops.changedFiles(wt, `${main}...HEAD`);
-        this.landingChecks(wt, main, changed, refusal, taskId);
+        if (!gitops.git(wt, ['rev-list', '--count', `${base}..HEAD`]).stdout.trim().replace(/^0+|0+$/g, '')) return ['', '']; // nothing of its own
+        const changed = gitops.changedFiles(wt, `${base}...HEAD`);
+        this.landingChecks(wt, main, base, changed, refusal, taskId);
         // Landing merges every commit of this copy, not only its final state: a secret written and taken out again
-        // would still reach main's history. Then the copy's own commits become one first.
+        // would still reach main's history - also one added in a merge (--cc: the lines no parent had). Then the
+        // copy's own commits become one first.
         if (this.team.settings.scan_secrets
-          && safety.findSecrets(gitops.git(wt, ['log', '-p', '--no-merges', `${main}..HEAD`]).stdout).length) {
-          gitops.flatten(wt, main, `${hub.branchRole(this.name)}: ${message}`);
+          && safety.findSecrets(gitops.git(wt, ['log', '-p', '--cc', `${base}..HEAD`]).stdout).length) {
+          gitops.flatten(wt, base, `${hub.branchRole(this.name)}: ${message}`);
           hub.event('safety', this.name, 'an earlier commit held a secret: its work lands as one commit, without it', taskId);
         }
         checks = await this.runChecks([...new Set([...files, ...changed])].sort(), wt, refusal, taskId, siblings);
-        landed = gitops.withLandLock(root, () => {
+        landed = await gitops.withLandLock(root, () => {
           if (gitops.head(root, main) !== base) return null; // main moved on meanwhile: check again with it
-          this.stillOpen(taskId, refusal); // cancelled or moved away while the checks ran: it does not land
-          const [commit, why] = gitops.land(root, branch, message);
-          if (commit === null) throw new HubError(`${refusal}: your work could not go into main: ${why}`);
-          gitops.sync(wt, main, true); // a fast-forward: your copy = main again
-          hub.store.setSetting(`synced:${hub.branchRole(this.name)}`, gitops.head(root, main));
-          return commit;
+          this.claimLanding(taskId, refusal); // cancelled or moved away while the checks ran: it does not land
+          try {
+            const [commit, why] = gitops.land(root, branch, message);
+            if (commit === null) throw new HubError(`${refusal}: your work could not go into main: ${why}`);
+            gitops.sync(wt, main, true); // a fast-forward: your copy = main again
+            hub.store.setSetting(`synced:${hub.branchRole(this.name)}`, gitops.head(root, main));
+            return commit;
+          } catch (e) {
+            this.unclaim(taskId);
+            throw e;
+          }
         });
         if (landed === null && round >= 3) {
           throw new HubError(`${refusal}: main kept changing while your checks ran (three times); try again in a moment.`);
@@ -797,7 +811,7 @@ export class RoleSession {
 
   /** What never goes into main: the team's own configuration, files outside the agent's write scope (also written
    * through the shell), and secrets. */
-  private landingChecks(wt: string, main: string, changed: string[], refusal: string, taskId: number | null): void {
+  private landingChecks(wt: string, main: string, base: string, changed: string[], refusal: string, taskId: number | null): void {
     const team = this.team;
     const name = this.hub.team_file ? path.basename(this.hub.team_file) : 'team.yaml';
     const guarded = changed.filter((f) => safety.isProtected(f, name));
@@ -813,7 +827,21 @@ export class RoleSession {
         + `files you may write (${this.scope(team, this.name).join(', ') || 'none'}). Undo those changes (git checkout `
         + `${main} -- <file>, or delete new files), or ask ${this.superior} to change your scope.`);
     }
-    this.noSecrets(gitops.git(wt, ['diff', `${main}...HEAD`]).stdout, refusal, taskId);
+    this.noSecrets(gitops.git(wt, ['diff', `${base}...HEAD`]).stdout, refusal, taskId);
+  }
+
+  /** Inside the land lock: mark the task as going into main, in one step with seeing it is still open - a cancel
+   * or a move waits for its end (seen: a task cancelled during its merge stayed cancelled, its code in main). */
+  private claimLanding(taskId: number | null, refusal: string): void {
+    if (taskId === null) return;
+    this.store.atomically(() => {
+      this.stillOpen(taskId, refusal);
+      this.store.setSetting(landingKey(taskId), String(now()));
+    });
+  }
+
+  private unclaim(taskId: number | null): void {
+    if (taskId !== null) this.store.setSetting(landingKey(taskId), '');
   }
 
   /** A task that was cancelled or moved away while its checks ran is not finished by them. */
@@ -903,8 +931,12 @@ export class RoleSession {
       throw new PermissionDenied(`only ${task.assigner} or someone above ${task.assignee} can cancel task #${taskId}`);
     }
     if ((CLOSED as readonly string[]).includes(task.state)) throw new HubError(`task #${taskId} is already ${task.state}`);
+    this.notLanding(taskId, 'cancel');
     const unseen = this.unseen(task);
-    task = this.store.updateTask(taskId, { state: 'cancelled', result: reason.trim() });
+    task = this.store.atomically(() => {
+      this.notLanding(taskId, 'cancel');
+      return this.store.updateTask(taskId, { state: 'cancelled', result: reason.trim() });
+    });
     this.hub.event('task', this.name, `cancelled #${task.id}: ${task.title}`, task.id);
     const freed = team.isMember(task.assignee) ? this.hub.session(task.assignee).settle() : [];
     const why = reason.trim() ? ` Reason: ${sentence(reason)}` : '';
@@ -920,6 +952,14 @@ export class RoleSession {
     }
     this.hub.stallDependents(task);
     return task;
+  }
+
+  /** A task going into main right now is not cancelled or moved under it: that waits for the landing to end. */
+  private notLanding(taskId: number, what: string): void {
+    const at = Number(this.store.getSetting(landingKey(taskId)) || 0);
+    if (at && now() - at < LANDING_FOR) {
+      throw new HubError(`task #${taskId} is going into main right now; ${what} it in a moment, once it is done`);
+    }
   }
 
   /** Whether its assignee never read the task (it waits for others, or its delivery is unread). Then a cancel or
@@ -948,6 +988,7 @@ export class RoleSession {
     if (!(team.isAbove(this.name, to) && (task.assigner === team.owner || team.isAbove(task.assigner, to)))) {
       throw new PermissionDenied(`${to} must be below both you and ${task.assigner}, who gave task #${taskId}`);
     }
+    this.notLanding(taskId, 'move');
     const before = task.assignee;
     const unseen = this.unseen(task);
     const files = this.store.taskFiles(taskId);
@@ -971,7 +1012,10 @@ export class RoleSession {
       }
     }
     const why = reason.trim();
-    task = this.store.updateTask(taskId, { assignee: to, started_at: null, nudged_at: null });
+    task = this.store.atomically(() => {
+      this.notLanding(taskId, 'move');
+      return this.store.updateTask(taskId, { assignee: to, started_at: null, nudged_at: null });
+    });
     if (task.state !== 'waiting') {
       const notes = [`This task was ${before}'s and is now yours${why ? `: ${why}` : '.'}`];
       if (task.result) notes.push(`${before}'s last word on it: ${task.result.slice(0, 1500)}`);

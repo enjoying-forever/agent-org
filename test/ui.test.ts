@@ -654,3 +654,14 @@ test('an unfinished task stays on the Board however many newer ones finished', a
   assert.ok(tasks.length >= 61 && tasks.length <= 62);
   assert.deepEqual(tasks.map((x) => x.id), [...tasks.map((x) => x.id)].sort((a, b) => a - b)); // oldest first, as before
 });
+
+test('more than 200 unfinished tasks: none drops off the Board, and each agent counts all of its own', async (t) => {
+  // reported: the open tasks were read with the store's limit of 200, so the 201st oldest vanished again
+  const server = await startServer(t);
+  const lead = server.app.hub.session('tech-lead');
+  const first = lead.assignTask('worker-a', 'The oldest open one');
+  for (let i = 0; i < 200; i++) lead.assignTask('worker-a', `Open ${i}`);
+  const state = server.app.state() as { tasks: { id: number }[]; roles: { name: string; open_tasks: number }[] };
+  assert.ok(state.tasks.some((x) => x.id === first.id), 'the oldest open task is there');
+  assert.equal(state.roles.find((r) => r.name === 'worker-a')?.open_tasks, 201);
+});

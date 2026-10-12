@@ -836,6 +836,11 @@ function output(command: string, args: string[], timeout: number): Promise<strin
   });
 }
 
+/** End a process and everything it started, without waiting for it on this thread. */
+export async function endTree(pid: number): Promise<void> {
+  await output('taskkill', ['/PID', String(pid), '/T', '/F'], 30);
+}
+
 /** stopRole for the agent-org window, whose terminals must not wait: each check (tasklist takes about 0.35 s)
  * and stop runs without blocking, and the role's sessions are stopped side by side. */
 export async function stopRoleAsync(hub: Hub, role: string): Promise<number> {

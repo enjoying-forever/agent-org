@@ -73,6 +73,7 @@ export function resultLines(value: unknown, ok: boolean, status = ''): string[] 
 /** Turns events into terminal text; `session` is the conversation the run belongs to. */
 export class View {
   session: string | null = null;
+  worked = false; // the model did something: thought, called a tool, wrote - not only a session, a status or an error
   midLine = false; // text is being streamed: the next line must start on a new one
   lastText = '';
   used: Record<string, number> = {}; // this run's token counts (DeepSeek reports them per step)
@@ -105,6 +106,8 @@ export class View {
   // DeepSeek Harness: {"type": session | status | thinking | tool_call | tool_result | text | final | error}
   private deepseek(e: Event): void {
     const kind = e.type;
+    if (['thinking', 'tool_call', 'tool_result', 'text', 'final'].includes(String(kind))
+      || (kind === 'status' && e.phase === 'step_end')) this.worked = true;
     if (kind === 'session') {
       this.session = e.sessionId ?? null; // kept for the next run, not shown
     } else if (kind === 'thinking') {
@@ -149,6 +152,7 @@ export class View {
     }
     if (kind === 'result') {
       const body = e.result ?? {};
+      if (String(body.status ?? 'SUCCESS').toUpperCase() === 'SUCCESS') this.worked = true;
       if (String(body.status ?? 'SUCCESS').toUpperCase() !== 'SUCCESS') {
         this.line(`${RED}✗ ${body.status}: ${short(body.response || body.error || '', 300)}${RESET}`);
       } else if (this.midLine) {
@@ -157,6 +161,7 @@ export class View {
       return;
     }
     const step = typeof e[kind] === 'object' && e[kind] !== null ? e[kind] : {};
+    this.worked = true;
     const state = String(step.state ?? '').toUpperCase();
     const stepType = step.step_type;
     if (stepType === 'agent_response' && step.text_delta) {
@@ -208,8 +213,9 @@ export function keepUsage(file: string, session: string, used: Record<string, nu
   }
 }
 
-/** The viewer's exit code when the run it showed produced no event at all: it failed before it began (a sign-in or
- * start that failed), so the role's loop waits before it tries again instead of starting it over and over. */
+/** The viewer's exit code when the model did nothing in the run it showed: it failed before it began (a sign-in or
+ * start that failed, also one that says so in an error event), so the role's loop waits before it tries again
+ * instead of starting it over and over. */
 export const NO_RUN = 3;
 
 function option(argv: string[], name: string): string | undefined {
@@ -230,7 +236,6 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
   const view = new View(out);
   const record = await recorder(option(argv, '--team'), option(argv, '--role'));
   if (record !== null) view.onTool = record.tool;
-  let events = 0;
   for await (const raw of createInterface({ input, crlfDelay: Infinity })) {
     const line = raw.trim();
     if (!line) continue;
@@ -242,7 +247,6 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
       continue;
     }
     if (typeof event !== 'object' || event === null || Array.isArray(event)) continue;
-    events += 1;
     const [before, steps] = [view.session, view.used.steps ?? 0];
     view.show(event as Event);
     if (sessionFile && view.session && view.session !== before) writeFileSync(sessionFile, view.session, 'utf8');
@@ -250,7 +254,7 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
   }
   if (view.midLine) out.write('\n');
   record?.end();
-  return events ? 0 : NO_RUN;
+  return view.worked ? 0 : NO_RUN;
 }
 
 /** What a run does, noted in its team's hub as the hooks note other agents' tool calls, for the owner's page.

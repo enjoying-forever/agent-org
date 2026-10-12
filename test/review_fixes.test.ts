@@ -100,7 +100,11 @@ test("a DeepSeek run that did nothing says so, and the role's loop waits before 
   // reported: a start that failed (sign-in) read no mail, so the loop started it again at once, over and over
   const run = async (lines: string[]) => runview.main([], Readable.from(lines.map((l) => `${l}\n`)), new PassThrough());
   assert.equal(await run(['error: not signed in']), runview.NO_RUN);
-  assert.equal(await run([JSON.stringify({ type: 'session', session_id: 's1' })]), 0);
+  // reported after: an error event said the same and counted as a run, so the loop went on at once
+  assert.equal(await run([JSON.stringify({ type: 'error', message: 'invalid API key' })]), runview.NO_RUN);
+  assert.equal(await run([JSON.stringify({ type: 'session', sessionId: 's1' }), JSON.stringify({ type: 'error', message: 'x' })]), runview.NO_RUN);
+  assert.equal(await run([JSON.stringify({ type: 'session', sessionId: 's1' }), JSON.stringify({ type: 'text', text: 'hi' })]), 0);
+  assert.equal(await run([JSON.stringify({ type: 'tool_call', tool: 'read_inbox', input: {} })]), 0);
   const launch = await import('../src/launch.ts');
   const script = String(launch.deepseekLaunch.toString());
   assert.ok(script.includes('NO_RUN') && script.includes('Start-Sleep'), 'the loop backs off after such a run');

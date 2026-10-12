@@ -11,7 +11,7 @@
  */
 
 import path from 'node:path';
-import { fnmatchcase } from './fnmatch.ts';
+import { fnmatchcase, patternWithin } from './fnmatch.ts';
 
 // relative to the project folder; directories end with "/"
 export const PROTECTED = ['team.yaml', 'team.yaml.bak', '.agent-org/', '.agents/plugins/agent-org/', '.grok/config.toml', '.git/'];
@@ -122,11 +122,13 @@ export function maskSecrets(text: string): string {
   return out;
 }
 
-/** Secrets that lines added in `diff` would put into history: 'file:line (kind)', never the value. */
+/** Secrets that lines added in `diff` would put into history: 'file:line (kind)', never the value. A merge's
+ * combined diff (git log --cc) has a column per parent: there only the lines no parent had are its own. */
 export function findSecrets(diff: string): string[] {
   const found: string[] = [];
   let file = '?';
   let line = 0;
+  let columns = 1;
   for (const text of diff.split(/\r?\n/)) {
     if (text.startsWith('+++ ')) {
       file = text.startsWith('+++ b/') ? text.slice(6) : text.slice(4);
@@ -135,9 +137,12 @@ export function findSecrets(diff: string): string[] {
     if (text.startsWith('@@')) {
       const m = /\+(\d+)/.exec(text);
       line = m ? Number(m[1]) - 1 : 0;
+      columns = /^@+/.exec(text)![0].length - 1; // '@@' one parent, '@@@' two
       continue;
     }
-    if (text.startsWith('+')) {
+    const mark = text.slice(0, columns);
+    if (mark.includes('-')) continue; // not in the result
+    if (mark === '+'.repeat(columns)) {
       line += 1;
       for (const [kind, rule] of SECRET_PATTERNS) {
         if (rule.test(text)) {
@@ -145,7 +150,7 @@ export function findSecrets(diff: string): string[] {
           break;
         }
       }
-    } else if (!text.startsWith('-')) {
+    } else {
       line += 1;
     }
   }
@@ -161,5 +166,7 @@ export function outsideScope(files: string[], scope: readonly string[]): string[
 
 /** Patterns in `granted` that reach beyond `own` (a manager cannot give more than it has). */
 export function scopeWithin(granted: readonly string[], own: readonly string[]): string[] {
-  return granted.filter((p) => !own.some((o) => fnmatchcase(stripDot(p.toLowerCase()), stripDot(o.toLowerCase()))));
+  // Whether all p reaches o reaches too, not whether p's text matches o: src/*.ts as a name matches src/?.ts, yet
+  // reaches src/long-file.ts, which src/?.ts does not (seen: a worker was given files its manager may not write).
+  return granted.filter((p) => !own.some((o) => patternWithin(stripDot(p.toLowerCase()), stripDot(o.toLowerCase()))));
 }

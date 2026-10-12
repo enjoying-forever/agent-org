@@ -302,7 +302,7 @@ export class App {
   private open(file: string): void {
     const teamFile = path.resolve(file);
     const hub = Hub.open(teamFile, launch.tabOpener(teamFile, (tab) => this.openTab(tab), this.inWindow)); // throws TeamError
-    hub.stopper = (role: string) => { void Promise.resolve(this.launcher.stopRole(hub, role)).catch(() => {}); };
+    hub.stopper = (role: string) => { void this.stopAgent(hub, role).catch(() => {}); };
     this.hubOrNull?.close();
     this.hubOrNull = hub;
     this.teamFile = teamFile;
@@ -480,7 +480,7 @@ export class App {
       if ((p.kind !== 'stopped' && p.kind !== 'stuck') || now - (this.autostarted.get(p.role) ?? 0) < AUTOSTART_GAP) continue;
       if (!(hub.team.roles[p.role]?.harness in launch.BUILDERS)) continue;
       if (p.kind === 'stuck') {
-        await this.launcher.stopRole(hub, p.role);
+        await this.stopAgent(hub, p.role);
         if (hub.store.online()[p.role]) { // its program did not stop: leave it for a while
           this.autostarted.set(p.role, now);
           hub.event('agent', p.role, 'could not be restarted automatically: its program did not stop');
@@ -888,7 +888,7 @@ export class App {
     if (!(role in this.hub.team.roles)) throw new ApiError(`'${role}' is not a role`);
     const why = launch.cannotStart(this.inWindow);
     if (why) throw new ApiError(why); // before stopping it: it could not come back
-    const stopped = await this.launcher.stopRole(this.hub, role);
+    const stopped = await this.stopAgent(this.hub, role);
     const result = this.launch({ roles: [role] }) as Body;
     this.hub.event('agent', role, 'restarted by the owner');
     return { stopped, ...result };
@@ -943,9 +943,26 @@ export class App {
     const role = str(body, 'role');
     const team = this.hub.team;
     if (role !== '@all' && !(role in team.roles)) throw new ApiError(`'${role}' is not a role`);
-    const names = role === '@all' ? Object.keys(team.roles).filter((n) => this.hub.store.online()[n]) : [role];
-    const stopped = await Promise.all(names.map((n) => this.launcher.stopRole(this.hub, n)));
+    const online = this.hub.store.online();
+    const names = role === '@all' ? Object.keys(team.roles).filter((n) => online[n] || this.startingTerm(this.hub, n)) : [role];
+    const stopped = await Promise.all(names.map((n) => this.stopAgent(this.hub, n)));
     return { stopped: Object.fromEntries(names.map((n, i) => [n, stopped[i]])) };
+  }
+
+  /** The terminal of the open team's role whose program runs here, if any. */
+  private startingTerm(hub: Hub, role: string): terminals.Terminal | undefined {
+    const term = this.inWindow && hub === this.hubOrNull ? this.hosts.get(this.teamFile ?? '')?.get(role) : undefined;
+    return term?.running ? term : undefined;
+  }
+
+  /** Stop a role's agent: through its hub connection, and here also the program in its terminal, which has no
+   * connection yet while it starts (seen: an agent at its trust prompt or sign-in could not be stopped). */
+  private async stopAgent(hub: Hub, role: string): Promise<number> {
+    const stopped = await this.launcher.stopRole(hub, role);
+    const term = stopped ? undefined : this.startingTerm(hub, role);
+    if (term === undefined) return stopped;
+    await launch.endTree(term.proc.pid);
+    return 1;
   }
 
   /** Keep the open team (as saved in team.yaml) to start new projects from. */

@@ -7,6 +7,7 @@
  * its superior writes for it; until then, the first sentence of its duties stands in.
  */
 
+import { dict } from './dict.ts';
 import { describeStuck, HubError, PermissionDenied, type RoleSession } from './hub.ts';
 import type { Action, Status, Task } from './store.ts';
 
@@ -44,14 +45,14 @@ interface Facts {
 
 function facts(me: RoleSession, detail: Detail): Facts {
   const store = me.store;
-  const tasks: Record<string, Task[]> = {};
+  const tasks = dict<Task[]>(); // by role name: a role named 'constructor' finds nothing inherited
   for (const t of store.tasks({ openOnly: true })) (tasks[t.assignee] ??= []).push(t);
-  const files: Record<string, string[]> = {};
+  const files = dict<string[]>();
   for (const l of store.locks()) (files[l.owner] ??= []).push(l.path);
-  const stuck = Object.fromEntries(Object.entries(me.hub.stuck()).map(([n, info]) => [n, describeStuck(info)]));
+  const stuck = dict(Object.entries(me.hub.stuck()).map(([n, info]) => [n, describeStuck(info)] as const));
   return {
     statuses: store.statuses(), online: store.online(), tasks, files, stuck,
-    actions: detail === 'full' ? store.recentActions(2) : {}, unread: detail === 'full' ? store.unreadCounts() : {},
+    actions: detail === 'full' ? store.recentActions(2) : dict(), unread: detail === 'full' ? store.unreadCounts() : dict(),
   };
 }
 

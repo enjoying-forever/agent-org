@@ -152,6 +152,7 @@ export class Terminal {
   private buf = '';
   private start = 0; // where buf begins in the whole output
   private closing = false;
+  private afterwards = false; // its program ended, and what runs after it (a shell) has the terminal
 
   /** `after`: what runs in the same terminal once the program ends - a shell to see and fix what happened (a
    * sign-in the program asked for, say), as the PowerShell a start script ran in used to stay. */
@@ -181,6 +182,7 @@ export class Terminal {
           this.output(`\r\n\x1b[2m[agent-org] ${path.basename(args[0])} ended. A PowerShell prompt in its folder:\x1b[0m\r\n`, notify);
           try {
             this.proc = run(then, null);
+            this.afterwards = true;
             return;
           } catch {
             // no shell to be had: the terminal ends
@@ -245,6 +247,11 @@ export class Terminal {
       this.rows = r;
       this.proc.resize(c, r);
     }
+  }
+
+  /** Whether the program it was started with still runs (not the shell after it). */
+  get running(): boolean {
+    return this.alive && !this.afterwards;
   }
 
   close(): void {

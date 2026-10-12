@@ -44,6 +44,26 @@ test('the window runs agents in its terminals', { skip: needsPty }, async (t) =>
   assert.deepEqual(app.liveAgents(), ['leader']);
 });
 
+test('an agent still starting (no hub connection yet) is stopped too', { skip: needsPty }, async (t) => {
+  // reported: Stop went by the agents' hub connections only; one at its trust prompt or sign-in stayed running
+  const dir = tmpDir(t);
+  const server = await startServer(t);
+  const app = server.app;
+  app.inWindow = true;
+  cleanup(t, () => app.terminals.closeAll());
+  for (const role of ['leader', 'worker-a']) {
+    const script = path.join(dir, 'launch', role, 'start.ps1');
+    mkdirSync(path.dirname(script), { recursive: true });
+    writeFileSync(script, 'Start-Sleep -Seconds 120\n', 'utf8'); // waits, as at a prompt
+    app.openTab(launch.tabCommand(role, '#D97757', dir, script));
+  }
+  const term = app.terminals.get('leader');
+  assert.deepEqual(await server.ok('/api/stop', { role: 'leader' }), { stopped: { leader: 1 } });
+  await Promise.race([term?.exited, new Promise((r) => setTimeout(r, 15_000))]);
+  assert.equal(term?.alive, false, 'its program has ended');
+  assert.deepEqual(await server.ok('/api/stop', { role: '@all' }), { stopped: { 'worker-a': 1 } });
+});
+
 test('an agent hired by an agent starts in the window', async (t) => {
   const server = await startServer(t);
   const app = server.app;
