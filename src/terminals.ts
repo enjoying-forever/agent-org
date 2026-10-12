@@ -145,7 +145,7 @@ export class Terminal {
   readonly started = Date.now() / 1000;
   lastOutput = this.started;
   lastInput = 0; // when the owner last typed text here (see typed)
-  unsent = false; // the owner typed text and has not sent it (Enter) or cleared it (Ctrl+C)
+  private draft = 0; // characters the owner typed into its input line and has not sent or taken out again
   alive = true;
   readonly exited: Promise<void>; // resolves when its program (and what runs after it) has ended
   proc: Pty;
@@ -226,17 +226,30 @@ export class Terminal {
   }
 
   /** Input from the owner's keyboard. Text (not the page's own replies to the program's queries, arrow keys or
-   * Ctrl keys) counts as typing: agent-org then leaves the prompt alone. */
+   * Ctrl keys) counts as typing: agent-org then leaves the prompt alone. How much is in the input line is kept:
+   * Enter sends it, Ctrl+C and Ctrl+U clear it, Backspace takes one back. */
   typed(data: string): void {
     for (const c of data.replace(ESCAPES, '')) {
-      if (c === '\r' || c === '\x03') { // Enter sends what you typed, Ctrl+C clears it
-        this.unsent = false;
+      if (c === '\r' || c === '\x03' || c === '\x15') {
+        this.draft = 0;
+      } else if (c === '\x7f' || c === '\b') {
+        this.draft = Math.max(0, this.draft - 1);
       } else if (c >= ' ') {
         this.lastInput = Date.now() / 1000;
-        this.unsent = true; // text in its input line that you have not sent yet
+        this.draft += 1;
       }
     }
     this.write(data);
+  }
+
+  /** Whether the owner left text in its input line: then nothing is typed into it, however long it waits (seen:
+   * a line typed after 10 minutes pressed Enter on the owner's draft too). */
+  get unsent(): boolean {
+    return this.draft > 0;
+  }
+
+  set unsent(value: boolean) { // for tests
+    this.draft = value ? Math.max(1, this.draft) : 0;
   }
 
   resize(cols: number, rows: number): void {

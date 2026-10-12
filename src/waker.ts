@@ -24,7 +24,6 @@ export const READY = 6.0; // seconds after a start before its first line: the pr
 export const AGAIN = 90.0; // seconds before the same terminal gets another line (doubling while the same mail waits)
 export const MOST = 1800.0; // the longest it waits before trying once more
 export const TYPED = 30.0; // seconds after you typed in a terminal before it gets a line (you may be mid-sentence)
-export const UNSENT = 600.0; // seconds it waits while you have typed text there and not sent it (a line would send yours too)
 export const TAIL = 1500; // characters of recent output searched for a question: about the last screen update
 
 const MOVES = /\x1b\[[0-9;]*[CHf]/g; // cursor moves: some programs skip blank cells with them
@@ -107,7 +106,7 @@ export class Waker {
       const spec = team.roles[name];
       if (spec === undefined || spec.harness === 'deepseek' || !term.alive || name in stuck || !online[name]) continue;
       if (now - term.started < READY || now - term.lastOutput < QUIET || now - term.lastInput < TYPED) continue;
-      if (term.unsent && now - term.lastInput < UNSENT) continue;
+      if (term.unsent) continue; // your draft would go along with the line: it waits for you (the page says so)
       const [since, oldest] = unreadSince[name] ?? [null, null];
       // Its Stop hook listening for mail (it says so, by its process id): the mail reaches it that way. Otherwise it
       // rests, and is woken as soon as mail is there - a guess of 2.5 s for a hook that might still be listening

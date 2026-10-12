@@ -1158,6 +1158,7 @@ function updatePane(p, r) {
       ? h('span', { class: 'tok', title: usageText(r.usage) }, shortUsage(r.usage)) : null,
     r.unread ? h('span', { class: 'pill hot', title: `${r.unread} unread` }, r.unread) : null,
     r.online > 1 && h('span', { class: 'flag bad' }, `${r.online} sessions`),
+    r.unread && r.terminal?.draft && h('span', { class: 'flag calm', title: `What you typed in ${r.name}'s terminal is not sent: its new messages wait for it. Send it (Enter) or clear it (Ctrl+C).` }, 'your text waits'),
     r.stuck && h('span', { class: `flag ${pausedByLimit(r) ? 'calm' : 'bad'}`, title: r.stuck.text }, r.stuck.describe),
     launchable && !r.online && iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)),
     launchable && r.online > 0 && r.stuck && !pausedByLimit(r) && iconBtn('restart', `Restart ${r.name}`, () => restartRole(r.name)),

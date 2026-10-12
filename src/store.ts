@@ -313,6 +313,7 @@ export interface TaskFields {
   checks?: string;
   commit_id?: string;
   assignee?: string;
+  assigner?: string;
 }
 
 export class Store {
@@ -516,11 +517,15 @@ export class Store {
 
   updateTask(taskId: number, fields: TaskFields): Task {
     const keys = Object.keys(fields) as (keyof TaskFields)[];
-    const allowed = new Set(['state', 'message_id', 'result', 'revisions', 'nudged_at', 'started_at', 'checks', 'commit_id', 'assignee']);
+    const allowed = new Set(['state', 'message_id', 'result', 'revisions', 'nudged_at', 'started_at', 'checks', 'commit_id', 'assignee', 'assigner']);
     for (const k of keys) if (!allowed.has(k)) throw new Error(`cannot set task field ${k}`);
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => (fields[k] ?? null) as SQLInputValue);
-    this.run(`UPDATE tasks SET ${sets}${keys.length ? ', ' : ''}updated_at = ? WHERE id = ?`, ...values, now(), taskId);
+    // The watchdog's own note that it reminded is not a change of the task: it would read as progress, and the
+    // reminder start over (seen: a silent agent's stall was never passed up to its superior).
+    const bookkeeping = keys.length > 0 && keys.every((k) => k === 'nudged_at');
+    if (bookkeeping) this.run(`UPDATE tasks SET ${sets} WHERE id = ?`, ...values, taskId);
+    else this.run(`UPDATE tasks SET ${sets}${keys.length ? ', ' : ''}updated_at = ? WHERE id = ?`, ...values, now(), taskId);
     return this.getTask(taskId) as Task;
   }
 

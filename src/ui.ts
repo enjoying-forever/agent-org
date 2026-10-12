@@ -823,9 +823,9 @@ export class App {
   /** The open team's terminals, each with whether its program is asking the owner something (a menu, a
    * permission or trust question) once it has gone quiet - so a page that is not showing the terminals (its
    * window hidden) can still tell the owner. */
-  private termListing(): Record<string, { id: number; alive: boolean; title: string; color: string; asking: boolean }> {
+  private termListing(): Record<string, { id: number; alive: boolean; title: string; color: string; asking: boolean; draft: boolean }> {
     return Object.fromEntries(this.terminals.items().map(([name, t]) => [name, { id: t.id, alive: t.alive, title: t.title, color: t.color,
-      asking: this.termAsking(t) }]));
+      asking: this.termAsking(t), draft: t.unsent }])); // draft: your text in its input line, which holds its mail back
   }
 
   private readonly askingSeen = new Map<number, [number, boolean]>(); // terminal id -> [its output's end, asking]

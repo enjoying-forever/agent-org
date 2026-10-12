@@ -247,25 +247,54 @@ async function doStep(contents: Electron.WebContents, text: string): Promise<str
   }
   if (step.verb === 'click') {
     if (!step.target) return 'click what? give a CSS selector';
-    return js(`let e; try { e = document.querySelector(${JSON.stringify(step.target)}); } catch { return 'not a CSS selector'; }
-      if (!e) return 'nothing matches it';
-      const all = document.querySelectorAll(${JSON.stringify(step.target)}).length;
-      e.scrollIntoView({ block: 'center' }); e.click();
-      return 'clicked ' + describe(e) + (all > 1 ? ' (the first of ' + all + ')' : '');`);
+    const where = await locate(js, `document.querySelector(${JSON.stringify(step.target)})`, JSON.stringify(step.target));
+    if (typeof where === 'string') return where;
+    await press(contents, where);
+    return `clicked ${where.what}${where.all > 1 ? ` (the first of ${where.all})` : ''}${where.covered ? `, but ${where.covered} lies over it there` : ''}`;
   }
   if (step.verb !== 'type') return 'not a step';
   // type: the selector quoted, or the longest run of its first words that names a field
-  return js(`const quoted = ${JSON.stringify(step.quoted)}; const words = ${JSON.stringify(step.words)};
-    let e = null; let text = ${JSON.stringify(step.text)};
+  const found = JSON.parse(await js(`const quoted = ${JSON.stringify(step.quoted)}; const words = ${JSON.stringify(step.words)};
     const field = (s) => { try { const c = document.querySelector(s); return c && c.matches('input, textarea, select, [contenteditable]') ? c : null; } catch { return null; } };
-    if (quoted !== null) e = field(quoted);
-    else for (let i = words.length - 1; i >= 1 && !e; i--) { e = field(words.slice(0, i).join(' ')); if (e) text = words.slice(i).join(' '); }
-    if (!e) return 'no field (input, textarea) matches it';
-    e.focus();
-    const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value')?.set;
-    if (set) set.call(e, text); else e.textContent = text;
-    e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'typed "' + text + '" into ' + describe(e);`);
+    if (quoted !== null) return JSON.stringify(field(quoted) ? [quoted, ${JSON.stringify(step.text)}] : null);
+    for (let i = words.length - 1; i >= 1; i--) { const s = words.slice(0, i).join(' '); if (field(s)) return JSON.stringify([s, words.slice(i).join(' ')]); }
+    return 'null';`)) as [string, string] | null;
+  if (found === null) return 'no field (input, textarea) matches it';
+  const [selector, value] = found;
+  const where = await locate(js, `document.querySelector(${JSON.stringify(selector)})`, JSON.stringify(selector));
+  if (typeof where === 'string') return where;
+  await press(contents, where); // a person's click: the field takes the focus (seen: focus() alone left keys going nowhere)
+  contents.selectAll(); // what was in it is replaced
+  await contents.insertText(value);
+  const shows = await js(`const e = document.activeElement; return e ? String(e.value ?? e.textContent ?? '') : '';`);
+  const field = where.what.replace(/ "[^"]*"$/, ''); // the field by its name: what it held before is not what it holds
+  if (where.covered) return `could not type into ${field}: ${where.covered} lies over it`;
+  return shows === value ? `typed "${value}" into ${field}` : `typed "${value}" into ${field}, but it shows "${shows.slice(0, 80)}"`;
+}
+
+interface Spot { x: number; y: number; what: string; all: number; covered: string }
+
+/** Where an element is on the page, scrolled into view: its middle, and what - if anything - lies over it there. */
+async function locate(js: (code: string) => Promise<string>, find: string, selector: string): Promise<Spot | string> {
+  const got = await js(`let e; try { e = ${find}; } catch { return 'not a CSS selector'; }
+    if (!e) return 'nothing matches it';
+    e.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = e.getBoundingClientRect();
+    if (!r.width || !r.height) return describe(e) + ' is not shown (no size)';
+    const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+    const top = document.elementFromPoint(x, y);
+    const covered = top && top !== e && !e.contains(top) && !top.contains(e) ? describe(top) : '';
+    return JSON.stringify({ x, y, what: describe(e), all: document.querySelectorAll(${selector}).length, covered });`);
+  return got.startsWith('{') ? JSON.parse(got) as Spot : got;
+}
+
+/** A person's click at a spot: the pointer moves there, goes down and up (pointerdown, focus, click). */
+async function press(contents: Electron.WebContents, at: Spot): Promise<void> {
+  const [x, y] = [Math.round(at.x), Math.round(at.y)];
+  contents.sendInputEvent({ type: 'mouseMove', x, y });
+  contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+  contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+  await new Promise((r) => { setTimeout(r, 120); });
 }
 
 /** What the page's browser may be and do, whatever the page asks for. */

@@ -447,3 +447,19 @@ test('a task taken away before it was read wakes nobody for nothing', (t) => {
   assert.ok(h.store.unreadCount('worker-a') === 0 && h.session('worker-a').readInbox().length === 0);
   assert.deepEqual(h.session('worker-b').readInbox().map((m) => m.task_id), [first.id]); // the new one has it
 });
+
+test("the watchdog's own reminder is not taken for progress", (t) => {
+  // reported: writing the reminder set the task's updated_at, the next patrol read that as progress and cleared
+  // it, and a silent agent's stall never reached its superior
+  const h = hub(t);
+  const task = give(h, 'tech-lead', 'worker-a', 'Build it');
+  h.session('worker-a').readInbox();
+  h.store.checkIn(1, 'worker-a');
+  const long = now() - watchdog.STALL - 30;
+  sql(h, 'UPDATE tasks SET updated_at = ?, started_at = ? WHERE id = ?', long, long, task.id);
+  watchdog.patrol(h, true); // at the real time, as in the window
+  const nudged = h.store.getTask(task.id)?.nudged_at;
+  assert.ok(nudged);
+  watchdog.patrol(h, true);
+  assert.equal(h.store.getTask(task.id)?.nudged_at, nudged, 'the reminder stands');
+});

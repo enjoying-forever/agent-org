@@ -317,7 +317,10 @@ test('text you typed and did not send is not sent along', (t) => {
   const term = new FakeTerm(now, { typed: 60 }); // you typed a minute ago ...
   term.unsent = true; // ... and left it in the input line
   assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), now), []);
-  assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), now + waker.UNSENT), ['researcher']); // not forever
+  // reported: after 10 minutes the line was typed anyway, and its Enter sent the draft along: never while it waits
+  assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), now + 6 * 3600), []);
+  term.unsent = false; // sent or cleared
+  assert.deepEqual(makeWaker().tick(hub, host({ researcher: term }), now + 6 * 3600), ['researcher']);
 });
 
 test('DeepSeek starts at once only with unfinished tasks', async (t) => {

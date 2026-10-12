@@ -166,3 +166,20 @@ test('a program that ends leaves a prompt in its terminal, and closing ends both
   await host.closeAll();
   assert.ok(!term.alive); // closing it starts nothing more
 });
+
+test('what you type in a terminal counts as a draft until it is sent or taken out again', () => {
+  const term = Object.assign(Object.create(terminals.Terminal.prototype), { draft: 0, alive: false, lastInput: 0 }) as terminals.Terminal;
+  term.typed('hi');
+  assert.ok(term.unsent);
+  term.typed('\x7f\x7f'); // Backspace, twice: nothing left
+  assert.ok(!term.unsent);
+  term.typed('fix the tests');
+  term.typed('\x1b[D\x1b[C'); // arrow keys are not text
+  assert.ok(term.unsent);
+  term.typed('\x15'); // Ctrl+U clears the line
+  assert.ok(!term.unsent);
+  term.typed('again\r'); // Enter sends it
+  assert.ok(!term.unsent);
+  term.typed('one more\x03'); // Ctrl+C clears it
+  assert.ok(!term.unsent);
+});

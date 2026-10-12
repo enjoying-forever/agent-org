@@ -622,12 +622,37 @@ export class RoleSession {
       if (dep === null) throw new HubError(`there is no task #${d} to wait for`);
       if (['failed', 'rejected', 'cancelled'].includes(dep.state)) throw new HubError(`task #${d} ended as ${dep.state}; it will never be done`);
     }
+    this.noDeadlock(partOf ?? null, deps);
     const waiting = deps.some((d) => !this.hub.satisfied(d));
     const task = this.store.addTask(this.name, to, title, details.trim().slice(0, MAX_TEXT), partOf ?? null,
       doneWhen.trim().slice(0, 2000), priority, deps, waiting ? 'waiting' : 'open');
     const afterText = deps.length ? ` after #${deps.join(', #')}` : '';
     this.hub.event('task', this.name, `gave #${task.id} to ${to}${afterText}: ${title}`, task.id);
     return waiting ? task : this.hub.deliverTask(task);
+  }
+
+  /** A part waits for nothing that waits for the task it is part of: that task is done only once its parts are
+   * settled (seen: part_of=#1 with after=[#1] - the part waited for #1, and #1 for the part). Also through other
+   * tasks: a part may not wait for a task that waits, at any remove, for one of its bigger tasks. */
+  private noDeadlock(partOf: number | null, deps: number[]): void {
+    if (partOf === null || !deps.length) return;
+    const above = new Set<number>(); // the task it is part of, and the ones that is part of
+    for (let id: number | null = partOf; id !== null && !above.has(id); id = this.store.getTask(id)?.parent_id ?? null) above.add(id);
+    for (const d of deps) {
+      const seen = new Set<number>();
+      const queue = [d];
+      while (queue.length) {
+        const id = queue.shift() as number;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (above.has(id)) {
+          const why = id === d ? `#${d} is` : `#${d} waits for #${id}, which is`;
+          throw new HubError(`this part would wait for ever: ${why} what it is part of (#${partOf} is done only once its `
+            + 'parts are settled). Give it no after= on its bigger task; start it when it is ready, or order the parts among themselves.');
+        }
+        queue.push(...(this.store.getTask(id)?.depends_on ?? []));
+      }
+    }
   }
 
   /** Close one of your tasks: done, blocked (you need something), failed, or rejected. */
@@ -1016,8 +1041,21 @@ export class RoleSession {
       this.notLanding(taskId, 'move');
       return this.store.updateTask(taskId, { assignee: to, started_at: null, nudged_at: null });
     });
+    // The parts it gave out of this task go with it: whoever has the task now reviews, cancels and sees them
+    // through (seen: moved to a peer, it could not finish the task, nor settle the parts that held it back).
+    const parts = this.store.parts(taskId).filter((p) => p.assigner === before && !(CLOSED as readonly string[]).includes(p.state));
+    for (const p of parts) {
+      this.store.updateTask(p.id, { assigner: to });
+      if (team.isMember(p.assignee)) {
+        this.hub.note(p.assignee, `Task #${p.id} (${p.title}) is now ${to}'s to review: ${to} took over #${taskId}, which it is part of. Send your result as before.`);
+      }
+    }
     if (task.state !== 'waiting') {
       const notes = [`This task was ${before}'s and is now yours${why ? `: ${why}` : '.'}`];
+      if (parts.length) {
+        notes.push(`The parts ${before} gave out of it are yours to see through now - review_task, cancel_task: `
+          + `${parts.map((p) => `#${p.id} [${p.state}] ${p.assignee}: ${p.title}`).join('; ')}.`);
+      }
       if (task.result) notes.push(`${before}'s last word on it: ${task.result.slice(0, 1500)}`);
       if (files.length) notes.push(`Files it changed so far: ${files.join(', ')}.`);
       if (moved.length) notes.push(`You now hold its leases on: ${moved.join(', ')}.`);
