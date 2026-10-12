@@ -1006,3 +1006,10 @@ button.primary.send svg { width: 16px; height: 16px; }
 #launch-all[data-idle="1"] { display: none; } /* every agent runs: nothing to start */
 /* a task's changed files: each shows itself in File Explorer */
 .task-files { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+/* the welcome page's Setup check: what is fine, folded into one line */
+.checks-fine { width: 100%; }
+.checks-fine > summary { display: flex; align-items: center; gap: 12px; cursor: pointer; font-weight: 600; list-style: none; }
+.checks-fine > summary::-webkit-details-marker { display: none; }
+.checks-fine > summary .mark { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--working); }
+.checks-fine > summary .muted { font-weight: 400; }
+.checks-fine > .checks { margin-top: 10px; }

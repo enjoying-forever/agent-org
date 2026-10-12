@@ -339,7 +339,7 @@ async function renderHome() {
       onchange: () => renderBuilder() }),
     h('span', {}, h('b', {}, 'Build my own from the Role Market')),
     h('small', {}, 'Pick roles and place each under its superior. The first one leads.'));
-  $('#templates').replaceChildren(buildChoice, ...home.templates.map((t) => h('label', { class: 'tier' },
+  $('#templates').replaceChildren(...home.templates.map((t) => h('label', { class: 'tier' },
     h('input', { type: 'radio', name: 'template', value: t.id, checked: t.id === chosen, onchange: () => renderBuilder() }),
     h('span', {}, h('b', {}, t.title), t.default ? h('span', { class: 'tag' }, 'default') : null,
       h('span', { class: 'muted' }, `  ${t.roles}`)),
@@ -347,8 +347,8 @@ async function renderHome() {
       !t.default && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('default', t); } },
         'Make default'),
       t.mine && h('button', { class: 'link', onclick: (e) => { e.preventDefault(); templateAction('delete', t); } },
-        'Delete')))));
-  renderChecks($('#home-checks'));
+        'Delete')))), buildChoice); // the ready-made teams first, simplest on top; building your own last
+  renderChecks($('#home-checks'), false, true);
   renderBuilder();
 }
 
@@ -422,7 +422,8 @@ $('#save-template').addEventListener('click', async () => {
 
 // ---------- setup checks ----------
 
-async function renderChecks(box, fresh = false) {
+/** The Setup check. `compact` (the welcome page): what must be fixed in full, everything fine in one folded line. */
+async function renderChecks(box, fresh = false, compact = false) {
   box.replaceChildren(h('span', { class: 'muted' }, 'Checking...'));
   let checks;
   try { ({ checks } = await api(`/api/checks${fresh ? '?fresh=1' : ''}`)); } catch (e) {
@@ -431,15 +432,24 @@ async function renderChecks(box, fresh = false) {
   MISSING = new Set(Object.keys(CHECK_NAME).filter((p) => checks.some((c) => c.name === CHECK_NAME[p] && !c.ok
     && c.detail === 'not installed')));
   document.querySelectorAll('.programs[data-programs]').forEach(markMissing);
-  box.replaceChildren(
-    ...checks.map((c) => h('div', { class: `check ${c.ok ? 'ok' : c.needed ? 'bad' : 'warn'}` },
+  const row = (c) => h('div', { class: `check ${c.ok ? 'ok' : c.needed ? 'bad' : 'warn'}` },
       h('span', { class: 'mark' }, c.ok ? '✓' : c.needed ? '✗' : '!'),
       h('div', {},
         h('b', {}, c.name), ' ', h('span', { class: 'muted' }, c.detail),
         !c.ok && c.fix && h('div', { class: 'fix' }, c.fix),
         !c.ok && c.name === 'Grok message delivery'
-          && h('button', { class: 'small', onclick: installGrokHooks }, 'Install Grok hooks')))),
-    h('button', { class: 'small', onclick: () => renderChecks(box, true) }, 'Check again'));
+          && h('button', { class: 'small', onclick: installGrokHooks }, 'Install Grok hooks')));
+  const again = h('button', { class: 'small', onclick: () => renderChecks(box, true, compact) }, 'Check again');
+  if (!compact) { box.replaceChildren(...checks.map(row), again); return; }
+  const broken = checks.filter((c) => !c.ok && c.needed);
+  const rest = checks.filter((c) => c.ok || !c.needed);
+  const missing = rest.filter((c) => !c.ok).length;
+  const fine = h('details', { class: 'checks-fine' },
+    h('summary', {}, h('span', { class: 'mark' }, '✓'),
+      broken.length ? `${rest.length - missing} others are ready` : 'Ready to go',
+      missing ? h('span', { class: 'muted' }, ` (${plural(missing, 'optional program')} not set up)`) : null),
+    h('div', { class: 'checks' }, rest.map(row)));
+  box.replaceChildren(...broken.map(row), fine, again);
 }
 
 async function installGrokHooks() {
