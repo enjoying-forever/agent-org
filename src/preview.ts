@@ -68,6 +68,25 @@ export interface PageView {
   height: number;
 }
 
+export type Step =
+  | { verb: 'click' | 'press' | 'scroll' | 'wait'; target: string }
+  | { verb: 'type'; words: string[]; quoted: string | null; text: string }
+  | { verb: 'bad'; why: string };
+
+/** One step of view_page. click, press, scroll and wait take all the rest (a selector with spaces needs no quotes:
+ * seen, "click .product button" clicked the first .product and nothing happened); type takes a selector and the
+ * text - quoted, or the words are tried from the longest selector down on the page itself. */
+export function parseStep(step: string): Step {
+  const m = /^(click|type|press|scroll|wait)\b\s*([\s\S]*)$/i.exec(step.trim());
+  if (m === null) return { verb: 'bad', why: 'not a step (click, type, press, scroll or wait)' };
+  const verb = m[1].toLowerCase();
+  const rest = m[2].trim();
+  if (verb !== 'type') return { verb: verb as 'click', target: rest.replace(/^"([^"]*)"$/, '$1') };
+  const quoted = /^"([^"]*)"\s*([\s\S]*)$/.exec(rest);
+  if (quoted) return { verb: 'type', words: [], quoted: quoted[1], text: quoted[2] };
+  return { verb: 'type', words: rest.split(/\s+/).filter(Boolean), quoted: null, text: '' };
+}
+
 /** What an agent asked to view, as an address: a port, a local server, a web address, or a file (in `root`, its copy of
  * the project, or a full path). */
 export function pageAddress(text: string, root: string): string {

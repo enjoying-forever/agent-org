@@ -5,7 +5,8 @@ import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { Server, Tools } from '../src/mcp_server.ts';
-import { localUrls, type PageView, type ViewOptions } from '../src/preview.ts';
+import { localUrls, type PageView, parseStep, type ViewOptions } from '../src/preview.ts';
+import { nodeEnv } from '../src/runtime.ts';
 import * as ui from '../src/ui.ts';
 import { startServer } from './web.ts';
 
@@ -67,4 +68,19 @@ test("an agent's view_page goes through the agent-org window, with a picture for
   app.window.shell = null;
   const [why, failed] = await new Tools(hub.session('leader')).call('view_page', { url: '5173' });
   assert.ok(failed && why.includes('runs without its window'), why);
+});
+
+test('view_page steps: a selector with spaces needs no quotes', () => {
+  // seen live: "click .product button" clicked the first .product, and the counter did not change
+  assert.deepEqual(parseStep('click .product button'), { verb: 'click', target: '.product button' });
+  assert.deepEqual(parseStep('click "#buy now"'), { verb: 'click', target: '#buy now' });
+  assert.deepEqual(parseStep('Scroll bottom'), { verb: 'scroll', target: 'bottom' });
+  assert.deepEqual(parseStep('type "#name input" Ada Lovelace'), { verb: 'type', words: [], quoted: '#name input', text: 'Ada Lovelace' });
+  assert.deepEqual(parseStep('type form #name Ada'), { verb: 'type', words: ['form', '#name', 'Ada'], quoted: null, text: '' });
+  assert.equal(parseStep('hover #x').verb, 'bad');
+});
+
+test("a tool server Codex starts knows agent-org's home", () => {
+  // seen live: Codex passes a tool server few variables, so it looked for the window in the default home
+  assert.equal(nodeEnv().AGENT_ORG_HOME, process.env.AGENT_ORG_HOME);
 });

@@ -13,6 +13,7 @@ import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, session, shell }
 import path from 'node:path';
 import { keepRunningOnFaults } from '../runtime.ts';
 import { TeamError } from '../team.ts';
+import * as preview from '../preview.ts';
 import * as ui from '../ui.ts';
 
 const MIN_WIDTH = 900;
@@ -218,39 +219,53 @@ async function viewOnce(url: string, opts: ui.ViewOptions): Promise<ui.PageView>
   }
 }
 
-/** One step on a page: click <selector>, type <selector> <text>, press <key>, scroll <pixels|top|bottom>, wait <ms>.
- * A selector with spaces goes in quotes. What happened, in a few words. */
-async function doStep(contents: Electron.WebContents, step: string): Promise<string> {
-  const m = /^(click|type|press|scroll|wait)\s*(?:"([^"]*)"|(\S+))?\s*([\s\S]*)$/i.exec(step.trim());
-  if (m === null) return 'not a step (click, type, press, scroll or wait)';
-  const [verb, quoted, bare, rest] = [m[1].toLowerCase(), m[2], m[3], m[4]];
-  const target = quoted ?? bare ?? '';
-  const js = (code: string): Promise<string> => contents.executeJavaScript(code).then(String);
-  const el = `document.querySelector(${JSON.stringify(target)})`;
-  if (verb === 'wait') {
-    await new Promise((r) => { setTimeout(r, Math.min(Number(target) || 500, 10_000)); });
+// in the page: an element as the agent can check it was the one it meant - <button.buy> "Add to cart"
+const DESCRIBE = `const describe = (e) => '<' + e.tagName.toLowerCase() + (e.id ? '#' + e.id : '')
+  + [...e.classList].slice(0, 2).map((c) => '.' + c).join('') + '>'
+  + ((e.innerText || e.value || '').trim() ? ' "' + (e.innerText || e.value).trim().replace(/\\s+/g, ' ').slice(0, 40) + '"' : '');`;
+
+/** One step on a page (see preview.parseStep). What happened, in a few words - which element it was. */
+async function doStep(contents: Electron.WebContents, text: string): Promise<string> {
+  const step = preview.parseStep(text);
+  const js = (code: string): Promise<string> => contents.executeJavaScript(`(() => { ${DESCRIBE} ${code} })()`).then(String);
+  if (step.verb === 'bad') return step.why;
+  if (step.verb === 'wait') {
+    await new Promise((r) => { setTimeout(r, Math.min(Number(step.target) || 500, 10_000)); });
     return 'waited';
   }
-  if (verb === 'scroll') {
-    const to = target === 'bottom' ? 'document.body.scrollHeight' : target === 'top' ? '0' : `scrollY + (${Number(target) || 600})`;
-    return js(`(scrollTo(0, ${to}), 'at ' + Math.round(scrollY))`);
+  if (step.verb === 'scroll') {
+    const t = step.target;
+    const to = t === 'bottom' ? 'document.body.scrollHeight' : t === 'top' ? '0' : `scrollY + (${Number(t) || 600})`;
+    return js(`scrollTo(0, ${to}); return 'at ' + Math.round(scrollY);`);
   }
-  if (verb === 'press') {
-    const key = target || 'Enter';
+  if (step.verb === 'press') {
+    const key = step.target || 'Enter';
     contents.sendInputEvent({ type: 'keyDown', keyCode: key });
     if (key.length === 1) contents.sendInputEvent({ type: 'char', keyCode: key });
     contents.sendInputEvent({ type: 'keyUp', keyCode: key });
-    return `pressed ${key}`;
+    return js(`return 'pressed ${key.replace(/[^\w+-]/g, '')} in ' + (document.activeElement && document.activeElement !== document.body ? describe(document.activeElement) : 'the page');`);
   }
-  if (!target) return `${verb} what? give a CSS selector`;
-  if (verb === 'click') {
-    return js(`(() => { const e = ${el}; if (!e) return 'nothing matches it'; e.scrollIntoView({ block: 'center' }); e.click(); return 'clicked'; })()`);
+  if (step.verb === 'click') {
+    if (!step.target) return 'click what? give a CSS selector';
+    return js(`let e; try { e = document.querySelector(${JSON.stringify(step.target)}); } catch { return 'not a CSS selector'; }
+      if (!e) return 'nothing matches it';
+      const all = document.querySelectorAll(${JSON.stringify(step.target)}).length;
+      e.scrollIntoView({ block: 'center' }); e.click();
+      return 'clicked ' + describe(e) + (all > 1 ? ' (the first of ' + all + ')' : '');`);
   }
-  return js(`(() => { const e = ${el}; if (!e) return 'nothing matches it'; e.focus();
+  if (step.verb !== 'type') return 'not a step';
+  // type: the selector quoted, or the longest run of its first words that names a field
+  return js(`const quoted = ${JSON.stringify(step.quoted)}; const words = ${JSON.stringify(step.words)};
+    let e = null; let text = ${JSON.stringify(step.text)};
+    const field = (s) => { try { const c = document.querySelector(s); return c && c.matches('input, textarea, select, [contenteditable]') ? c : null; } catch { return null; } };
+    if (quoted !== null) e = field(quoted);
+    else for (let i = words.length - 1; i >= 1 && !e; i--) { e = field(words.slice(0, i).join(' ')); if (e) text = words.slice(i).join(' '); }
+    if (!e) return 'no field (input, textarea) matches it';
+    e.focus();
     const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value')?.set;
-    if (set) set.call(e, ${JSON.stringify(rest)}); else e.textContent = ${JSON.stringify(rest)};
+    if (set) set.call(e, text); else e.textContent = text;
     e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'typed'; })()`);
+    return 'typed "' + text + '" into ' + describe(e);`);
 }
 
 /** What the page's browser may be and do, whatever the page asks for. */

@@ -24,7 +24,12 @@ export function entry(name: string): string {
 
 /** The environment Node needs to run our scripts: Electron's executable runs as Node only when told. */
 export function nodeEnv(): Record<string, string> {
-  return IN_ELECTRON ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+  const env: Record<string, string> = IN_ELECTRON ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+  // Codex starts a tool server with only a few variables of its own: an agent-org home set elsewhere is passed on,
+  // or the server would look for the window, the roles and the teams in the default one (seen: view_page said the
+  // window was closed while it was open)
+  if (process.env.AGENT_ORG_HOME) env.AGENT_ORG_HOME = process.env.AGENT_ORG_HOME;
+  return env;
 }
 
 /** [command, args, env] that run entry point `name` with `args`. */
