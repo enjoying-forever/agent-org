@@ -17,6 +17,7 @@ import type { Lock, Message } from './store.ts';
 import { HARNESSES, TeamError, type Role } from './team.ts';
 import { ABOUT_MAX, aboutKey, type Detail, setAbout, teamTree } from './teamtree.ts';
 import { dict } from './dict.ts';
+import { pageAddress, viewInWindow } from './preview.ts';
 
 export const FALLBACK_PROTOCOL = '2025-06-18';
 export const DEFAULT_WAIT = 1800; // seconds; launchers raise each harness's tool timeout above this
@@ -24,7 +25,11 @@ export const HEARTBEAT = 10; // seconds between presence check-ins; the hub coun
 const DIFF_CHARS = 30_000; // the most of a diff task_changes returns
 
 type Args = Record<string, unknown>;
-type Handler = (args: Args, signal: AbortSignal | null) => string | Promise<string>;
+/** A picture a tool answers with (MCP image content). */
+export interface Picture { data: string; mimeType: string }
+type Answer = string | { text: string; pictures: Picture[] };
+type Handler = (args: Args, signal: AbortSignal | null) => Answer | Promise<Answer>;
+const PICTURES = ['claude', 'codex']; // programs that take a picture from a tool; the others get the page's text
 interface Spec { name: string; description: string; inputSchema: { type: 'object'; properties: Record<string, Record<string, unknown>>; required: string[] } }
 
 /** A required argument that is missing (Python's KeyError). */
@@ -124,6 +129,11 @@ export class Tools {
       });
     this.add('ask_help', 'Ask your direct superior for help.', { question: text, reply_to: reply }, ['question'],
       (a) => `Sent ${fmtMessage(me.askHelp(str(a, 'question'), a.reply_to == null ? null : int(a.reply_to)))}`);
+    this.add('view_page', "Look at a web page as a person would, in agent-org's browser: a screenshot, its text and the "
+      + 'errors in its console. For a page you build: its local server (a port like 5173, or http://localhost:5173/shop) or a file '
+      + 'in your copy of the project (index.html). steps, done first: "click <css selector>", "type <css selector> <text>", '
+      + '"press Enter", "scroll 600" (or top, bottom), "wait 500" - a selector with spaces in quotes. mobile: a phone-sized window.',
+    { url: text, steps: { type: 'array', items: { type: 'string' } }, mobile: { type: 'boolean' } }, ['url'], (a) => this.viewPage(a));
     this.add('read_inbox', 'Your new messages (each returned once).', {}, [], () => {
       const messages = me.readInbox();
       return fmtMessages(messages, 'No new messages.') + this.aboutHint(messages);
@@ -288,6 +298,25 @@ export class Tools {
   private add(name: string, description: string, props: Record<string, Record<string, unknown>>, required: string[], handler: Handler): void {
     this.specs.push({ name, description, inputSchema: { type: 'object', properties: props, required } });
     this.handlers.set(name, handler);
+  }
+
+  private async viewPage(a: Args): Promise<Answer> {
+    const me = this.me;
+    const url = pageAddress(str(a, 'url'), me.hub.rootOf(me.name));
+    const steps = Array.isArray(a.steps) ? a.steps.map(String) : a.steps ? [String(a.steps)] : [];
+    let view;
+    try {
+      view = await viewInWindow(url, { steps, ...(a.mobile === true ? { width: 390, height: 844 } : {}) }, me.hub.team_file ?? '', me.name);
+    } catch (e) {
+      throw new HubError((e as Error).message);
+    }
+    const pictures = PICTURES.includes(me.team.roles[me.name]?.harness ?? '') ? [{ data: view.image, mimeType: 'image/jpeg' }] : [];
+    const lines = [`${view.title || '(no title)'} - ${view.url} (${view.width}x${view.height}${pictures.length ? ', screenshot below' : ''})`];
+    if (view.notes.length) lines.push('Steps:', ...view.notes.map((n) => `- ${n}`));
+    if (view.errors.length) lines.push('Errors in its console:', ...view.errors.map((e) => `- ${e}`));
+    else lines.push('No errors in its console.');
+    lines.push('Its text:', view.text.trim() || '(none)');
+    return { text: lines.join('\n'), pictures };
   }
 
   private async wait(args: Args, signal: AbortSignal | null): Promise<string> {
@@ -464,7 +493,7 @@ export class Tools {
     return out && Object.keys(out).length ? JSON.stringify(out) : '';
   }
 
-  async call(name: string, rawArgs: unknown, signal: AbortSignal | null = null): Promise<[string, boolean]> {
+  async call(name: string, rawArgs: unknown, signal: AbortSignal | null = null): Promise<[string, boolean, Picture[]?]> {
     const given = typeof rawArgs === 'object' && rawArgs !== null && !Array.isArray(rawArgs) ? (rawArgs as Args) : {};
     if (name === HOOK_TOOL) return [await this.hook(given), false]; // not a tool of the model's: no argument checks, no mail line
     const handler = this.handlers.get(name);
@@ -474,9 +503,12 @@ export class Tools {
       return [`Unknown argument ${unknown.join(', ')} for ${name}. It takes: ${this.props(name).join(', ') || 'no arguments'}.`, true];
     }
     let text: string;
+    let pictures: Picture[] = [];
     let isError = false;
     try {
-      text = await handler(args, signal);
+      const answer = await handler(args, signal);
+      if (typeof answer === 'string') text = answer;
+      else ({ text, pictures } = answer);
     } catch (e) {
       isError = true;
       if (e instanceof MissingArgument) text = `Missing argument: ${e.message}`;
@@ -485,7 +517,7 @@ export class Tools {
       else throw e;
     }
     if (name !== 'read_inbox' && name !== 'wait_for_messages') text += this.mailNotice();
-    return [text, isError];
+    return pictures.length ? [text, isError, pictures] : [text, isError];
   }
 }
 
@@ -574,15 +606,17 @@ export class Server {
   private async call(id: unknown, params: Msg, control: AbortController): Promise<void> {
     let text: string;
     let isError: boolean;
+    let pictures: Picture[] | undefined;
     try {
-      [text, isError] = await this.tools.call(String(params.name ?? ''), params.arguments ?? {}, control.signal);
+      [text, isError, pictures] = await this.tools.call(String(params.name ?? ''), params.arguments ?? {}, control.signal);
     } catch (e) {
       [text, isError] = [`Internal error:\n${e instanceof Error ? e.stack : String(e)}`, true];
     } finally {
       this.inFlight.delete(id);
       this.waits.delete(id);
     }
-    if (!control.signal.aborted) this.reply(id, { content: [{ type: 'text', text }], isError }); // MCP: no answer to a cancelled request
+    const content = [{ type: 'text', text }, ...(pictures ?? []).map((p) => ({ type: 'image', data: p.data, mimeType: p.mimeType }))];
+    if (!control.signal.aborted) this.reply(id, { content, isError }); // MCP: no answer to a cancelled request
   }
 
   private reply(id: unknown, result: unknown): void {

@@ -39,13 +39,11 @@ function openInBrowser(url) {
   go(url);
 }
 
-/** Ctrl+Alt+W: the browser, or back to the messages. */
+/** Ctrl+Alt+W: the browser, or closed. */
 function toggleBrowser() {
-  if (L.side && S.sideTab === 'browser') { showTab('messages'); return; }
   showView('team');
-  if (!L.side) { L.side = true; applyChrome(); saveLayout(); }
-  showTab('browser');
-  if (!BR.url) $('#br-url').focus();
+  togglePanel('browser');
+  if (L.side && !BR.url) $('#br-url').focus();
 }
 
 /** The Browser tab came into view: the team's last page, or where to start. */
@@ -138,11 +136,23 @@ function failed(url, why, code) {
     foundList(url));
 }
 
-/** Where to start: the local pages the team's work shows, and what the address bar takes. */
+/** Where to start: what the address bar takes, and the local pages the team's work shows. */
 function startNote() {
-  note(h('p', {}, h('b', {}, 'Look at what the team builds.')),
-    h('p', { class: 'muted' }, 'Type a port (5173), a file in the project (index.html), or any address above.'),
-    foundList(''));
+  note(h('div', { class: 'br-start' },
+    h('span', { class: 'br-globe', 'aria-hidden': 'true' }),
+    h('b', {}, 'Look at what the team builds'),
+    h('p', { class: 'muted' }, 'Type a port (5173), a file in the project (index.html) or any address.'),
+    BR.found.length ? foundList('') : h('p', { class: 'muted small' }, 'Preview your app? ',
+      h('button', { class: 'link', onclick: detectServers }, 'Find dev servers'))));
+}
+
+/** The menu's "Find": the local servers the team's work shows - the only one opens at once. */
+async function detectServers() {
+  $('#br-menu').open = false;
+  await findPages();
+  if (BR.found.length === 1) go(BR.found[0]);
+  else if (BR.found.length) startNote();
+  else toast("No local server in the team's work yet: an agent's terminal or message names one when it starts.");
 }
 
 function foundList(except) {
@@ -198,6 +208,15 @@ $('#br-reload').addEventListener('click', () => {
   if (IN_WINDOW && BR.view?.dataset.ready) BR.view.reload();
   else go(BR.url);
 });
+$('#br-detect').addEventListener('click', detectServers);
+$('#br-expand').addEventListener('click', () => {
+  L.browserWide = !L.browserWide;
+  applyChrome();
+  saveLayout();
+});
+$('#br-close').addEventListener('click', () => { L.side = false; applyChrome(); saveLayout(); });
+for (const b of document.querySelectorAll('#br-menu .menu-list button')) b.addEventListener('click', () => { $('#br-menu').open = false; });
+document.addEventListener('click', (e) => { if ($('#br-menu').open && !$('#br-menu').contains(e.target)) $('#br-menu').open = false; });
 $('#br-inspect').addEventListener('click', () => {
   try {
     if (BR.view?.isDevToolsOpened()) BR.view.closeDevTools(); else BR.view?.openDevTools();

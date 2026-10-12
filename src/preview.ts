@@ -3,6 +3,12 @@
  * terminal says where), a page an agent names in a message - so the owner can look at them beside the team.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { LAUNCHER_HEADER } from './launch.ts';
+import * as templates from './templates.ts';
+
 // what a program writes around text on a screen: colors, cursor moves (some skip blank cells with them), titles
 const MOVES = /\x1b\[[0-9;]*[CHf]/g;
 const ANSI = /\x1b\[[0-9;?<>=!]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
@@ -41,4 +47,56 @@ function tidy(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ---------- an agent looks at a page (its view_page tool), through the agent-org window ----------
+
+export interface ViewOptions {
+  width?: number;
+  height?: number;
+  steps?: string[]; // click <selector>, type <selector> <text>, press <key>, scroll <px|top|bottom>, wait <ms>
+}
+
+export interface PageView {
+  url: string;
+  title: string;
+  text: string; // what the page says (its first 8000 characters)
+  errors: string[]; // what its console reported as errors
+  notes: string[]; // what each step did
+  image: string; // a screenshot: JPEG, base64
+  width: number;
+  height: number;
+}
+
+/** What an agent asked to view, as an address: a port, a local server, a web address, or a file (in `root`, its copy of
+ * the project, or a full path). */
+export function pageAddress(text: string, root: string): string {
+  const t = text.trim();
+  if (/^\d{2,5}$/.test(t)) return `http://localhost:${t}/`;
+  if (/^(?:https?|file):/i.test(t)) return t;
+  if (/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(t)) return `http://${t}`;
+  return pathToFileURL(path.resolve(root, t)).href;
+}
+
+/** Ask the agent-org window (the one in instance.json) to view `url`. Throws with a reason the agent can act on. */
+export async function viewInWindow(url: string, opts: ViewOptions, team: string, role: string, timeout = 120): Promise<PageView> {
+  let info: { port?: unknown; launcher?: unknown };
+  try {
+    info = JSON.parse(readFileSync(path.join(templates.homeDir(), 'instance.json'), 'utf8'));
+  } catch {
+    throw new Error("agent-org's window is not open, so there is no browser to look with. Ask the owner to open it.");
+  }
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${Number(info.port)}/api/launcher/view`, {
+      method: 'POST', body: JSON.stringify({ team, role, url, ...opts }),
+      headers: { 'Content-Type': 'application/json', [LAUNCHER_HEADER]: String(info.launcher) },
+      signal: AbortSignal.timeout(timeout * 1000),
+    });
+  } catch (e) {
+    throw new Error(`agent-org's window did not answer (${(e as Error).message}). Is it still open?`);
+  }
+  const data = await res.json().catch(() => ({})) as PageView & { error?: string };
+  if (!res.ok) throw new Error(data.error || `agent-org's window answered ${res.status}`);
+  return data;
 }

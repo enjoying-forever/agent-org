@@ -39,7 +39,7 @@ with the subscription you already have, and you watch, type to and steer all of 
 2. **Create a team.** Choose the project folder the agents should work in, pick a
    starting team (Solo, Leader and worker, or Full team) and click *Create team*.
    The *Setup* check on the same page tells you if Claude, Codex or Grok needs fixing.
-3. **Click *Launch team*.** Each agent starts in its own terminal pane in the window.
+3. **Click *Launch*.** Each agent starts in its own terminal pane in the window.
    - The first time, Claude and Codex ask whether you trust the folder: say yes.
    - Codex also shows **Hooks need review** once: choose **Trust all and continue**.
    - Antigravity needs you to have run `agy` once yourself and finished its Google
@@ -58,7 +58,7 @@ Then watch: the leader splits the work into tasks for its team, each task moves
 across the Board as it is worked on, the leader checks every result, and when your
 task is done it lands in *Review*: open it and click **Accept** or **Send back**.
 
-Next time, open the team from *Open a recent team*, click *Launch team*, and every
+Next time, open the team from *Open a recent team*, click *Launch*, and every
 agent carries on where it stopped.
 
 ## What you see
@@ -103,8 +103,9 @@ agent carries on where it stopped.
 - **Arranging the workspace:** the page never scrolls; the panes tile the space. The grid
   button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
-  and the edges of the sidebar and the messages, or hide either with the buttons at the
-  top. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
+  and the edges of the sidebar and the side panel, or hide either at the top. The side panel
+  is chosen by four small icons in the title bar - messages, activity, files being written, the
+  browser; clicking the one that is open closes it. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
   agent keeps running; click it in the sidebar to bring the pane back). What waits for you
   shows where it is: a stuck agent or a second session in its pane's title, unread messages
   as a count, and an agent whose terminal is asking something (a permission, "trust this
@@ -130,12 +131,18 @@ agent carries on where it stopped.
   *Reply* and *Summon consultant* buttons. A message is sent once however often you click,
   and what you start typing while it goes stays. What you were writing in a team waits for you
   when you switch to another one and back.
-- **Browser** (beside Messages; Ctrl+Alt+W): look at what the team builds without leaving agent-org - type
+- **Browser** (the globe at the top; Ctrl+Alt+W): look at what the team builds without leaving agent-org - type
   a port (`5173`), a file in the project (`index.html`) or any address. It offers the local addresses the
   team's work shows (a dev server's in an agent's terminal, a link in a message), and a local link clicked in a
   terminal or a message opens here; any other link opens in your own browser, where your accounts are. A page
   of a task's changes has a *preview* link. A page there runs in a session of its own - without Node, agent-org's
-  sign-in or its permissions - and its developer tools are one click away.
+  sign-in or its permissions. Its ⋯ menu finds the team's local servers, opens developer tools or your own
+  browser; the arrows button lays it over the agents' panes, and back.
+- **Agents look too:** with `view_page` an agent opens a page in this browser, out of sight - a
+  port, a local address or a file in its copy of the project, at desktop or phone size, after a
+  few steps (click, type, press, scroll, wait) - and gets back what it says, the errors in its
+  console and, for Claude and Codex, a screenshot. *Activity* shows who looked at what. It needs
+  agent-org's window open.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
   "done" means, what it waits for, which files it changed (with the diff; click one to show it in File Explorer), whether the
@@ -288,7 +295,7 @@ Board and review flow from [Vibe Kanban](https://www.vibekanban.com/).
 
 ## Memory: agents remember across restarts
 
-- **Launch team** (with some already running it reads *Start 2 more*, and it goes once all run;
+- **Launch** (with some already running it reads *Start 2*, and it goes once all run;
   or *Start* on a card) resumes each agent's last conversation, so
   it remembers everything it was doing. In the window it is told nothing unless it has
   unfinished tasks or new messages (then one line); in terminal tabs it is told the team

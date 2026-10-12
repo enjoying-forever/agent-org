@@ -40,7 +40,12 @@ function applyChrome() {
   view.classList.toggle('no-side', !L.side);
   view.style.setProperty('--side-w', `${S.sideTab === 'browser' ? browserWidth() : Math.max(320, L.sideW)}px`); // older layouts allowed 280
   $('#rail-toggle').classList.toggle('on', L.rail);
-  $('#side-toggle').classList.toggle('on', L.side);
+  for (const b of document.querySelectorAll('.panel-btn')) {
+    const on = L.side && b.dataset.tab === S.sideTab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  view.classList.toggle('side-full', L.side && S.sideTab === 'browser' && Boolean(L.browserWide)); // the browser over the panes
 }
 
 /** The panel's width while it shows the browser: wider than for messages (a page needs room), as you left it. */
@@ -363,7 +368,6 @@ function renderLayoutMenu() {
 function updateAttention() {
   const btn = $('#attention-btn');
   btn.hidden = S.mode !== 'team' || $('#guide').hidden;
-  btn.textContent = 'Getting started';
   if (btn.hidden) $('#attention').hidden = true;
 }
 
@@ -379,7 +383,6 @@ document.addEventListener('click', (e) => {
 // ---------- wiring ----------
 
 $('#rail-toggle').addEventListener('click', () => { L.rail = !L.rail; applyChrome(); saveLayout(); });
-$('#side-toggle').addEventListener('click', () => { L.side = !L.side; applyChrome(); saveLayout(); });
 for (const g of document.querySelectorAll('.gutter')) g.addEventListener('pointerdown', dragEdge);
 $('#layout-menu').addEventListener('toggle', renderLayoutMenu);
 new ResizeObserver(() => { if (L.team) applyLayout(); }).observe($('#panes'));
@@ -431,7 +434,7 @@ document.addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.code === 'KeyT') { showView('team'); setTeamMode(!L.tree); if (!L.tree && S.focus) goToPane(S.focus); return; }
   if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
-  if (e.code === 'KeyM') { L.side = !L.side; applyChrome(); saveLayout(); return; }
+  if (e.code === 'KeyM') { togglePanel('messages'); return; }
   if (e.code === 'KeyW') { toggleBrowser(); return; }
   if (['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0'].includes(e.code)) {
     zoomTerms(e.code === 'Digit0' ? 0 : ['Equal', 'NumpadAdd'].includes(e.code) ? 1 : -1);

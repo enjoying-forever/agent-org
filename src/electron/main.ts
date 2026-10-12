@@ -114,6 +114,7 @@ async function start(): Promise<void> {
     win.close();
   };
   control.shell = {
+    view: (url, opts) => viewPage(url, opts),
     show: () => {
       if (win.isMinimized()) win.restore();
       win.show();
@@ -171,6 +172,85 @@ async function start(): Promise<void> {
   });
 
   await win.loadURL(control.signIn?.() ?? served.base);
+}
+
+let viewing: Promise<unknown> = Promise.resolve(); // one page at a time: each is a renderer of its own
+
+/** An agent looks at a page (its view_page tool): opened out of sight in the browser's own session, at the size
+ * asked for, the steps done, then a screenshot, its text and the errors its console showed. */
+function viewPage(url: string, opts: ui.ViewOptions): Promise<ui.PageView> {
+  const run = viewing.then(() => viewOnce(url, opts), () => viewOnce(url, opts));
+  viewing = run.catch(() => {});
+  return run;
+}
+
+async function viewOnce(url: string, opts: ui.ViewOptions): Promise<ui.PageView> {
+  if (!WEB.test(url)) throw new Error('only web addresses (http, https) and files can be viewed');
+  const [width, height] = [opts.width ?? 1280, opts.height ?? 800];
+  const page = new BrowserWindow({ show: false, width, height, useContentSize: true, frame: false,
+    webPreferences: { partition: BROWSER, offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  const contents = page.webContents;
+  const errors: string[] = [];
+  const notes: string[] = [];
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('console-message', (event: Electron.Event & { level?: string; message?: string }, ...old: unknown[]) => {
+    const level = event.level ?? old[0];
+    const message = event.message ?? old[1];
+    if ((level === 'error' || level === 3) && errors.length < 20) errors.push(String(message).slice(0, 400));
+  });
+  const settle = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms); });
+  const timed = <T>(work: Promise<T>, seconds: number, what: string): Promise<T> => Promise.race([work,
+    new Promise<T>((_r, reject) => { setTimeout(() => reject(new Error(`${what} took longer than ${seconds} s`)), seconds * 1000); })]);
+  try {
+    await timed(contents.loadURL(url), 30, 'loading the page');
+    await settle(800); // its scripts draw it
+    for (const step of opts.steps ?? []) {
+      notes.push(`${step}: ${await doStep(contents, step)}`);
+      await settle(400);
+    }
+    const shot = await contents.capturePage({ x: 0, y: 0, width, height }); // the size asked for, whatever the frame
+    const size = shot.getSize();
+    const image = (size.width > 1280 ? shot.resize({ width: 1280 }) : shot).toJPEG(72).toString('base64');
+    const text = String(await contents.executeJavaScript('document.body ? document.body.innerText : ""')).slice(0, 8000);
+    return { url: contents.getURL(), title: contents.getTitle(), text, errors, notes, image, width: size.width, height: size.height };
+  } finally {
+    page.destroy();
+  }
+}
+
+/** One step on a page: click <selector>, type <selector> <text>, press <key>, scroll <pixels|top|bottom>, wait <ms>.
+ * A selector with spaces goes in quotes. What happened, in a few words. */
+async function doStep(contents: Electron.WebContents, step: string): Promise<string> {
+  const m = /^(click|type|press|scroll|wait)\s*(?:"([^"]*)"|(\S+))?\s*([\s\S]*)$/i.exec(step.trim());
+  if (m === null) return 'not a step (click, type, press, scroll or wait)';
+  const [verb, quoted, bare, rest] = [m[1].toLowerCase(), m[2], m[3], m[4]];
+  const target = quoted ?? bare ?? '';
+  const js = (code: string): Promise<string> => contents.executeJavaScript(code).then(String);
+  const el = `document.querySelector(${JSON.stringify(target)})`;
+  if (verb === 'wait') {
+    await new Promise((r) => { setTimeout(r, Math.min(Number(target) || 500, 10_000)); });
+    return 'waited';
+  }
+  if (verb === 'scroll') {
+    const to = target === 'bottom' ? 'document.body.scrollHeight' : target === 'top' ? '0' : `scrollY + (${Number(target) || 600})`;
+    return js(`(scrollTo(0, ${to}), 'at ' + Math.round(scrollY))`);
+  }
+  if (verb === 'press') {
+    const key = target || 'Enter';
+    contents.sendInputEvent({ type: 'keyDown', keyCode: key });
+    if (key.length === 1) contents.sendInputEvent({ type: 'char', keyCode: key });
+    contents.sendInputEvent({ type: 'keyUp', keyCode: key });
+    return `pressed ${key}`;
+  }
+  if (!target) return `${verb} what? give a CSS selector`;
+  if (verb === 'click') {
+    return js(`(() => { const e = ${el}; if (!e) return 'nothing matches it'; e.scrollIntoView({ block: 'center' }); e.click(); return 'clicked'; })()`);
+  }
+  return js(`(() => { const e = ${el}; if (!e) return 'nothing matches it'; e.focus();
+    const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value')?.set;
+    if (set) set.call(e, ${JSON.stringify(rest)}); else e.textContent = ${JSON.stringify(rest)};
+    e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'typed'; })()`);
 }
 
 /** What the page's browser may be and do, whatever the page asks for. */

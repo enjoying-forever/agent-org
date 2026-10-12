@@ -134,7 +134,7 @@ test('a misnamed argument is not lost', async (t) => {
   assert.ok(err && text.includes('Unknown argument colour') && text.includes('to, text'));
 });
 
-const BASIC_TOOLS = ['my_role', 'team_tree', 'set_about', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view',
+const BASIC_TOOLS = ['my_role', 'team_tree', 'set_about', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view', 'view_page',
   'claim_file', 'release_file', 'list_locks', 'hand_over_file', 'list_tasks', 'finish_task', 'save_notes', 'task_details', 'search_messages',
   'task_changes', 'run_checks'];
 

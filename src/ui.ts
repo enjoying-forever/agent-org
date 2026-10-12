@@ -36,7 +36,9 @@ import * as wake from './wake.ts';
 import * as waker from './waker.ts';
 import * as watchdog from './watchdog.ts';
 import { dict } from './dict.ts';
-import { localUrls } from './preview.ts';
+import { localUrls, type PageView, type ViewOptions } from './preview.ts';
+
+export type { PageView, ViewOptions } from './preview.ts';
 
 export const STATIC = path.join(CODE_DIR, '..', 'static');
 const CONTENT_TYPES: Record<string, string> = dict({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -201,6 +203,8 @@ export interface Shell {
   quit(): void;
   /** The page went light or dark: the window's own parts (its buttons, what shows before the page) follow. */
   theme?(dark: boolean): void;
+  /** An agent looks at a page: opened out of sight in the browser's session, the steps done, a screenshot. */
+  view?(url: string, opts: ViewOptions): Promise<PageView>;
 }
 
 /** agent-org's window: hidden while its agents run in the background, shown again when the owner starts
@@ -354,6 +358,27 @@ export class App {
     const [title, color, cwd, argv] = launch.tabParts(tab);
     const direct = launch.directStart(tab); // the agent's program itself, without PowerShell, when it can be
     this.terminals.open(launch.tabRole(tab), direct?.argv ?? argv, direct?.cwd ?? cwd, title, color, direct?.env, direct ? AFTER : null);
+  }
+
+  /** An agent's view_page: the window opens the page out of sight and answers with what it shows. Noted in the
+   * open team's activity, so the owner sees who looked at what. */
+  async viewForAgent(body: Body): Promise<Json> {
+    const url = str(body, 'url');
+    if (!/^(?:https?|file):/i.test(url) || url.length > 4000) throw new ApiError('only web addresses (http, https) and files can be viewed');
+    const view = this.window.shell?.view;
+    if (!view) throw new ApiError("agent-org runs without its window here, so there is no browser to look with", 409);
+    const size = (v: unknown, least: number, most: number, fallback: number): number =>
+      (Number.isInteger(v) ? Math.min(Math.max(Number(v), least), most) : fallback);
+    const steps = Array.isArray(body.steps) ? body.steps.slice(0, 20).map(String) : [];
+    const role = String(body.role || '');
+    if (this.hubOrNull && path.resolve(String(body.team || '')) === this.teamFile && role in this.hub.team.roles) {
+      this.hub.event('agent', role, `looked at ${url}${steps.length ? ` (${steps.length} steps)` : ''}`);
+    }
+    try {
+      return { ...await view(url, { width: size(body.width, 320, 1920, 1280), height: size(body.height, 320, 1600, 800), steps }) };
+    } catch (e) {
+      throw new ApiError(`the page could not be viewed: ${(e as Error).message}`, 409);
+    }
   }
 
   /** Start a role an agent just hired or summoned, in a terminal of this window. The agent's own tool server
@@ -1458,9 +1483,10 @@ function handler(app: App, access: Access, port: () => number): http.RequestList
     }
     if (!body || typeof body !== 'object' || Array.isArray(body)) return json(req, res, 400, { error: 'body must be a JSON object' });
     const where = url.pathname;
-    if (where === '/api/launcher/show' || where === '/api/launcher/start') { // a second start, or an agent's tool server
+    if (where === '/api/launcher/show' || where === '/api/launcher/start' || where === '/api/launcher/view') { // a second start, or an agent's tool server
       if (!same(header(req, LAUNCHER_HEADER) ?? '', app.window.launcher)) return json(req, res, 403, { error: "not this agent-org's launcher" });
       if (where === '/api/launcher/show') return json(req, res, 200, { shown: app.window.show() });
+      if (where === '/api/launcher/view') return call(req, res, where, () => app.viewForAgent(body as Body));
       return call(req, res, where, () => app.startForAgent(body as Body));
     }
     await api(req, res, POST_ROUTES, where, body);

@@ -354,7 +354,7 @@ function enterHome() {
   S.mode = 'home';
   leaveTeam();
   for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template',
-    '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#team-mode', '#layout-menu', '#attention-btn']) {
+    '#stop-all', '#launch-all', '#rail-toggle', '#panel-btns', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
   document.body.dataset.mode = 'home';
@@ -1923,7 +1923,8 @@ function renderLocks() {
   const key = JSON.stringify(locks);
   if (key === S.locksKey) return; // the same files: the table (and a Release you are about to click) stays
   S.locksKey = key;
-  $('#files-count').textContent = locks.length ? `(${locks.length})` : '';
+  $('#files-count').textContent = locks.length || '';
+  $('#files-count').hidden = !locks.length;
   $('#locks').replaceChildren(...(locks.length
     ? locks.map((l) => h('tr', {},
       h('td', { class: 'mono' }, l.path), h('td', {}, l.owner), h('td', { class: 'muted' }, fmtTime(l.claimed_at)),
@@ -2011,7 +2012,7 @@ function showView(v) {
   $('#view-board').hidden = v !== 'board';
   $('#view-roles').hidden = v !== 'roles';
   $('#launch-all').hidden = S.mode !== 'team';
-  for (const id of ['#side-toggle', '#team-mode']) $(id).hidden = S.mode !== 'team' || v !== 'team';
+  for (const id of ['#panel-btns', '#team-mode']) $(id).hidden = S.mode !== 'team' || v !== 'team';
   $('#bar-title').textContent = S.mode === 'team' ? { team: 'Team', board: 'Board', roles: 'Role Market' }[v] : '';
   $('#layout-menu').hidden = S.mode !== 'team' || v !== 'team' || Boolean(L.tree);
   if (v === 'team' && S.state) { setTimeout(applyLayout, 0); renderTree(); } // once the view has its size again
@@ -2021,17 +2022,23 @@ function showView(v) {
 }
 
 function showTab(t) {
-  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === t);
   for (const tab of document.querySelectorAll('.side > .tab')) tab.hidden = tab.id !== `tab-${t}`;
-  const was = S.sideTab;
   S.sideTab = t;
-  if ((was === 'browser') !== (t === 'browser')) applyChrome(); // the browser has its own, wider width
+  applyChrome(); // which icon is lit; the browser has its own, wider width
   if (t === 'messages') stickFeed();
   if (t === 'browser') browserShown();
 }
 
+/** A side panel's icon in the title bar: shows that panel, or - the one open - closes the side. */
+function togglePanel(t) {
+  if (L.side && S.sideTab === t) L.side = false;
+  else { L.side = true; showTab(t); }
+  applyChrome();
+  saveLayout();
+}
+
 for (const b of document.querySelectorAll('.views button')) b.addEventListener('click', () => showView(b.dataset.view));
-for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
+for (const b of document.querySelectorAll('.panel-btn')) b.addEventListener('click', () => togglePanel(b.dataset.tab));
 for (const b of document.querySelectorAll('#filter-seg button')) b.addEventListener('click', () => setFilter(b.dataset.filter));
 for (const b of document.querySelectorAll('#mode-seg button')) b.addEventListener('click', () => setCompose(b.dataset.mode));
 $('#filter-role').addEventListener('change', (e) => { S.roleFilter = e.target.value; renderFeed('bottom'); });
@@ -2064,7 +2071,7 @@ function renderLaunch() {
   const off = st.roles.filter((r) => !r.online && !r.tier && st.launchable.includes(r.harness));
   const none = st.roles.every((r) => !r.online);
   const b = $('#launch-all');
-  b.textContent = none ? 'Launch team' : `Start ${off.length} more`;
+  b.replaceChildren(h('span', { class: 'play', 'aria-hidden': 'true' }), none ? 'Launch' : `Start ${off.length}`);
   b.title = `Start ${none ? 'every agent' : off.map((r) => r.name).join(', ')}: each resumes its last conversation`;
   b.dataset.idle = off.length ? '' : '1';
 }
