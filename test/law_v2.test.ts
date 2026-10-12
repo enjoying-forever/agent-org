@@ -159,7 +159,7 @@ test('a task keeps its conversation together', async (t) => {
   await worker.finishTask(task.id, 'built');
   const [, thread] = h.session('leader').taskDetails(task.id);
   assert.deepEqual(thread.map((m) => m.kind), ['task', 'report', 'result']);
-  raises(() => h.session('researcher').taskDetails(task.id), PermissionDenied, 'you can see its status with team_status');
+  raises(() => h.session('researcher').taskDetails(task.id), PermissionDenied, 'you can see its status with team_tree');
 });
 
 test('search finds only what you may read', (t) => {

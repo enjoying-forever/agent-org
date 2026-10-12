@@ -1,6 +1,7 @@
 /** Role cards: the text that tells an agent who it is, the law it works under, and where it left off. */
 
 import { lawText, type RoleSession } from './hub.ts';
+import { teamTree } from './teamtree.ts';
 import { describe } from './verify.ts';
 
 export const SERVER_NAME = 'org';
@@ -26,16 +27,9 @@ export function roleCard(me: RoleSession, resumed = false): string {
   lines.push(`Your direct subordinates: ${subs.join(', ') || 'none'}`);
   const peers = me.peers(team);
   if (peers.length) lines.push(`Your peers (same superior): ${peers.join(', ')}`);
-  lines.push('The whole team (who reports to whom):');
-  // depth first, each under its own superior (in the order nearest first, worker-a printed after researcher read
-  // as researcher's: the card showed every agent a wrong chart)
-  const walk = (name: string, depth: number): void => {
-    const r = team.roles[name];
-    const you = name === me.name ? '  <- you' : '';
-    lines.push(`${'  '.repeat(depth)}- ${name} (${r.harness}): ${r.duties || '-'}${you}`);
-    for (const sub of team.subordinatesOf(name)) walk(sub, depth + 1);
-  };
-  walk(team.leader, team.chainOf(team.leader).length);
+  // The part of the team around it, not all of it (a big team's chart filled every agent's prompt): team_tree
+  // shows more - deeper, in full, or around someone else.
+  lines.push(teamTree(me, { live: false }), "(team_tree shows more: depth=, detail='full', around=<role>.)");
   const scope = role ? role.write_scope.join(', ') : 'everything';
   lines.push(`Files you may write: ${scope || 'none - you do not edit files'}`);
   if (me.hub.branches) {
@@ -68,6 +62,7 @@ export function roleCard(me: RoleSession, resumed = false): string {
     "- Messages from 'hub' are the system's own reminders: a quiet task, a question passed up to you. Act on them.",
     '- When you have nothing left to do, end your turn: new messages are delivered to you automatically, and you are '
     + 'reminded of open tasks and unanswered questions.',
+    "- Once you know what you own or are for, say it in one line with set_about: it is your line in everyone's team tree.",
     '- Save what you know with save_notes from time to time: if your session is ever replaced, the new one starts from your notes.',
     ...(Object.keys(team.tiers).length ? [ // no tiers: there will never be one
       '- If your superior gives you a consultant, it is your temporary subordinate: work with it through '

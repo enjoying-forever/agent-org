@@ -7,6 +7,7 @@ import { roleCard } from '../src/cards.ts';
 import * as hooks from '../src/hooks.ts';
 import { HubError, lawText, MAX_TEXT, PermissionDenied } from '../src/hub.ts';
 import { isOpen, Store } from '../src/store.ts';
+import { teamTree } from '../src/teamtree.ts';
 import { makeHub, raises, rejects, tmpDir } from './helpers.ts';
 
 test('the law reads as numbered rules', () => {
@@ -203,10 +204,13 @@ test('the role card carries the law and where you left off', (t) => {
 test("the role card's chart shows each agent under its own superior", (t) => {
   // it listed the team nearest first: worker-a and worker-b, after researcher, read as researcher's
   const { hub } = makeHub(t);
+  // (now the part around the agent: its superior, it and its peers, its subordinates; the whole team is team_tree's)
   const card = roleCard(hub.session('worker-a'));
-  const chart = card.slice(card.indexOf('The whole team'), card.indexOf('Files you may write')).split('\n').slice(1, -1)
-    .map((l) => l.replace(/ \(.*$/, ''));
-  assert.deepEqual(chart, ['  - leader', '    - tech-lead', '      - worker-a', '      - worker-b', '    - researcher']);
+  const chart = card.slice(card.indexOf('Team around you'), card.indexOf('(team_tree shows more')).split('\n').slice(1, -1)
+    .map((l) => l.replace(/ \[.*$/, ''));
+  assert.deepEqual(chart, ['(above tech-lead: you > leader)', 'tech-lead', '  - worker-a', '  - worker-b']);
+  const whole = teamTree(hub.session('worker-a'), { around: 'you', depth: 6 }).split('\n').slice(1).map((l) => l.replace(/ [[(].*$/, ''));
+  assert.deepEqual(whole, ['you', '  - leader', '    - tech-lead', '      - worker-a', '      - worker-b', '    - researcher']);
 });
 
 test('a new role has nothing to recall', (t) => {

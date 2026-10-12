@@ -13,7 +13,7 @@ const TIER_KEYS = new Set(['harness', 'model', 'effort', 'use_for', 'max_active'
 const CHECK_KEYS = new Set(['name', 'run', 'when', 'timeout']);
 const TEAM_KEYS = new Set(['owner', 'project_root', 'database', 'roles', 'consultants', 'checks',
   'autostart', 'max_running', 'commit_on_accept', 'isolation', 'team_changes',
-  'guard_commands', 'scan_secrets', 'max_agents']);
+  'guard_commands', 'scan_secrets', 'max_agents', 'tree_depth']);
 export const ISOLATION = ['leases', 'branches'] as const; // one writer per file, or every agent on its own git branch
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const CONSULTANT_PREFIX = 'consultant-'; // names of temporary consultant roles: consultant-1, ...
@@ -105,9 +105,10 @@ export class Settings {
   readonly guard_commands: boolean = true; // refuse commands that publish, wipe shared work or delete outside
   readonly scan_secrets: boolean = true; // keep private keys and API tokens out of git history
   readonly max_agents: number = 12; // most roles the team may grow to by hiring
+  readonly tree_depth: number = 3; // levels of the team tree an agent is shown: its superior, its peers and itself, its subordinates
 
   constructor(s: Partial<Pick<Settings, 'autostart' | 'max_running' | 'commit_on_accept' | 'isolation' | 'team_changes'
-    | 'guard_commands' | 'scan_secrets' | 'max_agents'>> = {}) {
+    | 'guard_commands' | 'scan_secrets' | 'max_agents' | 'tree_depth'>> = {}) {
     Object.assign(this, s);
   }
 
@@ -189,7 +190,9 @@ export class Team {
       commit_on_accept: truthy(data.commit_on_accept ?? true), isolation: isolation as string,
       team_changes: truthy(data.team_changes ?? true), guard_commands: truthy(data.guard_commands ?? true),
       scan_secrets: truthy(data.scan_secrets ?? true), max_agents: whole(data, 'max_agents', 12),
+      tree_depth: whole(data, 'tree_depth', 3),
     });
+    if (settings.tree_depth < 2) throw new TeamError("'tree_depth' must be at least 2 (your superior, and you with your peers)");
     return new Team(owner, projectRoot, database, roles, tiers, checks, settings);
   }
 

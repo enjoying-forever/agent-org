@@ -134,7 +134,7 @@ test('a misnamed argument is not lost', async (t) => {
   assert.ok(err && text.includes('Unknown argument colour') && text.includes('to, text'));
 });
 
-const BASIC_TOOLS = ['my_role', 'team_status', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view',
+const BASIC_TOOLS = ['my_role', 'team_tree', 'set_about', 'send_message', 'ask_help', 'read_inbox', 'wait_for_messages', 'set_status', 'view',
   'claim_file', 'release_file', 'list_locks', 'hand_over_file', 'list_tasks', 'finish_task', 'save_notes', 'task_details', 'search_messages',
   'task_changes', 'run_checks'];
 
@@ -175,28 +175,43 @@ test('summon and dismiss through tools', async (t) => {
   assert.deepEqual(await client('worker-a').tool('dismiss_consultant', { name: 'consultant-1' }), ['Dismissed consultant-1.', false]);
 });
 
-test('the role card shows the whole team to everyone', async (t) => {
+test('the role card shows the team around the agent', async (t) => {
   const { client } = setup(t);
   const [leader] = await client('leader').tool('my_role');
   assert.ok(leader.includes('Your superior: you, the owner: a person who reads your messages in the agent-org UI'));
   assert.ok(leader.includes('Your direct subordinates: tech-lead, researcher'));
   const [worker] = await client('worker-b').tool('my_role');
   assert.ok(worker.includes('Your peers (same superior): worker-a'));
-  assert.ok(worker.includes('    - worker-b (antigravity): -  <- you'));
-  assert.ok(worker.includes('  - researcher (grok): -')); // other branches are listed too
+  assert.ok(worker.includes('Team around you (3 levels; who is doing what now: team_tree):\n(above tech-lead: you > leader)\ntech-lead [codex]'), worker);
+  assert.ok(worker.includes('  - worker-b [antigravity]  <- you'), worker); // no state in a card: it would be old news
+  assert.ok(!worker.includes('- researcher'), 'another branch is left to team_tree');
+  assert.ok(worker.includes("(team_tree shows more: depth=, detail='full', around=<role>"));
   assert.ok(worker.includes('Text you write in your own session reaches nobody'));
   assert.ok(worker.includes('THE MESSAGE LAW') && worker.includes('6. Results are checked.'));
 });
 
-test('the team_status tool', async (t) => {
+test('team_tree: the part around you, as deep and as full as asked; set_about writes the one line', async (t) => {
   const { hub, client } = setup(t);
   hub.session('worker-a').setStatus('working', 'login form');
   hub.store.checkIn(7, 'worker-a');
-  const lines = (await client('researcher').tool('team_status'))[0].split('\n');
-  assert.equal(lines[0], 'you (owner)');
-  assert.ok(lines.includes('  leader [claude, not running]: not started'));
-  assert.ok(lines.includes('      worker-a [codex]: working - login form'));
-  assert.ok(lines.includes('    researcher [grok, not running]: not started  <- you'));
+  const lead = client('tech-lead');
+  // a manager writes the about of someone below it; the agent itself writes its own
+  assert.deepEqual(await lead.tool('set_about', { about: 'Owns the login form and its validation', role: 'worker-a' }),
+    ['About worker-a: Owns the login form and its validation', false]);
+  assert.ok((await client('worker-b').tool('set_about', { about: 'x', role: 'worker-a' }))[1], 'not a peer');
+  assert.ok((await client('worker-a').tool('set_about', { about: 'y'.repeat(161) }))[1], 'one short line only');
+  const [brief] = await client('worker-b').tool('team_tree');
+  assert.ok(brief.includes('  - worker-a [codex] - Owns the login form and its validation | working: login form'), brief);
+  assert.ok(brief.includes('  - worker-b [antigravity] | not running  <- you'), brief);
+  const [deep] = await client('researcher').tool('team_tree', { around: 'you', depth: 4 });
+  assert.ok(deep.startsWith('Team around the owner (you) (4 levels, brief):\nyou (the owner, a person)\n  - leader [claude]'), deep);
+  assert.ok(deep.includes('      - worker-a [codex]') && deep.includes('    - researcher [grok] | not running  <- you'), deep);
+  const [shallow] = await client('leader').tool('team_tree', { depth: 2 });
+  assert.ok(shallow.endsWith('\n  - leader [claude] | not running (+4 below)  <- you'), shallow); // 2 levels: who is below, counted
+  const [full] = await client('worker-b').tool('team_tree', { detail: 'full' });
+  assert.ok(full.includes('model: ') && full.includes('writes: src/*'), full);
+  assert.ok((await client('worker-b').tool('team_tree', { detail: 'everything' }))[1]);
+  assert.equal((await client('worker-b').tool('team_status'))[0], brief, 'its earlier name still answers');
 });
 
 test('tool results mention new mail once', async (t) => {
@@ -472,4 +487,18 @@ test('a part whose checks wait for the other parts hears so from run_checks and 
   [text, err] = await worker.tool('finish_task', { task_id: a.id, result: 'a is written' });
   assert.ok(!err && text.startsWith('Task #2 is done; tech-lead has been told.')
     && text.includes("The team's checks do not pass yet (unit FAILED); they run again when the other parts of #1 are done."), text);
+});
+
+test('with its first task, an agent with no about is asked once to write one', async (t) => {
+  // seen live: told only in its role card, no agent wrote its about
+  const { hub, client } = setup(t);
+  const worker = client('worker-a');
+  hub.session('tech-lead').assignTask('worker-a', 'First');
+  const [first] = await worker.tool('read_inbox');
+  assert.ok(first.includes('no about yet') && first.includes('set_about'), first);
+  hub.session('tech-lead').assignTask('worker-a', 'Second');
+  assert.ok(!(await worker.tool('read_inbox'))[0].includes('no about yet'), 'once');
+  hub.session('tech-lead').assignTask('worker-b', 'Its first');
+  await client('worker-b').tool('set_about', { about: 'Writes the tests' });
+  assert.ok(!(await client('worker-b').tool('read_inbox'))[0].includes('no about yet'), 'not when it has one');
 });

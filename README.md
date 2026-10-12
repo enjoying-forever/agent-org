@@ -299,6 +299,33 @@ handed, and is dismissed when the problem is solved; its files go back to the ag
 it helped. Tiers are set in `team.yaml`, under `consultants` (for example *opus-medium*, *luna-high*,
 *opus-xhigh*), each with what it is good for and how many may run at once.
 
+## What each agent knows of the team
+
+An agent sees the part of the team around it, not all of it, so a big team does not fill
+every agent's context:
+
+```
+Team around you (3 levels, brief):
+(above tech-lead: you > leader)
+tech-lead [codex] - Splits the checkout work | waiting: worker-a's validation module
+  - worker-a [codex] - Owns src/validate.ts: card, expiry and CVC checks | working: #2 Move card validation  <- you
+    - helper [claude] - Helps with the regexes | not running (1 open task)
+  - worker-b [antigravity] - Tests for the checkout form | idle
+```
+
+- **Its superior at the top**, then **it and its peers** (one line each, with how many are
+  below them), then **its own subtree**: 3 levels by default (`tree_depth` in `team.yaml`,
+  at least 2).
+- **Each line**: the agent, its program, its **about** and what it is doing now.
+  The about is one line the agent writes itself with `set_about`, or its manager writes for it.
+  Until then, the first sentence of its duties stands in. The about also shows on its card in
+  the Tree page and in its details.
+- **`team_tree`** (the agents' tool) shows more when it is needed: `depth=` for more levels,
+  `detail='full'` for each agent's model, duties, files it may write, open tasks, files held
+  and recent actions, `around=<role>` (or the owner) to look from someone else.
+- The role card an agent starts with holds the same tree **without** what each is doing:
+  that would be out of date minutes later, so the card says to ask `team_tree`.
+
 ## Checks, history and starting by themselves
 
 These are set in `team.yaml` (`checks`, `autostart`, `max_running`).
@@ -399,6 +426,7 @@ team_changes: true            # agents may hire, change and let go of agents bel
 guard_commands: true          # refuse dangerous commands (see Safety)
 scan_secrets: true            # refuse new work that adds a key or token (see Safety)
 max_agents: 12                # the most agents the team may grow to by hiring
+tree_depth: 3                 # levels of the team each agent is shown (see What each agent knows)
 ```
 
 ## Several agents on one file: git branches

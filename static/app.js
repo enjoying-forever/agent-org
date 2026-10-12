@@ -862,7 +862,8 @@ function treeNode(r, looks, reports) {
       L.collapsed?.includes(r.name) ? `Show the ${plural(reports, 'agent')} under ${r.name}` : `Fold the agents under ${r.name} into one card`,
       () => toggleFold(r.name)) : null,
     launchable && !r.online ? iconBtn('play', r.resumes ? `Start ${r.name} (resumes its conversation)` : `Start ${r.name}`, () => startRole(r)) : null);
-  const model = h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r));
+  const model = [h('div', { class: 'model' }, r.tier ? `${r.tier} consultant, ${modelLine(r)}` : modelLine(r)),
+    r.about ? h('div', { class: 'about', title: `${r.name} about itself (set_about)` }, r.about) : null]; // its own one line, when written
   const facts = h('div', { class: 'facts' },
     r.online > 1 ? h('span', { class: 'bad' }, `${r.online} sessions`) : null,
     r.locks.length ? h('span', { title: r.locks.join('\n') }, `writing ${plural(r.locks.length, 'file')}`) : null,
@@ -1541,6 +1542,7 @@ function renderDrawer() {
         r.tier
           ? [h('dt', {}, 'Consultant'), h('dd', {}, `${r.tier} tier, helping with #${r.help_id}`)]
           : [h('dt', {}, 'Write scope'), h('dd', { class: 'mono' }, r.write_scope.join(', ') || 'nothing')],
+        r.about && [h('dt', {}, 'About'), h('dd', {}, r.about)],
         r.duties && [h('dt', {}, 'Duties'), h('dd', {}, r.duties)]),
       h('h3', {}, `Tasks (${r.open_tasks} open)`),
       tasks.length ? tasks.map((t) => taskEl(t)) : h('div', { class: 'muted' }, 'No tasks yet.'),

@@ -15,6 +15,7 @@ import { BROADCAST, Hub, HubError, OUTCOMES, type RoleSession } from './hub.ts';
 import * as presets from './presets.ts';
 import type { Lock, Message } from './store.ts';
 import { HARNESSES, TeamError, type Role } from './team.ts';
+import { ABOUT_MAX, aboutKey, type Detail, setAbout, teamTree } from './teamtree.ts';
 import { dict } from './dict.ts';
 
 export const FALLBACK_PROTOCOL = '2025-06-18';
@@ -83,7 +84,20 @@ export class Tools {
 
     this.add('my_role', 'Show your role, duties, superior, team and the rules you work under.', {}, [],
       () => roleCard(me) + this.reference());
-    this.add('team_status', 'The whole team: who reports to whom, what each does, who is running.', {}, [], () => this.teamStatus());
+    const treeArgs = {
+      depth: { type: 'integer', description: `levels in all (default ${me.team.settings.tree_depth}: your superior; you and your peers; your subordinates)` },
+      detail: { type: 'string', enum: ['brief', 'full'], description: 'brief (default): one line each; full: model, duties, tasks, files, recent actions' },
+      around: { type: 'string', description: 'another role (or the owner) to see the tree around; default: you' },
+    };
+    this.add('team_tree', 'The team around you: your superior, your peers and you, and the agents below you - each with '
+      + 'what it is about and what it is doing now, running or not.', treeArgs, [], (a) => this.tree(a));
+    this.handlers.set('team_status', (a) => this.tree(a)); // its earlier name: an agent started before still finds it
+    this.add('set_about', `Write your one-line about (at most ${ABOUT_MAX} characters): what you own or are for, as the others `
+      + 'should know you in their team tree. Also for someone below you (role). Empty: back to your duties.',
+    { about: text, role: { type: 'string', description: 'someone below you; default: you' } }, ['about'], (a) => {
+      const line = setAbout(me, opt(a, 'about'), opt(a, 'role') || me.name);
+      return line ? `About ${opt(a, 'role') || 'you'}: ${line}` : 'Cleared: your duties stand in.';
+    });
     this.add('send_message', "Message your superior, a peer (same superior) or anyone below you, or answer anyone who wrote to you "
       + "(reply_to). to='@team': your direct subordinates; '@all': everyone below you. Every message wakes its receiver: "
       + 'send only what they need.',
@@ -110,7 +124,10 @@ export class Tools {
       });
     this.add('ask_help', 'Ask your direct superior for help.', { question: text, reply_to: reply }, ['question'],
       (a) => `Sent ${fmtMessage(me.askHelp(str(a, 'question'), a.reply_to == null ? null : int(a.reply_to)))}`);
-    this.add('read_inbox', 'Your new messages (each returned once).', {}, [], () => fmtMessages(me.readInbox(), 'No new messages.'));
+    this.add('read_inbox', 'Your new messages (each returned once).', {}, [], () => {
+      const messages = me.readInbox();
+      return fmtMessages(messages, 'No new messages.') + this.aboutHint(messages);
+    });
     this.add('wait_for_messages', 'Wait for your next message and return it - while you wait for results (no cost meanwhile).',
       { timeout_seconds: { type: 'integer', description: `default ${DEFAULT_WAIT}` } }, [], (a, signal) => this.wait(a, signal));
     this.add('set_status', 'Say what you are doing, if it is more than your task (the hub sets that by itself when you read a task '
@@ -279,7 +296,19 @@ export class Tools {
     this.me.setStatus('waiting', before ? before.task : '');
     const messages = await this.me.waitForMessages(timeout, 0.5, signal);
     if (messages.length) this.me.backToWork();
-    return fmtMessages(messages, `No messages in ${timeout} seconds. Call wait_for_messages again.`);
+    return fmtMessages(messages, `No messages in ${timeout} seconds. Call wait_for_messages again.`) + this.aboutHint(messages);
+  }
+
+  /** Once per agent, with its first task: its line in the team tree has no about of its own yet (seen: told so only
+   * in its role card, no agent wrote one). */
+  private aboutHint(messages: Message[]): string {
+    const me = this.me;
+    const asked = `about-asked:${me.name}`;
+    if (!messages.some((m) => m.kind === 'task') || me.team.roles[me.name]?.is_consultant
+      || me.store.getSetting(aboutKey(me.name)) || me.store.getSetting(asked)) return '';
+    me.store.setSetting(asked, '1');
+    return '\n\n(Your line in the team tree has no about yet. Once this shows what your part is, write it in one line '
+      + 'with set_about - what you own or are for - so the others know.)';
   }
 
   private send(args: Args): string {
@@ -374,21 +403,10 @@ export class Tools {
     return lines.join('\n');
   }
 
-  private teamStatus(): string {
-    const lines = [`${this.me.team.owner} (owner)`];
-    for (const row of this.me.overview()) {
-      const s = row.status;
-      const state = s ? `${s.state}${s.task ? ` - ${s.task}` : ''}` : 'not started';
-      const running = row.online ? '' : ', not running';
-      const temp = row.role.is_consultant ? `, consultant (${row.role.tier})` : '';
-      const files = row.locks ? `, writing ${row.locks} file(s)` : '';
-      const stuck = row.stuck ? ` -- ${row.stuck.toUpperCase()}` : '';
-      const you = row.name === this.me.name ? '  <- you' : '';
-      const indent = '  '.repeat(row.depth + 1);
-      lines.push(`${indent}${row.name} [${row.role.harness}${temp}${running}]: ${state}${files}${stuck}${you}`);
-      lines.push(...row.tasks.map((t) => `${indent}    task #${t.id} [${t.state}] from ${t.assigner}: ${t.title}`));
-    }
-    return lines.join('\n');
+  private tree(args: Args): string {
+    const detail = opt(args, 'detail');
+    if (detail && detail !== 'brief' && detail !== 'full') throw new BadArgument("detail is 'brief' or 'full'");
+    return teamTree(this.me, { depth: args.depth == null ? undefined : int(args.depth), detail: detail as Detail || 'brief', around: opt(args, 'around') || undefined });
   }
 
   private view(args: Args): string {

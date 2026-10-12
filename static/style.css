@@ -1013,3 +1013,5 @@ button.primary.send svg { width: 16px; height: 16px; }
 .checks-fine > summary .mark { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; color: #fff; background: var(--working); }
 .checks-fine > summary .muted { font-weight: 400; }
 .checks-fine > .checks { margin-top: 10px; }
+/* what an agent says it is about (set_about): one line under its model */
+.node .about { font-size: 12.5px; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }

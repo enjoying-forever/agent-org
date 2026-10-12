@@ -114,3 +114,10 @@ test('a team.yaml read again comes from the kept copy, until the file changes', 
   writeFileSync(cached, '{broken'); // a damaged copy is only read past
   assert.ok('analyst' in Team.load(file).roles);
 });
+
+test('tree_depth: how much of the team an agent is shown, 3 unless set, at least 2', (t) => {
+  const dir = tmpDir(t);
+  assert.equal(Team.fromDict({ ...example() }, dir).settings.tree_depth, 3);
+  assert.equal(Team.fromDict({ ...example(), tree_depth: 5 }, dir).settings.tree_depth, 5);
+  raises(() => Team.fromDict({ ...example(), tree_depth: 1 }, dir), TeamError, 'at least 2');
+});

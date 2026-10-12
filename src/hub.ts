@@ -70,7 +70,7 @@ export const LAW: [string, string][] = [
     + 'Leases run out when their holder stops working. Closing your last task releases your files; '
     + 'release_file one earlier if someone needs it.'],
   ['Everyone sees the team', "Anyone can see every role's status, tasks and files "
-    + '(team_status). Messages stay private to the sender, the receiver and their superiors.'],
+    + '(team_tree). Messages stay private to the sender, the receiver and their superiors.'],
   ['Silence is a problem', 'A task that shows no progress gets a reminder, then its assigner '
     + 'is told. Report a blocker as soon as you hit it instead of waiting. When an agent is out of '
     + 'its usage limit, whoever gave its tasks moves them (reassign_task) to someone who can work, '
@@ -1154,7 +1154,7 @@ export class RoleSession {
     if (task === null) throw new HubError(`there is no task #${taskId}`);
     const involved = [task.assigner, task.assignee];
     if (!(involved.includes(this.name) || this.isOwner || involved.some((p) => team.isMember(p) && team.isAbove(this.name, p)))) {
-      throw new PermissionDenied(`task #${taskId} is between ${task.assigner} and ${task.assignee}; you can see its status with team_status`);
+      throw new PermissionDenied(`task #${taskId} is between ${task.assigner} and ${task.assignee}; you can see its status with team_tree`);
     }
     return [task, this.store.thread(taskId)];
   }

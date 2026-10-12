@@ -23,6 +23,7 @@ import path from 'node:path';
 import * as doctor from './doctor.ts';
 import * as gitops from './gitops.ts';
 import { BRANCH_RULE, describeStuck, Hub, HubError, LAW } from './hub.ts';
+import { aboutKey } from './teamtree.ts';
 import * as launch from './launch.ts';
 import * as presets from './presets.ts';
 import { CODE_DIR, inTest, keepRunningOnFaults, which } from './runtime.ts';
@@ -722,6 +723,7 @@ export class App {
       const consultant = r.is_consultant ? store.getConsultant(name) : null;
       return {
         name, superior: r.superior, harness: r.harness, model: r.model, effort: r.effort, duties: r.duties,
+        about: store.getSetting(aboutKey(name)), // its own one line (set_about), '' until it writes one
         write_scope: [...r.write_scope], tier: r.tier, help_id: consultant ? consultant.help_id : null,
         status: s ? { state: s.state, task: s.task, updated_at: s.updated_at } : null,
         unread: unread[name] ?? 0,
