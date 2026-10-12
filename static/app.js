@@ -265,7 +265,7 @@ function applyState(state) {
   S.stateKey = key;
   const folder = state.project_root.split(/[\\/]/).filter(Boolean).pop() || state.project_root;
   $('#project').textContent = folder;
-  $('#project').title = `project: ${state.project_root}\nteam file: ${state.team_file}`;
+  $('#project').title = `Open the project folder in File Explorer\n\nproject: ${state.project_root}\nteam file: ${state.team_file}`;
   if (!S.focus || !findRole(S.focus)) S.focus = state.leader;
   renderChart();
   renderPanes();
@@ -295,7 +295,7 @@ function enterTeam() {
   $('#view-home').hidden = true;
   $('#view-roles').hidden = true;
   $('#market-btn').hidden = true;
-  for (const id of ['#sidebar', '#views', '#conn', '#switch-btn', '#save-template', '#stop-all', '#launch-all', '#rail-toggle']) $(id).hidden = false;
+  for (const id of ['#sidebar', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template', '#stop-all', '#launch-all', '#rail-toggle']) $(id).hidden = false;
   document.body.dataset.mode = 'team';
   showView('team');
 }
@@ -307,7 +307,7 @@ function enterHome() {
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
-  for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#switch-btn', '#save-template',
+  for (const id of ['#sidebar', '#view-team', '#view-board', '#view-roles', '#views', '#conn', '#folder-btn', '#switch-btn', '#save-template',
     '#stop-all', '#launch-all', '#rail-toggle', '#side-toggle', '#team-mode', '#layout-menu', '#attention-btn']) {
     $(id).hidden = true;
   }
@@ -407,6 +407,9 @@ $('#create-go').addEventListener('click', async () => {
 $('#shortcut-btn').addEventListener('click', () =>
   act(api('/api/desktop-shortcut', {}), () => 'Shortcut added: double-click "agent-org" on your desktop next time.'));
 $('#switch-btn').addEventListener('click', () => act(api('/api/close', {})));
+const openFolder = () => api('/api/open-folder', {}).catch((e) => toast(e.message, true));
+$('#folder-btn').addEventListener('click', openFolder);
+$('#project').addEventListener('click', openFolder);
 $('#save-template').addEventListener('click', async () => {
   $('#more-menu').open = false;
   const name = prompt('Name for this team (it will be offered for every new project):', 'My team');

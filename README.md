@@ -66,7 +66,8 @@ agent carries on where it stopped.
 - **Laid out like the Codex app:** a sidebar on the left, the whole height of the window, with
   **New task**, the pages (Team, Board, Roles) and the **Agents** as its list of threads - each with
   whether it runs, its unread messages and, below its name, what it is doing right now. Click one
-  for its terminal; Ctrl+Alt+B or the button at the top left hides the sidebar, and its edge drags
+  for its terminal; the project's name at its top opens the project folder (where the agents' work
+  is) in File Explorer. Ctrl+Alt+B or the button at the top left hides the sidebar, and its edge drags
   wider. In the middle, the page; on the right, the team's messages, with a message box like the
   Codex composer (Message or Task, to whom, urgent, and a round send button). Neutral grays with
   blue for what you act on and what is new, each page and each program in its own color (the

@@ -395,6 +395,15 @@ export class App {
     return {};
   }
 
+  /** Show the open team's project folder (where the agents' work lands) in File Explorer. Only that folder: the
+   * page names none. */
+  openFolder(): Json {
+    const folder = this.hub.baseTeam.project_root;
+    if (!isDir(folder)) throw new ApiError(`The project folder is not there: ${folder}`);
+    if (!inTest()) spawn('explorer.exe', [folder], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    return { opened: folder };
+  }
+
   /** Open a web link from an agent's terminal in the owner's own browser (a sign-in page, say). */
   openUrl(body: Body): Json {
     const url = str(body, 'url').trim();
@@ -1177,6 +1186,7 @@ export const POST_ROUTES: Record<string, Route> = {
   '/api/role-place': post(App.prototype.rolePlace), '/api/role-reset': post(App.prototype.roleReset),
   '/api/role-restore': post(App.prototype.roleRestore),
   '/api/term-input': post(App.prototype.termInput), '/api/term-resize': post(App.prototype.termResize), '/api/open-url': post(App.prototype.openUrl),
+  '/api/open-folder': post(App.prototype.openFolder),
   '/api/window': post(App.prototype.windowAction), '/api/prefs': post(App.prototype.setPref),
   '/api/teammate': post(App.prototype.teammateUpdate), '/api/teammate-remove': post(App.prototype.teammateRemove),
 };

@@ -217,12 +217,14 @@ function cancelTask(t) {
 
 function openNewTask(to) {
   $('#nt-to').replaceChildren(...S.state.roles.filter((r) => !r.tier).map((r) =>
-    h('option', { value: r.name, selected: r.name === (to || S.state.leader) }, `${r.name}${r.name === S.state.leader ? ' (leader)' : ''}`)));
-  const candidates = S.state.tasks.filter((t) => !['failed', 'rejected', 'cancelled'].includes(t.state)
-    && t.state !== 'accepted').slice(-30).reverse();
-  $('#nt-after').replaceChildren(...(candidates.length ? candidates.map((t) => h('label', { class: 'inline' },
-    h('input', { type: 'checkbox', value: t.id }), `#${t.id} ${t.title} (${t.assignee}, ${t.state})`))
-    : [h('span', { class: 'muted small' }, 'No other open tasks.')]));
+    h('option', { value: r.name, selected: r.name === (to || S.state.leader) },
+      `${r.name}${r.name === S.state.leader && r.name !== 'leader' ? ' (leader)' : ''}`)));
+  // what a new task can wait for: work still to be done (a done one has nothing left to wait for)
+  const candidates = S.state.tasks.filter((t) => ['waiting', 'open', 'working', 'blocked'].includes(t.state)).slice(-30).reverse();
+  $('#nt-after-box').hidden = !candidates.length;
+  $('#nt-after-box').open = false;
+  $('#nt-after').replaceChildren(...candidates.map((t) => h('label', { class: 'inline' },
+    h('input', { type: 'checkbox', value: t.id }), `#${t.id} ${t.title} (${t.assignee}, ${t.state})`)));
   for (const id of ['#nt-title', '#nt-details', '#nt-done']) $(id).value = '';
   $('#nt-priority').value = '2';
   $('#new-task').returnValue = '';

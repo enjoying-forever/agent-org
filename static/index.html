@@ -13,7 +13,7 @@
   <aside class="rail sidebar" id="sidebar" aria-label="Team" hidden>
     <div class="sb-head">
       <span class="logo" aria-hidden="true"></span>
-      <span id="project" class="sb-project"></span>
+      <button id="project" class="sb-project" type="button"></button>
     </div>
     <button id="sb-new" class="sb-row sb-new" title="Give a task to someone in the team">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
@@ -79,6 +79,7 @@
         <button id="law-btn" title="The rules every agent follows">The law</button>
         <button id="checks-btn" title="Check that Claude, Codex, Grok, Antigravity and DeepSeek are ready">Setup check</button>
         <button id="keys-btn" title="Moving between panes without the mouse">Keyboard shortcuts</button>
+        <button id="folder-btn" hidden title="Where the agents' work is: the project folder in File Explorer">Open project folder</button>
         <button id="switch-btn" hidden title="Open or create another team">Switch team</button>
         <button id="save-template" hidden title="Keep this team to start new projects from, so you set it up only once">Save as my team…</button>
         <hr>
@@ -283,7 +284,7 @@
       <label>What to do (one line)<input id="nt-title" required></label>
       <label>Details<textarea id="nt-details" rows="4" placeholder="Everything they need to do it"></textarea></label>
       <label>Done when<input id="nt-done" placeholder="How anyone can check it is finished, e.g. the page shows today's stories"></label>
-      <label>Start after (optional)<div id="nt-after" class="after-list"></div></label>
+      <details class="nt-after" id="nt-after-box"><summary>Start only after other tasks are done</summary><div id="nt-after" class="after-list"></div></details>
       <div class="dialog-actions">
         <button value="cancel" formnovalidate>Cancel</button>
         <button class="primary" value="ok">Give task</button>
@@ -301,7 +302,7 @@
 
   <div id="palette" class="palette" hidden>
     <div class="palette-head"><b>Add a teammate</b>
-      <span class="muted small">Drag a role onto whoever it should report to</span></div>
+      <span class="muted small">Click a role to add it, or drag it onto whoever it should report to</span></div>
     <input id="palette-search" type="search" placeholder="Search roles">
     <div id="palette-list" class="palette-list"></div>
     <button id="palette-market" class="link small">Open the Role Market</button>

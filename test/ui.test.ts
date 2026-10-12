@@ -534,6 +534,13 @@ test('links from a terminal open in the browser', async (t) => {
   assert.equal(opened.length, 1);
 });
 
+test("the project folder opens: the team's own, whatever the page asks", async (t) => {
+  const server = await startServer(t);
+  const root = server.app.hub.baseTeam.project_root;
+  assert.deepEqual(await server.ok('/api/open-folder', {}), { opened: root });
+  assert.deepEqual(await server.ok('/api/open-folder', { path: 'C:\\Windows' }), { opened: root }); // no path from the page
+});
+
 test('the folder picker answers with what was chosen', async (t) => {
   const server = await startServer(t);
   server.app.pickFolderWith = async (title) => (title === 'Where?' ? 'C:\\work\\app' : '');
