@@ -16,7 +16,14 @@ async function loadRoles() {
     ...R.meta.harnesses.map((x) => h('option', { value: x }, x)));
   filter.value = keep;
   $('#roles-back').hidden = S.mode === 'team';
-  renderRoles();
+  renderMarket(true);
+}
+
+/** The tab shown, roles or models; `keep`: on the model page open (a reload), not back to the grid (a search). */
+function renderMarket(keep = false) {
+  if (R.tab !== 'models') { renderRoles(); return; }
+  if (!keep) R.modelPage = null;
+  renderModels();
 }
 
 function renderRestore() {
@@ -52,7 +59,9 @@ function roleTile(p) {
         h('div', { class: 'specs' },
           h('span', { class: 'harness' }, p.harness),
           (p.model || p.effort) && h('span', { class: 'spec' },
-            [p.model, p.effort && `${p.effort} effort`].filter(Boolean).join(', '))))),
+            guideFor(p.model) ? h('button', { class: 'link', title: `What ${guideFor(p.model).name} is good at`,
+              onclick: () => showModelPage(guideFor(p.model).id) }, p.model) : p.model,
+            p.model && p.effort ? ', ' : '', p.effort && `${p.effort} effort`)))),
     p.description && h('p', { class: 'desc' }, p.description),
     (p.tags || []).length ? h('div', { class: 'tags' }, p.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
     h('details', { class: 'role-details' },
@@ -91,10 +100,11 @@ document.addEventListener('click', (e) => {
 
 // ---------- designing a role ----------
 
-async function openRoleDesigner(p) {
+/** `start`: for a new role, its program and model (from a model's page). */
+async function openRoleDesigner(p, start = {}) {
   try { R.meta = await api('/api/roles'); } catch { /* keep the lists we have */ }
   R.editing = p ? p.id : null;
-  const v = p || { harness: 'claude', title: '', icon: '', description: '', model: '', effort: '', tags: [],
+  const v = p || { harness: start.harness || 'claude', title: '', icon: '', description: '', model: start.model || '', effort: '', tags: [],
     duties: '', instructions: '', write_scope: [] };
   $('#role-dialog-title').textContent = R.editing ? `Edit "${v.title}"` : 'New role';
   $('#rd-title').value = v.title || '';
@@ -120,7 +130,8 @@ function renderModelFields(model, effort) {
   const harness = $('#rd-harness').value;
   const models = R.meta.models[harness] || [];
   const efforts = R.meta.efforts[harness] || [];
-  R.model = choiceField(model, models, { blank: "program's default" });
+  R.model = choiceField(model, models, { blank: "program's default", onchange: modelHint });
+  modelHint(model);
   R.effort = choiceField(effort, efforts, { blank: 'default' });
   $('#rd-model').replaceChildren(...R.model.childNodes);
   $('#rd-effort').replaceChildren(...R.effort.childNodes);
@@ -147,12 +158,12 @@ $('#role-form').addEventListener('submit', async (e) => {
   };
   const res = await act(api('/api/role-save', { id: R.editing, role }),
     () => (R.editing ? `Saved "${role.title}".` : `"${role.title}" is in your market now.`));
-  if (res) { $('#role-dialog').close(); R.list = res.roles; renderRoles(); }
+  if (res) { $('#role-dialog').close(); R.list = res.roles; renderMarket(true); }
 });
 
 async function duplicateRole(p) {
   const res = await act(api('/api/role-duplicate', { id: p.id }), () => `Copied "${p.title}": edit your copy.`);
-  if (res) { R.list = res.roles; renderRoles(); openRoleDesigner(R.list.find((x) => x.id === res.id)); }
+  if (res) { R.list = res.roles; renderMarket(true); openRoleDesigner(R.list.find((x) => x.id === res.id)); }
 }
 
 async function deleteRole(p) {
@@ -165,7 +176,7 @@ async function deleteRole(p) {
 async function resetRole(p) {
   if (!confirm(`Undo your edits to "${p.title}" and go back to the original?`)) return;
   const res = await act(api('/api/role-reset', { id: p.id }), () => `"${p.title}" is back to the original.`);
-  if (res) { R.list = res.roles; renderRoles(); }
+  if (res) { R.list = res.roles; renderMarket(true); }
 }
 
 $('#roles-restore').addEventListener('click', async () => {
@@ -193,12 +204,12 @@ $('#roles-file').addEventListener('change', async (e) => {
   if (file.size > 200000) { toast('That file is too large to be a role.', true); return; }
   const text = await file.text();
   const res = await act(api('/api/role-import', { text }), () => `Imported "${file.name}".`);
-  if (res) { R.list = res.roles; renderRoles(); }
+  if (res) { R.list = res.roles; renderMarket(true); }
 });
 
 $('#roles-new').addEventListener('click', () => openRoleDesigner(null));
-$('#roles-search').addEventListener('input', renderRoles);
-$('#roles-filter').addEventListener('change', renderRoles);
+$('#roles-search').addEventListener('input', () => renderMarket());
+$('#roles-filter').addEventListener('change', () => renderMarket());
 
 // ---------- placing a role in the open team ----------
 
@@ -364,3 +375,100 @@ for (const b of document.querySelectorAll('#more-menu .menu-list button')) {
 document.addEventListener('click', (e) => {
   if ($('#more-menu').open && !$('#more-menu').contains(e.target)) $('#more-menu').open = false;
 });
+
+// ---------- the models: what each is good at (researched), and the roles on it ----------
+
+const COST = { $: 'cheap', $$: 'moderate', $$$: 'dear', $$$$: 'the dearest' };
+const guideFor = (model) => (R.meta?.guide || []).find((g) => g.ids.includes(String(model || '').trim().toLowerCase())) || null;
+
+/** Roles or Models, above the grid. */
+function setMarketTab(tab, page = null) {
+  R.tab = tab;
+  R.modelPage = page;
+  for (const b of document.querySelectorAll('#market-seg button')) b.classList.toggle('active', b.dataset.market === tab);
+  const models = tab === 'models';
+  $('#roles-grid').hidden = models;
+  $('#roles-restore-row').hidden = models || !(R.meta?.deleted_built_ins);
+  $('#models-view').hidden = !models;
+  for (const id of ['#roles-import', '#roles-new']) $(id).hidden = models;
+  $('#roles-search').placeholder = models ? 'Search models' : 'Search roles';
+  $('#market-lead').textContent = models
+    ? `What each model is good at, from the makers' pages, benchmarks and reviews (${R.meta?.researched || ''}). `
+      + 'Open one for its strengths, its limits, the roles that use it and where this comes from.'
+    : 'Packaged roles: a program and model, a reasoning level, its tasks and its prompt. Place one in your team, '
+      + 'build a new team from them, or make your own and share it as a file.';
+  if (models) renderModels(); else renderRoles();
+  $('#view-roles').scrollTop = 0;
+}
+
+function renderModels() {
+  if (R.modelPage) { renderModelPage(R.meta.guide.find((g) => g.id === R.modelPage)); return; }
+  const words = $('#roles-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const program = $('#roles-filter').value;
+  const hay = (g) => [g.name, g.maker, g.harness, g.summary, ...g.good, g.pick, ...g.ids].join(' ').toLowerCase();
+  const shown = (R.meta.guide || []).filter((g) => (!program || g.harness === program) && words.every((w) => hay(g).includes(w)));
+  if (!shown.length) { fill($('#models-view'), h('div', { class: 'empty' }, 'No model matches. Try other words.')); return; }
+  const programs = [...new Set(shown.map((g) => g.harness))];
+  fill($('#models-view'), programs.map((p) => h('section', { class: 'model-group' },
+    h('h2', {}, PROGRAM[p] || p),
+    h('div', { class: 'models-grid' }, shown.filter((g) => g.harness === p).map(modelTile)))));
+}
+
+function costSpeed(g) {
+  return h('span', { class: 'model-meta' },
+    h('span', { class: 'cost', title: `Cost: ${COST[g.cost]}` }, g.cost), h('span', { class: 'dot' }, '·'),
+    h('span', { title: 'Speed' }, g.speed));
+}
+
+function modelTile(g) {
+  return h('button', { class: `model-tile h-${g.harness}`, onclick: () => setMarketTab('models', g.id) },
+    h('div', { class: 'model-head' }, h('b', {}, g.name), costSpeed(g)),
+    h('p', { class: 'desc' }, g.summary),
+    h('ul', { class: 'model-good' }, g.good.slice(0, 2).map((x) => h('li', {}, x))),
+    g.roles.length ? h('div', { class: 'model-roles' }, g.roles.map((id) => h('span', { class: 'tag' },
+      R.list.find((p) => p.id === id)?.title || id))) : null);
+}
+
+function renderModelPage(g) {
+  if (!g) { setMarketTab('models'); return; }
+  const roles = R.list.filter((p) => guideFor(p.model)?.id === g.id);
+  fill($('#models-view'), h('article', { class: `model-page h-${g.harness}` },
+    h('button', { class: 'link small', onclick: () => setMarketTab('models') }, '← All models'),
+    h('header', {},
+      h('h2', {}, g.name),
+      h('div', { class: 'model-sub' }, `${g.maker} · runs in `, h('span', { class: 'harness' }, PROGRAM[g.harness] || g.harness),
+        ' · ', costSpeed(g))),
+    h('p', { class: 'model-summary' }, g.summary),
+    h('div', { class: 'model-cols' },
+      h('section', {}, h('h3', {}, 'Good at'), h('ul', {}, g.good.map((x) => h('li', {}, x)))),
+      h('section', {}, h('h3', {}, 'Less good at'), h('ul', {}, g.weak.map((x) => h('li', {}, x))))),
+    h('section', { class: 'model-pick' }, h('h3', {}, 'Pick it'), h('p', {}, g.pick)),
+    h('section', {}, h('h3', {}, roles.length ? 'Roles on it' : 'No role uses it yet'),
+      roles.length ? h('div', { class: 'roles-grid' }, roles.map(roleTile)) : null,
+      h('p', {}, h('button', { class: 'small', onclick: () => openRoleDesigner(null, { harness: g.harness, model: g.ids[g.ids.length > 1 && g.harness === 'claude' ? 1 : 0] }) },
+        'New role on this model'))),
+    h('details', { class: 'model-sources' },
+      h('summary', {}, `Names to use and sources (researched ${R.meta.researched})`),
+      h('p', { class: 'muted small' }, 'As the model of a role: ', g.ids.map((id) => h('code', {}, id)).flatMap((c, i) => (i ? [', ', c] : [c]))),
+      h('ul', {}, g.sources.map(([title, url]) => h('li', {}, h('a', { href: url, class: 'msg-link',
+        onclick: (e) => { e.preventDefault(); openExternal(url); } }, title)))))));
+}
+
+/** In the role designer: a line on what the chosen model is good at. */
+function modelHint(model) {
+  const g = guideFor(model);
+  const hint = $('#rd-model-hint');
+  hint.hidden = !g;
+  if (!g) return;
+  fill(hint, h('b', {}, g.name), ` - ${g.summary} `,
+    h('button', { type: 'button', class: 'link', onclick: () => { $('#role-dialog').close(); showModelPage(g.id); } }, 'More'));
+}
+
+/** The market, on one model's page. */
+async function showModelPage(id) {
+  if (S.mode === 'team') showView('roles'); else openMarket();
+  if (!R.meta) await loadRoles();
+  setMarketTab('models', id);
+}
+
+for (const b of document.querySelectorAll('#market-seg button')) b.addEventListener('click', () => setMarketTab(b.dataset.market));

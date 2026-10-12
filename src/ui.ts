@@ -36,6 +36,7 @@ import * as wake from './wake.ts';
 import * as waker from './waker.ts';
 import * as watchdog from './watchdog.ts';
 import { dict } from './dict.ts';
+import { MODELS, RESEARCHED } from './models.ts';
 import { localUrls, type PageView, type ViewOptions } from './preview.ts';
 
 export type { PageView, ViewOptions } from './preview.ts';
@@ -1038,6 +1039,7 @@ export class App {
   roles(): Json {
     const open = this.hubOrNull !== null;
     return { roles: presets.catalogue(), harnesses: [...HARNESSES], models: this.catalog.models, efforts: EFFORTS,
+      guide: MODELS, researched: RESEARCHED, // what each model is good at: the market's model pages
       deleted_built_ins: presets.hidden().length, team_open: open, team_roles: open ? Object.keys(this.hub.team.roles) : [],
       owner: open ? this.hub.baseTeam.owner : '' };
   }

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { roleCard } from '../src/cards.ts';
 import { Hub, HubError } from '../src/hub.ts';
+import * as models from '../src/models.ts';
 import * as presets from '../src/presets.ts';
 import { parseYaml } from '../src/team.ts';
 import { cleanup, FakeOpener, freshHome, raises, writeTeamFile } from './helpers.ts';
@@ -37,7 +38,7 @@ test('ready-made roles can be edited, reset, deleted and restored', (t) => {
   assert.deepEqual([card.harness, card.model, card.edited, card.mine], ['codex', 'gpt-6-luna', true, false]);
   assert.equal(presets.get('reviewer').model, 'gpt-6-luna');
   presets.reset('reviewer');
-  assert.equal(presets.get('reviewer').model, 'claude-sonnet-5-5');
+  assert.equal(presets.get('reviewer').model, 'claude-opus-5-5');
   assert.ok(!presets.catalogue().find((p) => p.id === 'reviewer')!.edited);
 
   presets.remove('reviewer');
@@ -58,7 +59,7 @@ test('hiring from a preset', (t) => {
   const hub = Hub.open(file, new FakeOpener().call);
   cleanup(t, () => hub.close());
   const role = hub.session('leader').hire('rev', { preset: 'reviewer', write_scope: ['docs/*'] });
-  assert.deepEqual([role.harness, role.model], ['claude', 'claude-sonnet-5-5']);
+  assert.deepEqual([role.harness, role.model], ['claude', 'claude-opus-5-5']);
   assert.deepEqual([...role.write_scope], ['docs/*']); // what you give overrides the preset
   const roles = (parseYaml(readFileSync(file, 'utf8')) as { roles: Record<string, { instructions: string }> }).roles;
   assert.ok(roles.rev.instructions.includes('reviews/task-<number>.md'));
@@ -72,4 +73,22 @@ test('instructions reach the agent', (t) => {
   hub.session('leader').hire('helper', { harness: 'claude', duties: 'Help out.', instructions: 'Answer in English. Keep it short.' });
   const card = roleCard(hub.session('helper'));
   assert.ok(card.includes('Your instructions (from the owner):') && card.includes('Keep it short.'));
+});
+
+test("every ready-made role's model has a page, and each page lists the roles on it", () => {
+  const { MODELS, guideFor } = models;
+  for (const [id, spec] of Object.entries(presets.BUILT_IN)) {
+    const g = guideFor(String(spec.model));
+    assert.ok(g, `${id}: no page for ${spec.model}`);
+    assert.equal(g.harness, spec.harness, `${id}: ${spec.model} runs in ${g.harness}`);
+    assert.ok(g.roles.includes(id), `${g.id} does not list ${id}`);
+  }
+  for (const g of MODELS) {
+    for (const r of g.roles) assert.ok(r in presets.BUILT_IN, `${g.id} lists ${r}, which is not a ready-made role`);
+    assert.ok(g.good.length && g.weak.length && g.sources.length && g.sources.every(([, u]) => u.startsWith('https://')), g.id);
+  }
+  assert.equal(new Set(MODELS.flatMap((g) => g.ids)).size, MODELS.flatMap((g) => g.ids).length, 'a name belongs to one model');
+  assert.equal(guideFor('Opus')?.id, 'claude-opus-5-5');
+  assert.equal(guideFor('gemini-3.8-flash-high')?.id, 'gemini-3.8-flash');
+  assert.equal(guideFor('some-new-model'), null);
 });

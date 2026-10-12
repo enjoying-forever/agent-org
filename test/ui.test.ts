@@ -415,7 +415,7 @@ test('the Role Market', async (t) => {
   const edited = (await server.ok('/api/roles')).roles.find((p: any) => p.id === 'reviewer');
   assert.deepEqual([edited.title, edited.model, edited.edited], ['Strict reviewer', 'opus', true]);
   assert.ok(await server.ok('/api/role-reset', { id: 'reviewer' }));
-  assert.equal((await server.ok('/api/roles')).roles.find((p: any) => p.id === 'reviewer').model, 'claude-sonnet-5-5');
+  assert.equal((await server.ok('/api/roles')).roles.find((p: any) => p.id === 'reviewer').model, 'claude-opus-5-5');
   assert.equal((await server.request('/api/role-reset', { id: 'my:doc-writer' }))[0], 400);
   await server.ok('/api/role-delete', { id: 'tester' });
   market = await server.ok('/api/roles');
@@ -702,4 +702,25 @@ test('terminal input says what is wrong with it', async (t) => {
   const [status, long] = await server.request('/api/term-input', { role: 'leader', data: 'x'.repeat(ui.TERM_INPUT_MAX + 1) });
   assert.ok(status === 400 && /At most 65536 characters at a time/.test(long.error), JSON.stringify(long));
   await server.ok('/api/term-input', { role: 'leader', data: 'x'.repeat(ui.TERM_INPUT_MAX) });
+});
+
+test("the market sends what each model is good at, for its model pages", async (t) => {
+  freshHome(t);
+  const server = await startServer(t);
+  const market = await server.ok('/api/roles');
+  assert.ok(market.researched && market.guide.length >= 10);
+  const opus = market.guide.find((g: any) => g.id === 'claude-opus-5-5');
+  assert.ok(opus.good.length && opus.sources.length && opus.roles.includes('reviewer'));
+});
+
+test("the page's scripts share one scope: no name is declared twice", () => {
+  // seen: a second `const PROGRAM` in roles.js stopped the whole script, and the Role Market with it
+  const seen = new Map<string, string>();
+  for (const file of ['app.js', 'board.js', 'browser.js', 'roles.js', 'layout.js', 'teammates.js']) {
+    const text = readFileSync(path.join(ui.STATIC, file), 'utf8');
+    for (const m of text.matchAll(/^(?:const|let|var|class|(?:async )?function\*?)\s+([A-Za-z_$][\w$]*)/gm)) {
+      assert.ok(!seen.has(m[1]), `${m[1]} is declared in ${seen.get(m[1])} and ${file}`);
+      seen.set(m[1], file);
+    }
+  }
 });

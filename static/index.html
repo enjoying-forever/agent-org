@@ -213,11 +213,15 @@
         <div class="grow">
           <button id="roles-back" class="ghost small" hidden>&larr; Back</button>
           <h1>Role Market</h1>
-          <p>Packaged roles: a program and model, a reasoning level, its tasks and its prompt. Place one in your
+          <p id="market-lead">Packaged roles: a program and model, a reasoning level, its tasks and its prompt. Place one in your
             team, build a new team from them, or make your own and share it as a file.</p>
+          <div class="seg market-seg" id="market-seg" role="tablist" aria-label="Roles or models">
+            <button data-market="roles" class="active">Roles</button>
+            <button data-market="models" title="What each model is good at, and the roles that use it">Models</button>
+          </div>
         </div>
         <div class="roles-tools">
-          <input id="roles-search" type="search" placeholder="Search roles">
+          <input id="roles-search" type="search" placeholder="Search roles" aria-label="Search">
           <select id="roles-filter" title="Only roles on this program"></select>
           <button id="roles-import" title="Add a role from a .role.yaml file">Import…</button>
           <input id="roles-file" type="file" accept=".yaml,.yml,.json,.txt" hidden>
@@ -225,6 +229,7 @@
         </div>
       </div>
       <div id="roles-grid" class="roles-grid"></div>
+      <div id="models-view" class="models-view" hidden></div>
       <p id="roles-restore-row" class="muted small" hidden><button id="roles-restore" class="link"></button></p>
     </div>
   </main>
@@ -241,7 +246,7 @@
         <label class="wide">Icon<div class="icon-picks" id="rd-icons"></div></label>
         <label class="wide">One-line description<input id="rd-description" placeholder="What this role is good at"></label>
         <label>Program<select id="rd-harness"></select></label>
-        <label>Model<span id="rd-model" class="choice"></span></label>
+        <label>Model<span id="rd-model" class="choice"></span><span id="rd-model-hint" class="model-hint" hidden></span></label>
         <label>Reasoning effort<span id="rd-effort" class="choice"></span></label>
         <label>Tags<input id="rd-tags" placeholder="e.g. code, review"></label>
         <label class="wide">Tasks it does (its duties)<textarea id="rd-duties" rows="2" placeholder="Review finished work when asked, and report a clear verdict."></textarea></label>
