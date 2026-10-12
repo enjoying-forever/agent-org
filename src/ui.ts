@@ -742,7 +742,7 @@ export class App {
       tiers: Object.values(team.tiers).map((t) => ({ name: t.name, harness: t.harness, model: t.model, effort: t.effort, use_for: t.use_for,
         max_active: t.max_active, active: roles.filter((r) => r.tier === t.name).length })),
       locks: locks.map(lockJson),
-      tasks: store.tasks({ limit: 60 }).map(taskJson),
+      tasks: this.boardTasks(openTasks).map(taskJson),
       problems: this.problems(),
       history: this.history(),
       settings: { autostart: s.autostart, max_running: s.max_running, commit_on_accept: s.commit_on_accept, isolation: s.isolation,
@@ -752,6 +752,14 @@ export class App {
       launchable: Object.keys(launch.BUILDERS),
       in_window: this.inWindow,
     };
+  }
+
+  /** The tasks the page shows: every unfinished one, however old, and the latest 60 (seen: an open task pushed off
+   * the Board by 60 newer finished ones). */
+  private boardTasks(open: Task[]): Task[] {
+    const recent = this.hub.store.tasks({ limit: 60 });
+    const shown = new Set(recent.map((t) => t.id));
+    return [...open.filter((t) => !shown.has(t.id)), ...recent].sort((a, b) => a.id - b.id);
   }
 
   /** The open team's terminals, each with whether its program is asking the owner something (a menu, a

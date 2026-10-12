@@ -60,7 +60,8 @@ export function git(root: string, args: string[], opts: { check?: boolean; env?:
   const started = performance.now();
   gitStats.calls += 1;
   gitStats.log?.push(args.join(' '));
-  const r = spawnSync(command, ['-C', root, ...args], {
+  // core.quotePath=false: file names come back as written (else git escapes every non-ASCII one: "\346...")
+  const r = spawnSync(command, ['-c', 'core.quotePath=false', '-C', root, ...args], {
     encoding: 'utf8', timeout: (opts.timeout ?? 60) * 1000, env: { ...process.env, ...env, ...(opts.env ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 * 1024 * 1024,
   });
@@ -345,6 +346,17 @@ export function isJunk(file: string): boolean {
     }
   }
   return false;
+}
+
+/** The files changed in `range` (a commit, or main...HEAD), each whole: names with spaces or any letters included. */
+export function changedFiles(wt: string, range: string): string[] {
+  return git(wt, ['diff', '--name-only', '-z', range]).stdout.split('\0').filter((f) => f);
+}
+
+/** Make the worktree's own commits since `main` (which it has taken in) one commit with its final state. */
+export function flatten(wt: string, main: string, message: string): void {
+  git(wt, ['reset', '--soft', main], { check: true });
+  git(wt, ['commit', '--no-edit', '-m', message], { check: true, env: identity(wt) });
 }
 
 /** Commit everything in the worktree (also concludes a merge whose conflicts were resolved). */

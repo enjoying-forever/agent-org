@@ -531,6 +531,14 @@ export class RoleSession {
   readInbox(): Message[] {
     void this.team; // refuses a dismissed consultant
     const messages = this.store.takeUnread(this.name);
+    this.startTasks(messages);
+    return messages;
+  }
+
+  /** Tasks among messages it has now read start: open -> working, and its status says so with no call for it.
+   * (Also for urgent mail the hooks hand over in full: seen, an urgent task left open while its edits were
+   * recorded against the task worked on before.) */
+  startTasks(messages: Message[]): void {
     for (const m of messages) {
       if (m.kind !== 'task' || m.task_id === null) continue;
       const task = this.store.getTask(m.task_id);
@@ -543,7 +551,6 @@ export class RoleSession {
       // a new task, or one sent back to it: its status says so with no call for it
       this.store.setStatus(this.name, 'working', `#${task.id} ${task.title}`);
     }
-    return messages;
   }
 
   /** Wait until at least one message arrives, `timeout` seconds pass, or `signal` aborts. An aborted wait returns
@@ -656,6 +663,8 @@ export class RoleSession {
       }
       checks = await this.runChecks(files, root, `task #${taskId} is not done yet`, task.id, siblings);
     }
+    // seen: a task cancelled while its checks ran was set back to done, and its work merged
+    if (outcome === 'done') this.stillOpen(taskId, `task #${taskId} is not done`);
     if (checks.includes('FAILED')) {
       result += `\n\n(The team's checks do not pass yet: ${checks}. Other parts of #${task.parent_id} are still open `
         + `(${siblings.map((t) => `#${t.id} ${t.assignee}: ${t.title}`).join('; ')}), which may be why; they run again when those finish.)`;
@@ -737,31 +746,46 @@ export class RoleSession {
       if (gitops.merging(wt)) {
         const conflicted = gitops.conflicted(wt);
         const left = gitops.withMarkers(wt, conflicted.length ? conflicted
-          : gitops.git(wt, ['diff', '--name-only', 'HEAD']).stdout.split(/\s+/).filter((x) => x));
+          : gitops.changedFiles(wt, 'HEAD'));
         if (left.length) throw new HubError(`${refusal}: ${left.join(', ')} still hold conflict markers (<<<<<<< / >>>>>>>). Settle each spot, then try again.`);
       }
       gitops.commitAll(wt, `${hub.branchRole(this.name)}: ${message}`);
-      let [, conflicts] = gitops.sync(wt, main, false);
-      if (conflicts.length) {
-        hub.event('git', this.name, `conflicts with main in ${conflicts.join(', ')}`, taskId);
-        throw new HubError(`${refusal}. ${conflictText(conflicts)}`);
-      }
-      const changed = gitops.git(wt, ['diff', '--name-only', `${main}...HEAD`]).stdout.split(/\s+/).filter((x) => x);
-      if (!gitops.git(wt, ['rev-list', '--count', `${main}..HEAD`]).stdout.trim().replace(/^0+|0+$/g, '')) return ['', '']; // nothing of its own
-      this.landingChecks(wt, main, changed, refusal, taskId);
-      checks = await this.runChecks([...new Set([...files, ...changed])].sort(), wt, refusal, taskId, siblings);
-      landedAs = gitops.withLandLock(root, () => {
-        let [commit, why] = gitops.land(root, branch, message);
-        if (commit === null) { // main moved on while the checks ran: take it in and try once more
-          [, conflicts] = gitops.sync(wt, main, false);
-          if (conflicts.length) throw new HubError(`${refusal}. ${conflictText(conflicts)}`);
-          [commit, why] = gitops.land(root, branch, message);
+      // What lands is exactly what was checked: if main moves on while the checks run, take it in and check the
+      // new combination again (seen: a landing recorded "passed" whose merged result failed the same check).
+      let landed: string | null = null;
+      checks = '';
+      for (let round = 1; landed === null; round++) {
+        const [, conflicts] = gitops.sync(wt, main, false);
+        if (conflicts.length) {
+          hub.event('git', this.name, `conflicts with main in ${conflicts.join(', ')}`, taskId);
+          throw new HubError(`${refusal}. ${conflictText(conflicts)}`);
         }
-        if (commit === null) throw new HubError(`${refusal}: your work could not go into main: ${why}`);
-        gitops.sync(wt, main, true); // a fast-forward: your copy = main again
-        hub.store.setSetting(`synced:${hub.branchRole(this.name)}`, gitops.head(root, main));
-        return commit;
-      });
+        if (!gitops.git(wt, ['rev-list', '--count', `${main}..HEAD`]).stdout.trim().replace(/^0+|0+$/g, '')) return ['', '']; // nothing of its own
+        const base = gitops.head(root, main);
+        const changed = gitops.changedFiles(wt, `${main}...HEAD`);
+        this.landingChecks(wt, main, changed, refusal, taskId);
+        // Landing merges every commit of this copy, not only its final state: a secret written and taken out again
+        // would still reach main's history. Then the copy's own commits become one first.
+        if (this.team.settings.scan_secrets
+          && safety.findSecrets(gitops.git(wt, ['log', '-p', '--no-merges', `${main}..HEAD`]).stdout).length) {
+          gitops.flatten(wt, main, `${hub.branchRole(this.name)}: ${message}`);
+          hub.event('safety', this.name, 'an earlier commit held a secret: its work lands as one commit, without it', taskId);
+        }
+        checks = await this.runChecks([...new Set([...files, ...changed])].sort(), wt, refusal, taskId, siblings);
+        landed = gitops.withLandLock(root, () => {
+          if (gitops.head(root, main) !== base) return null; // main moved on meanwhile: check again with it
+          this.stillOpen(taskId, refusal); // cancelled or moved away while the checks ran: it does not land
+          const [commit, why] = gitops.land(root, branch, message);
+          if (commit === null) throw new HubError(`${refusal}: your work could not go into main: ${why}`);
+          gitops.sync(wt, main, true); // a fast-forward: your copy = main again
+          hub.store.setSetting(`synced:${hub.branchRole(this.name)}`, gitops.head(root, main));
+          return commit;
+        });
+        if (landed === null && round >= 3) {
+          throw new HubError(`${refusal}: main kept changing while your checks ran (three times); try again in a moment.`);
+        }
+      }
+      landedAs = landed;
     } catch (e) {
       if (e instanceof HubError) throw e;
       if (isGitError(e)) throw new HubError(`${refusal}: git failed: ${(e as Error).message}`);
@@ -790,6 +814,16 @@ export class RoleSession {
         + `${main} -- <file>, or delete new files), or ask ${this.superior} to change your scope.`);
     }
     this.noSecrets(gitops.git(wt, ['diff', `${main}...HEAD`]).stdout, refusal, taskId);
+  }
+
+  /** A task that was cancelled or moved away while its checks ran is not finished by them. */
+  private stillOpen(taskId: number | null, refusal: string): void {
+    if (taskId === null) return;
+    const task = this.store.getTask(taskId);
+    if (task === null || task.assignee !== this.name || !(ACTIVE as readonly string[]).includes(task.state)) {
+      const what = task === null ? 'removed' : task.assignee !== this.name ? `moved to ${task.assignee}` : task.state;
+      throw new HubError(`${refusal}: it was ${what} while its checks ran.`);
+    }
   }
 
   private noSecrets(diff: string, refusal: string, taskId: number | null): void {

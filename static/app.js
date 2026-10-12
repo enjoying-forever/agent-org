@@ -1569,6 +1569,9 @@ const KEEP_MESSAGES = 2000;
 const FEED_SHOWN = 300;
 
 function addMessages(list) {
+  // Two fetches can overlap (a refresh after an action, and the live one) and bring the same messages: each is
+  // kept once (seen: one message shown twice).
+  list = list.filter((m) => m.id > S.lastId);
   for (const m of list) {
     S.messages.push(m);
     S.lastId = Math.max(S.lastId, m.id);

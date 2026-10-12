@@ -208,6 +208,10 @@ export function keepUsage(file: string, session: string, used: Record<string, nu
   }
 }
 
+/** The viewer's exit code when the run it showed produced no event at all: it failed before it began (a sign-in or
+ * start that failed), so the role's loop waits before it tries again instead of starting it over and over. */
+export const NO_RUN = 3;
+
 function option(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
@@ -226,6 +230,7 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
   const view = new View(out);
   const record = await recorder(option(argv, '--team'), option(argv, '--role'));
   if (record !== null) view.onTool = record.tool;
+  let events = 0;
   for await (const raw of createInterface({ input, crlfDelay: Infinity })) {
     const line = raw.trim();
     if (!line) continue;
@@ -237,6 +242,7 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
       continue;
     }
     if (typeof event !== 'object' || event === null || Array.isArray(event)) continue;
+    events += 1;
     const [before, steps] = [view.session, view.used.steps ?? 0];
     view.show(event as Event);
     if (sessionFile && view.session && view.session !== before) writeFileSync(sessionFile, view.session, 'utf8');
@@ -244,7 +250,7 @@ export async function main(argv: string[] = process.argv.slice(2), input: Readab
   }
   if (view.midLine) out.write('\n');
   record?.end();
-  return 0;
+  return events ? 0 : NO_RUN;
 }
 
 /** What a run does, noted in its team's hub as the hooks note other agents' tool calls, for the owner's page.

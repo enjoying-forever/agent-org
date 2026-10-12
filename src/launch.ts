@@ -24,6 +24,7 @@ import * as sessions from './sessions.ts';
 import type { Role, Team } from './team.ts';
 import * as templates from './templates.ts';
 import { networkEnv } from './terminals.ts';
+import { NO_RUN } from './runview.ts';
 import { DSH_USAGE } from './usage.ts';
 import { dict } from './dict.ts';
 
@@ -571,6 +572,7 @@ export const deepseekLaunch: Builder = (hub, teamFile, role, out, resume = null)
     '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
     `& ${banner}`,
     "$first = @('--first')",
+    '$fails = 0',
     `while (-not (Test-Path -LiteralPath ${marker})) {`,
     `    & ${waiter} @first`,
     '    if ($LASTEXITCODE -ne 0) { break }',
@@ -579,6 +581,14 @@ export const deepseekLaunch: Builder = (hub, teamFile, role, out, resume = null)
     "    $resume = if ($sid) { @('--session-id', $sid) } else { @() }",
     `    $prompt = if ($sid) { ${ps(deepseekWake(role))} } else { ${ps(deepseekKickoff(role))} }`,
     `    & ${dsh} @resume $prompt | & ${viewer}`,
+    // A run that did nothing failed before it began (a sign-in, say) and read no mail, so the waiter would return
+    // at once: wait longer each time (10 s, 20 s ... 5 min) instead of starting it over and over.
+    `    if ($LASTEXITCODE -eq ${NO_RUN}) {`,
+    '        $fails++',
+    '        $pause = [int][Math]::Min(300, 10 * [Math]::Pow(2, $fails - 1))',
+    '        Write-Host "agent-org: DeepSeek ended without starting ($fails in a row): trying again in $pause s." -ForegroundColor DarkYellow',
+    '        Start-Sleep -Seconds $pause',
+    '    } else { $fails = 0 }',
     '}',
   ].join('\n');
   return launch(role, 'deepseek', command, [], env, { script });

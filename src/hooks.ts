@@ -180,6 +180,7 @@ export function onPostTool(me: RoleSession, _payload: Payload): HookOut {
   const parts = synced ? [synced] : [];
   if (urgent.length) { // urgent messages interrupt the current work, in full
     me.store.markRead(urgent.map((m) => m.id));
+    me.startTasks(urgent); // read in full here: an urgent task starts now, so its edits are recorded against it
     parts.push(`agent-org: URGENT message(s) for you. Deal with them before you continue:\n\n${fmtMessages(urgent)}`);
   }
   if (rest.length) {

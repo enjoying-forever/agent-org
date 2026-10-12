@@ -436,12 +436,16 @@ pre-approved). On top of that, agent-org holds every agent to these limits:
   project - are not touched.
 - **Secrets stay out of git history.** New work that adds a private key or an API token
   (`sk-...`, AWS, GitHub, Google, Slack keys, passwords in code) is refused, with the file
-  and line but never the value, until it reads them from the environment instead.
+  and line but never the value, until it reads them from the environment instead. With git
+  branches, a secret written and taken out again does not reach main through the earlier
+  commit either: that agent's work lands as one commit.
 - **Nobody gives more than they have.** A manager can only hire or change agents with files
   it may write itself, and the team cannot grow past `max_agents` in `team.yaml` (12 by
   default). A new hire does not start past the running limit.
 - **With git branches, scope is checked at the door:** work only reaches main if every file
-  it changed is in the agent's write scope - including files written through the shell.
+  it changed is in the agent's write scope - including files written through the shell. What
+  lands is what the checks passed: if main moved on while they ran, they run again on the new
+  combination; a task cancelled meanwhile does not land.
 - Every refusal is recorded in *Activity* (kind "safety"). The command guard and the secret
   check can be turned off in `team.yaml` (`guard_commands`, `scan_secrets`) if a project really needs it.
 

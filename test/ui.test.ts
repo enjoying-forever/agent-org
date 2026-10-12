@@ -642,3 +642,15 @@ test('the page remembers its preferences in agent-org, and gets them inside the 
   await server.ok('/api/prefs', { key: 'agent-org-theme', value: null }); // forgotten
   assert.ok(!('agent-org-theme' in (await prefsIn(signedIn)).prefs));
 });
+
+test('an unfinished task stays on the Board however many newer ones finished', async (t) => {
+  // reported: the page got the latest 60 tasks only, so 60 newer closed ones pushed an open one off the Board
+  const server = await startServer(t);
+  const lead = server.app.hub.session('tech-lead');
+  const old = lead.assignTask('worker-a', 'The old open one');
+  for (let i = 0; i < 61; i++) lead.cancelTask(lead.assignTask('worker-b', `Later ${i}`).id, 'not needed');
+  const tasks = (server.app.state() as { tasks: { id: number }[] }).tasks;
+  assert.ok(tasks.some((x) => x.id === old.id), 'the old open task is there');
+  assert.ok(tasks.length >= 61 && tasks.length <= 62);
+  assert.deepEqual(tasks.map((x) => x.id), [...tasks.map((x) => x.id)].sort((a, b) => a - b)); // oldest first, as before
+});
