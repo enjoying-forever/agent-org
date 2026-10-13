@@ -471,7 +471,7 @@ test('one teammate changed, moved and removed', async (t) => {
   assert.ok(code === 400 && body.error.includes(`#${task.id}`));
   server.app.me.cancelTask(task.id);
   // then whoever reported to it reports to its superior
-  assert.deepEqual(await server.ok('/api/teammate-remove', { name: 'tech-lead' }), { removed: 'tech-lead', moved_to: 'leader' });
+  assert.deepEqual(await server.ok('/api/teammate-remove', { name: 'tech-lead' }), { removed: 'tech-lead', moved_to: 'leader', dismissed: [] });
   assert.ok(!('tech-lead' in roles()) && roles()['worker-b'].superior === 'leader');
 });
 

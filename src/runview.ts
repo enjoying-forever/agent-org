@@ -78,7 +78,8 @@ export class View {
   lastText = '';
   used: Record<string, number> = {}; // this run's token counts (DeepSeek reports them per step)
   /** Told of each tool call as it starts (with its name and input) and as it ends (without). */
-  onTool: (name?: string, input?: unknown) => void = () => {};
+  // a tool call starts (name, input) or ends (no name); id: the call's own, when the event names one
+  onTool: (name?: string, input?: unknown, id?: string) => void = () => {};
   private readonly out: Writable;
 
   constructor(out: Writable) {
@@ -114,9 +115,9 @@ export class View {
       for (const t of String(e.text ?? '').trim().split(/\r?\n/)) if (t.trim()) this.line(`${DIM}✻ ${t}${RESET}`);
     } else if (kind === 'tool_call') {
       this.line(callLine(String(e.tool ?? '?'), e.input));
-      this.onTool(String(e.tool ?? '?'), e.input);
+      this.onTool(String(e.tool ?? '?'), e.input, callId(e));
     } else if (kind === 'tool_result') {
-      this.onTool();
+      this.onTool(undefined, undefined, callId(e));
       const ok = e.status == null || ['completed', 'ok', 'success'].includes(e.status);
       for (const t of resultLines(e.result ?? e.error ?? '', ok, String(e.status ?? ''))) this.line(t);
     } else if (kind === 'text' || kind === 'final') {
@@ -171,13 +172,24 @@ export class View {
       const info = step.tool_info ?? {};
       if (state === 'ACTIVE') {
         this.line(callLine(String(step.tool_name || info.name || '?'), info.parameters));
-        this.onTool(String(step.tool_name || info.name || '?'), info.parameters);
+        this.onTool(String(step.tool_name || info.name || '?'), info.parameters, callId(step, info, e));
       } else if (['DONE', 'ERROR', 'FAILED', 'CANCELLED'].includes(state)) {
-        this.onTool();
+        this.onTool(undefined, undefined, callId(step, info, e));
         for (const t of resultLines(info.output || info.error || 'done', state === 'DONE', state.toLowerCase())) this.line(t);
       }
     }
   }
+}
+
+/** The id a tool event gives its call, under the names programs use for it; undefined when it gives none. */
+function callId(...parts: Record<string, unknown>[]): string | undefined {
+  for (const p of parts) {
+    for (const key of ['callId', 'call_id', 'toolCallId', 'tool_call_id', 'step_id', 'stepId', 'id']) {
+      const v = p?.[key];
+      if (typeof v === 'string' || typeof v === 'number') return String(v);
+    }
+  }
+  return undefined;
 }
 
 const WHALE = ['   ▄▄▄▄▄▄   ', ' ▄█▀▀▀▀▀▀█▄▄', '▐█ ●     ▀▀█', ' ▀█▄▄▄▄▄▄█▀ '];
@@ -265,7 +277,7 @@ async function recorder(teamFile: string | undefined, role: string | undefined):
     const [{ Hub }, { describeAction }] = await Promise.all([import('./hub.ts'), import('./hooks.ts')]);
     const hub = Hub.open(teamFile);
     const root = hub.rootOf(role);
-    const running: string[] = []; // calls started and not ended, oldest first
+    const running: [string | undefined, string][] = []; // [call id, what] of the calls started and not ended, oldest first
     const safely = (f: () => void): void => {
       try {
         f();
@@ -274,15 +286,20 @@ async function recorder(teamFile: string | undefined, role: string | undefined):
       }
     };
     return {
-      tool: (name, input) => safely(() => {
+      tool: (name, input, id) => safely(() => {
         if (name === undefined) {
-          const what = running.shift();
-          if (what !== undefined) hub.store.noteAction(role, what, false);
+          // the call that ended, by its id - the oldest only when the events name none (seen: B ended first, and
+          // the page said A had ended and B still ran)
+          let at = id === undefined ? -1 : running.findIndex(([i]) => i === id);
+          if (at < 0) at = id === undefined || !running.some(([i]) => i !== undefined) ? 0 : -1;
+          if (at < 0 || at >= running.length) return;
+          const [[, what]] = running.splice(at, 1);
+          hub.store.noteAction(role, what, false);
           return;
         }
         const what = describeAction({ tool_name: name, tool_input: input ?? {} }, root);
         if (what === null) return;
-        running.push(what);
+        running.push([id, what]);
         hub.store.noteAction(role, what, true);
       }),
       end: () => safely(() => {

@@ -522,6 +522,7 @@ export class App {
       if (!(hub.team.roles[p.role]?.harness in launch.BUILDERS)) continue;
       if (p.kind === 'stuck') {
         await this.stopAgent(hub, p.role);
+        if (this.hubOrNull !== hub) return; // another team opened while it stopped: none of these starts is its
         if (hub.store.online()[p.role]) { // its program did not stop: leave it for a while
           this.autostarted.set(p.role, now);
           hub.event('agent', p.role, 'could not be restarted automatically: its program did not stop');
@@ -954,9 +955,13 @@ export class App {
     if (!(role in this.hub.team.roles)) throw new ApiError(`'${role}' is not a role`);
     const why = launch.cannotStart(this.inWindow);
     if (why) throw new ApiError(why); // before stopping it: it could not come back
-    const stopped = await this.stopAgent(this.hub, role);
+    const hub = this.hub; // the team it is restarted in, whatever is opened while it stops
+    const stopped = await this.stopAgent(hub, role);
+    if (this.hubOrNull !== hub) { // seen: A's agent stopped, and B's of the same name started
+      throw new ApiError(`${role} was stopped; another team was opened meanwhile, so it was not started again. Start it from its own team.`, 409);
+    }
     const result = this.launch({ roles: [role] }) as Body;
-    this.hub.event('agent', role, 'restarted by the owner');
+    hub.event('agent', role, 'restarted by the owner');
     return { stopped, ...result };
   }
 
@@ -1212,6 +1217,8 @@ export class App {
     const team = this.hub.baseTeam;
     if (!(name in team.roles)) throw new ApiError(`'${name}' is not in team.yaml`);
     if (this.hub.store.online()[name]) throw new ApiError(`${name} is running: stop it first.`);
+    // still starting in this window (a trust prompt, a sign-in): no hub connection yet, but its program runs
+    if (this.startingTerm(this.hub, name)) throw new ApiError(`${name}'s program is running in its pane: stop it first.`);
     // its unfinished tasks would stay open with nobody to do them (and keep their assigners waiting)
     const busy = this.hub.store.tasks({ assignee: name, openOnly: true });
     if (busy.length) {
@@ -1219,6 +1226,7 @@ export class App {
         + 'cancel them first, on the Board.');
     }
     const superior = team.roles[name].superior;
+    const helpers = this.hub.dismissHelpersOf(name, team.owner);
     try {
       this.hub.editTeam((config) => {
         const roles = (config.roles ?? {}) as Body;
@@ -1233,7 +1241,7 @@ export class App {
     }
     for (const lock of this.hub.store.locks(name)) this.hub.store.release(this.hub.lockKey(lock.path)[0]);
     this.hub.event('team', team.owner, `removed ${name} from the team`);
-    return { removed: name, moved_to: superior };
+    return { removed: name, moved_to: superior, dismissed: helpers };
   }
 
   saveTeam(body: Body): Json {

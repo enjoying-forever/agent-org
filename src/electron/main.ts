@@ -206,17 +206,35 @@ async function viewOnce(url: string, opts: ui.ViewOptions): Promise<ui.PageView>
     await timed(contents.loadURL(url), 30, 'loading the page');
     await settle(800); // its scripts draw it
     for (const step of opts.steps ?? []) {
-      notes.push(`${step}: ${await doStep(contents, step)}`);
-      await settle(400);
+      const before = contents.getURL();
+      const did = await doStep(contents, step);
+      await calm(contents, settle);
+      const now = contents.getURL();
+      notes.push(`${step}: ${did}${now !== before ? ` - it went to ${now}` : ''}`);
     }
-    const shot = await contents.capturePage({ x: 0, y: 0, width, height }); // the size asked for, whatever the frame
-    const size = shot.getSize();
-    const image = (size.width > 1280 ? shot.resize({ width: 1280 }) : shot).toJPEG(72).toString('base64');
-    const text = String(await contents.executeJavaScript('document.body ? document.body.innerText : ""')).slice(0, 8000);
-    return { url: contents.getURL(), title: contents.getTitle(), text, errors, notes, image, width: size.width, height: size.height };
+    // the screenshot, the text and the address of one page: taken once it is loaded, again if it moved meanwhile
+    // (seen: a link's slow page - its address and text, with the old page's screenshot)
+    for (let round = 0; ; round++) {
+      await calm(contents, settle);
+      const at = contents.getURL();
+      const shot = await contents.capturePage({ x: 0, y: 0, width, height }); // the size asked for, whatever the frame
+      const text = String(await contents.executeJavaScript('document.body ? document.body.innerText : ""')).slice(0, 8000);
+      if ((contents.getURL() !== at || contents.isLoading()) && round < 3) continue;
+      const size = shot.getSize();
+      const image = (size.width > 1280 ? shot.resize({ width: 1280 }) : shot).toJPEG(72).toString('base64');
+      return { url: at, title: contents.getTitle(), text, errors, notes, image, width: size.width, height: size.height };
+    }
   } finally {
     page.destroy();
   }
+}
+
+/** After a step: a page it began to load has loaded (up to 20 s), and its scripts have had a moment. */
+async function calm(contents: Electron.WebContents, settle: (ms: number) => Promise<void>): Promise<void> {
+  await settle(400); // a click's navigation starts a moment after it
+  const end = Date.now() + 20_000;
+  while (contents.isLoading() && Date.now() < end) await settle(100);
+  await settle(300);
 }
 
 // in the page: an element as the agent can check it was the one it meant - <button.buy> "Add to cart"

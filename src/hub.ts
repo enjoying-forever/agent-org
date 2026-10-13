@@ -378,6 +378,25 @@ export class Hub {
   }
 
   /** Agents that cannot work right now, as the watchdog last saw them: role -> kind, text, at, until. */
+  /** Before a role leaves the team: the consultants helping it go first - their files back to it, their programs
+   * stopped (seen: removed with one still attached, the consultant pointed at nobody, and the team could no
+   * longer be read at all - not even to dismiss it). Returns their names. */
+  dismissHelpersOf(name: string, by: string): string[] {
+    const gone: string[] = [];
+    for (const c of this.store.activeConsultants().filter((x) => x.helped === name)) {
+      const cname = consultantName(c);
+      this.store.dismissConsultant(cname, by);
+      try {
+        this.stopper?.(cname);
+      } catch {
+        // its terminal can be closed by hand
+      }
+      this.event('consultant', by, `dismissed ${cname}: ${name} left the team`);
+      gone.push(cname);
+    }
+    return gone;
+  }
+
   stuck(): Record<string, StuckInfo> {
     try {
       const found = JSON.parse(this.store.getSetting('stuck') || '{}');
@@ -1197,7 +1216,8 @@ export class RoleSession {
       throw new HubError(`${name} still has unfinished tasks (${busy.map((t) => `#${t.id}`).join(', ')}): reassign_task or cancel_task them first`);
     }
     const above = team.roles[name].superior;
-    const moved = team.subordinatesOf(name);
+    const moved = team.subordinatesOf(name).filter((s) => !team.roles[s].is_consultant); // consultants are not in team.yaml: they go
+    this.hub.dismissHelpersOf(name, this.name);
     if (this.hub.stopper !== null) {
       try {
         this.hub.stopper(name);

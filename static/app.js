@@ -478,7 +478,7 @@ async function browse(input, title) {
 
 // ---------- one folder, open or start: what it holds decides ----------
 
-const FOLDER = { asked: '', info: null }; // the folder typed, and what agent-org says it holds
+const FOLDER = { asked: '', info: null, infoFor: null }; // the folder typed; what agent-org says it holds, and for which folder
 
 /** The folder field: a folder with a team opens it; any other gets a new one (seen: two cards, each a folder
  * and Browse, one to open and one to create - which one was yours to know). */
@@ -491,6 +491,7 @@ async function lookAtFolder() {
   }
   if ($('#create-path').value.trim() !== text) return; // typed on meanwhile: that answer is for an older folder
   FOLDER.info = info;
+  FOLDER.infoFor = text;
   const status = $('#folder-status');
   const hasTeam = Boolean(info?.team_file);
   status.hidden = !text;
@@ -509,7 +510,10 @@ $('#create-browse').addEventListener('click', async () => {
 });
 $('#create-go').addEventListener('click', async () => {
   const folder = $('#create-path').value.trim();
-  if (folder && FOLDER.asked !== folder) await lookAtFolder(); // pressed before the look answered
+  // what is known about this very folder - not an answer still on its way, nor one about the folder before it
+  // (seen: B typed, A's answer still there, and A opened)
+  if (folder && FOLDER.infoFor !== folder) await lookAtFolder();
+  if (folder !== $('#create-path').value.trim() || FOLDER.infoFor !== folder) return; // changed while it looked: press again
   if (FOLDER.info?.team_file) { await openTeam(FOLDER.info.team_file); return; }
   const template = document.querySelector('#templates input:checked')?.value;
   if (!folder) { toast('Choose the project folder first.', true); return; }
