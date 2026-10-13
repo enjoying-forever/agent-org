@@ -72,7 +72,7 @@
     <div class="panel-btns" id="panel-btns" hidden role="tablist" aria-label="Side panel">
       <button class="icon-btn panel-btn" data-tab="messages" title="Messages (Ctrl+Alt+M)" aria-label="Messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/></svg><span id="inbox-badge" class="badge mini" hidden></span></button>
       <button class="icon-btn panel-btn" data-tab="activity" title="Activity: what happened, newest first" aria-label="Activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg></button>
-      <button class="icon-btn panel-btn" data-tab="files" title="Files being written, and by whom" aria-label="Files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg><span id="files-count" class="badge mini quiet" hidden></span></button>
+      <button class="icon-btn panel-btn" data-tab="files" title="Project files: look, change, and who is writing what (Ctrl+Alt+E)" aria-label="Files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg><span id="files-count" class="badge mini quiet" hidden></span></button>
       <button class="icon-btn panel-btn" data-tab="browser" title="Browser: look at what the team builds (Ctrl+Alt+W)" aria-label="Browser"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></button>
     </div>
     <button id="market-btn" class="ghost" title="Browse the Role Market">Role Market</button>
@@ -169,8 +169,33 @@
       <div id="tab-activity" class="tab" hidden>
         <div id="activity" class="feed activity"></div>
       </div>
-      <div id="tab-files" class="tab" hidden>
-        <div class="feed" style="padding:0"><table class="locks"><thead><tr><th>File</th><th>Being written by</th><th>Since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
+      <div id="tab-files" class="tab files" hidden>
+        <div id="fs-tree-view" class="fs-view">
+          <div class="fs-bar">
+            <span id="fs-root" class="fs-root"></span>
+            <span class="grow"></span>
+            <button type="button" id="fs-refresh" class="icon-btn" title="Look again" aria-label="Look again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg></button>
+            <button type="button" id="fs-collapse" class="icon-btn" title="Close every folder" aria-label="Close every folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20l5-5 5 5M7 4l5 5 5-5"/></svg></button>
+            <button type="button" id="fs-explorer" class="icon-btn" title="Open the project folder in File Explorer" aria-label="Open in File Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          </div>
+          <div id="fs-writing" class="fs-writing" hidden><table class="locks"><thead><tr><th>Being written</th><th>by</th><th>since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
+          <div id="fs-tree" class="fs-tree"></div>
+        </div>
+        <div id="fs-editor" class="fs-view" hidden>
+          <div class="fs-bar">
+            <button type="button" id="fs-back" class="icon-btn" title="Back to the files" aria-label="Back to the files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span id="fs-path" class="fs-path mono"></span>
+            <span id="fs-dirty" class="fs-dirty" title="Not saved" hidden></span>
+            <span class="grow"></span>
+            <button type="button" id="fs-preview" class="icon-btn" title="Open it in the browser" aria-label="Open in the browser" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></button>
+            <button type="button" id="fs-reveal" class="icon-btn" title="Show it in File Explorer" aria-label="Show in File Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+            <button type="button" id="fs-wide" class="icon-btn" title="Wide: the file over the agents' panes, or back" aria-label="Wide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+            <button type="button" id="fs-save" class="primary small" title="Save (Ctrl+S)" disabled>Save</button>
+          </div>
+          <div id="fs-note" class="fs-note" hidden></div>
+          <div id="fs-code" class="fs-code"><pre id="fs-lines" class="fs-lines" aria-hidden="true"></pre><textarea id="fs-text" spellcheck="false" wrap="off" autocomplete="off" aria-label="The file's text"></textarea></div>
+          <div id="fs-status" class="fs-status muted small"></div>
+        </div>
       </div>
       <div id="tab-browser" class="tab browser" hidden>
         <form id="br-bar" class="br-bar" autocomplete="off">
@@ -366,6 +391,7 @@
   <script src="/static/app.js"></script>
   <script src="/static/board.js"></script>
   <script src="/static/browser.js"></script>
+  <script src="/static/files.js"></script>
   <script src="/static/roles.js"></script>
   <script src="/static/layout.js"></script>
   <script src="/static/teammates.js"></script>

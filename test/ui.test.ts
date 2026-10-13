@@ -716,7 +716,7 @@ test("the market sends what each model is good at, for its model pages", async (
 test("the page's scripts share one scope: no name is declared twice", () => {
   // seen: a second `const PROGRAM` in roles.js stopped the whole script, and the Role Market with it
   const seen = new Map<string, string>();
-  for (const file of ['app.js', 'board.js', 'browser.js', 'roles.js', 'layout.js', 'teammates.js']) {
+  for (const file of ['app.js', 'board.js', 'browser.js', 'files.js', 'roles.js', 'layout.js', 'teammates.js']) {
     const text = readFileSync(path.join(ui.STATIC, file), 'utf8');
     for (const m of text.matchAll(/^(?:const|let|var|class|(?:async )?function\*?)\s+([A-Za-z_$][\w$]*)/gm)) {
       assert.ok(!seen.has(m[1]), `${m[1]} is declared in ${seen.get(m[1])} and ${file}`);

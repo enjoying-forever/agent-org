@@ -26,6 +26,7 @@ import { BRANCH_RULE, describeStuck, Hub, HubError, LAW } from './hub.ts';
 import { aboutKey } from './teamtree.ts';
 import * as launch from './launch.ts';
 import * as presets from './presets.ts';
+import * as projectfiles from './projectfiles.ts';
 import * as safety from './safety.ts';
 import { CODE_DIR, inTest, keepRunningOnFaults, which } from './runtime.ts';
 import type { Lock, Message, Task } from './store.ts';
@@ -46,6 +47,7 @@ export const STATIC = path.join(CODE_DIR, '..', 'static');
 const CONTENT_TYPES: Record<string, string> = dict({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' });
 export const MAX_BODY = 1_000_000;
+const FILE_BODY_MAX = 4 * projectfiles.OPEN_MAX; // a file saved from the page: its text, JSON-escaped
 export const TERM_INPUT_MAX = 65536; // characters of terminal input per request
 export const NO_TEAM = 'no_team'; // error the page answers by showing the welcome screen
 export const WATCH_EVERY = 30; // seconds between watchdog patrols
@@ -462,6 +464,67 @@ export class App {
       spawn('explorer.exe', [`/select,"${file}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
     }
     return { shown: file };
+  }
+
+  /** The project's folders the page has open, each listed (or why not: gone since, say). */
+  projectFolders(dirs: string): Json {
+    let names: unknown;
+    try { names = JSON.parse(dirs || '[""]'); } catch { names = null; }
+    if (!Array.isArray(names) || names.length > 200) throw new ApiError('dirs: a list of folders in the project');
+    const root = this.hub.baseTeam.project_root;
+    const out: Record<string, Json> = {};
+    for (const d of names.map(String)) {
+      try { out[d] = projectfiles.list(root, d) as unknown as Json; } catch (e) {
+        if (!(e instanceof projectfiles.FileError)) throw e;
+        out[d] = { error: e.message };
+      }
+    }
+    return { root, dirs: out };
+  }
+
+  /** One of the project's files, to read and change in the page. With the `version` the page has: only whether it
+   * is still that one (the page looks again every few seconds while it shows the file). */
+  projectFile(rel: string, version: string): Json {
+    const root = this.hub.baseTeam.project_root;
+    const held_by = this.fileHolder(rel);
+    if (version && projectfiles.versionNow(root, rel) === version) return { same: true, held_by };
+    return { ...projectfiles.read(root, rel), held_by };
+  }
+
+  /** Who other than the owner is writing `rel` now ('' for nobody). Branch mode has no leases: each agent writes
+   * in its own copy, and what the owner saves goes into main. */
+  fileHolder(rel: string): string {
+    if (this.hub.branches) return '';
+    try {
+      const lock = this.hub.store.covering(this.hub.lockKey(rel)[0]);
+      return lock !== null && lock.owner !== this.hub.baseTeam.owner ? this.me.heldBy(lock) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /** Save the owner's change to a project file. Not over an agent writing it, nor over a change made since the
+   * page read it, unless the owner said so (`over_lease`, `over_change`). In branch mode it is committed to main
+   * at once, as a landing is: the agents take it in with main, and a dirty main would stop their landings. */
+  async fileSave(body: Body): Promise<Json> {
+    const root = this.hub.baseTeam.project_root;
+    const owner = this.hub.baseTeam.owner;
+    const rel = str(body, 'path');
+    const held_by = this.fileHolder(rel);
+    if (held_by && !body.over_lease) return { saved: false, held_by };
+    const save = (): Json => {
+      const r = projectfiles.write(root, rel, body.text as string, String(body.version ?? ''), Boolean(body.over_change));
+      if (!r.written) return { saved: false, changed: true, path: r.path };
+      this.hub.event('file', owner, `edited ${r.path}${held_by ? ` while ${held_by} was writing it` : ''}`);
+      if (!this.hub.branches || !gitops.isOwnRepo(root)) return { saved: true, version: r.version, path: r.path, size: r.size };
+      const secrets = this.hub.baseTeam.settings.scan_secrets ? safety.findSecrets(gitops.diff(root, [r.path])) : [];
+      if (secrets.length) {
+        return { saved: true, version: r.version, path: r.path, size: r.size,
+          note: `Saved, not committed: it looks like it holds a secret (${secrets.join(', ')}). Until it is committed or undone, landings that touch it stop.` };
+      }
+      return { saved: true, version: r.version, path: r.path, size: r.size, committed: gitops.commit(root, [r.path], `${owner}: edit ${r.path}`) };
+    };
+    return this.hub.branches ? gitops.withLandLock(root, save) : save();
   }
 
   /** Open a web link from an agent's terminal in the owner's own browser (a sign-in page, say). */
@@ -1279,6 +1342,8 @@ export const GET_ROUTES: Record<string, Route> = {
   '/api/messages': (app, query: Query) => app.messages(int(q(query, 'after', '0'), 'after')),
   '/api/previews': (app) => app.previews(),
   '/api/folder': (app, query: Query) => app.folder(q(query, 'path', '')),
+  '/api/files': (app, query: Query) => app.projectFolders(q(query, 'dirs', '')),
+  '/api/file': (app, query: Query) => app.projectFile(q(query, 'path'), q(query, 'version', '')),
   '/api/team': (app) => app.teamConfig(),
   '/api/law': (app) => app.law(),
   '/api/checks': (app, query: Query) => app.checks(q(query, 'fresh', '0') === '1'),
@@ -1311,6 +1376,7 @@ export const POST_ROUTES: Record<string, Route> = {
   '/api/role-restore': post(App.prototype.roleRestore),
   '/api/term-input': post(App.prototype.termInput), '/api/term-resize': post(App.prototype.termResize), '/api/open-url': post(App.prototype.openUrl),
   '/api/open-folder': post(App.prototype.openFolder), '/api/reveal': post(App.prototype.revealFile),
+  '/api/file-save': post(App.prototype.fileSave),
   '/api/window': post(App.prototype.windowAction), '/api/prefs': post(App.prototype.setPref),
   '/api/teammate': post(App.prototype.teammateUpdate), '/api/teammate-remove': post(App.prototype.teammateRemove),
 };
@@ -1410,6 +1476,7 @@ function handler(app: App, access: Access, port: () => number): http.RequestList
     } catch (e) {
       if (e instanceof ApiError) json(req, res, e.status, { error: e.message });
       else if (e instanceof HubError) json(req, res, 409, { error: e.message });
+      else if (e instanceof projectfiles.FileError) json(req, res, e.status, { error: e.message });
       else if (e instanceof TeamError) json(req, res, 400, { error: `team problem: ${e.message}` });
       else if (e instanceof BadRequest) json(req, res, 400, { error: `bad request: ${e.message}` });
       else {
@@ -1489,7 +1556,7 @@ function handler(app: App, access: Access, port: () => number): http.RequestList
     const declared = header(req, 'Content-Length');
     if (declared === undefined || !/^\d+$/.test(declared.trim())) return json(req, res, 411, { error: 'Content-Length is required' });
     const length = Number(declared);
-    if (length > MAX_BODY) return json(req, res, 413, { error: 'too large' });
+    if (length > (url.pathname === '/api/file-save' ? FILE_BODY_MAX : MAX_BODY)) return json(req, res, 413, { error: 'too large' });
     if ((header(req, 'Content-Type') ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') {
       return json(req, res, 415, { error: 'the body must be JSON' });
     }

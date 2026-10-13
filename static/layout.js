@@ -38,20 +38,25 @@ function applyChrome() {
   $('#app').classList.toggle('no-rail', !L.rail); // the sidebar is the whole app's
   $('#app').style.setProperty('--rail-w', `${L.railW}px`);
   view.classList.toggle('no-side', !L.side);
-  view.style.setProperty('--side-w', `${S.sideTab === 'browser' ? browserWidth() : Math.max(320, L.sideW)}px`); // older layouts allowed 280
+  view.style.setProperty('--side-w', `${S.sideTab === 'browser' ? browserWidth() : S.sideTab === 'files' ? filesWidth() : Math.max(320, L.sideW)}px`); // older layouts allowed 280
   $('#rail-toggle').classList.toggle('on', L.rail);
   for (const b of document.querySelectorAll('.panel-btn')) {
     const on = L.side && b.dataset.tab === S.sideTab;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', String(on));
   }
-  view.classList.toggle('side-full', L.side && S.sideTab === 'browser' && Boolean(L.browserWide)); // the browser over the panes
+  view.classList.toggle('side-full', L.side && Boolean(S.sideTab === 'browser' ? L.browserWide : S.sideTab === 'files' && L.filesWide)); // the browser, or a file, over the panes
 }
 
 /** The panel's width while it shows the browser: wider than for messages (a page needs room), as you left it. */
 function browserWidth() {
   const most = Math.max(360, innerWidth * 0.75);
   return Math.round(Math.min(Math.max(L.browserW || innerWidth * 0.45, 360), most));
+}
+
+/** The panel's width while it shows the project's files: as you left it, a little wider than for messages at first. */
+function filesWidth() {
+  return Math.round(Math.min(Math.max(L.filesW || Math.max(L.sideW, 400), 320), Math.max(320, innerWidth * 0.75)));
 }
 
 /** Where each visible pane goes: a grid of `cols` x `rows`, each pane at (c, r) spanning (cs, rs). */
@@ -226,6 +231,7 @@ function dragEdge(e) {
     const d = ev.clientX - start;
     if (edge === 'rail') L.railW = Math.min(Math.max(base + d, 160), 420);
     else if (S.sideTab === 'browser') L.browserW = Math.min(Math.max(base - d, 360), Math.max(360, innerWidth * 0.75));
+    else if (S.sideTab === 'files') L.filesW = Math.min(Math.max(base - d, 320), Math.max(320, innerWidth * 0.75));
     else L.sideW = Math.min(Math.max(base - d, 320), Math.max(320, innerWidth * 0.5)); // narrower, the message box no longer fits
     applyChrome();
   };
@@ -405,6 +411,8 @@ const SHORTCUTS = [
   ['Ctrl+Alt+B', 'Show or hide the sidebar'],
   ['Ctrl+Alt+M', 'Show or hide the messages'],
   ['Ctrl+Alt+W', 'The browser beside the team, or back to the messages'],
+  ['Ctrl+Alt+E', 'The project files beside the team, or closed'],
+  ['Ctrl+S', 'In a file open in the Files tab: save it'],
   ['Ctrl+Alt+= / - / 0', 'Bigger, smaller or normal text in the terminals (or Ctrl+wheel over one)'],
   ['Ctrl+C / Ctrl+V', 'In a terminal: copy the selection (without one, Ctrl+C interrupts) / paste'],
   ['Right-click', 'In a terminal: copy the selection, or paste'],
@@ -412,7 +420,7 @@ const SHORTCUTS = [
 
 function isShortcut(e) {
   return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey
-    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyT', 'KeyB', 'KeyM', 'KeyW', 'Equal', 'Minus',
+    && (/^Digit[0-9]$/.test(e.code) || ['Enter', 'ArrowLeft', 'ArrowRight', 'KeyT', 'KeyB', 'KeyM', 'KeyW', 'KeyE', 'Equal', 'Minus',
       'NumpadAdd', 'NumpadSubtract'].includes(e.code));
 }
 
@@ -436,6 +444,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyB') { L.rail = !L.rail; applyChrome(); saveLayout(); return; }
   if (e.code === 'KeyM') { togglePanel('messages'); return; }
   if (e.code === 'KeyW') { toggleBrowser(); return; }
+  if (e.code === 'KeyE') { showView('team'); togglePanel('files'); return; }
   if (['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0'].includes(e.code)) {
     zoomTerms(e.code === 'Digit0' ? 0 : ['Equal', 'NumpadAdd'].includes(e.code) ? 1 : -1);
     return;

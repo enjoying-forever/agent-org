@@ -104,7 +104,7 @@ agent carries on where it stopped.
   button at the top picks *Grid*, *Focus* (one big pane, the rest stacked beside it),
   *Columns* or *Rows*; drag the borders between panes (double-click one to even them out)
   and the edges of the sidebar and the side panel, or hide either at the top. The side panel
-  is chosen by four small icons in the title bar - messages, activity, files being written, the
+  is chosen by four small icons in the title bar - messages, activity, the project's files, the
   browser; clicking the one that is open closes it. Each pane has *Full screen* (Esc, outside a terminal, comes back) and *Close* (the
   agent keeps running; click it in the sidebar to bring the pane back). What waits for you
   shows where it is: a stuck agent or a second session in its pane's title, unread messages
@@ -138,6 +138,13 @@ agent carries on where it stopped.
   of a task's changes has a *preview* link. A page there runs in a session of its own - without Node, agent-org's
   sign-in or its permissions. Its ⋯ menu finds the team's local servers, opens developer tools or your own
   browser; the arrows button lays it over the agents' panes, and back.
+- **Files** (the page icon at the top; Ctrl+Alt+E): the project folder as a tree - open a file to read
+  or change it, Ctrl+S saves (line ends and encoding as they were). The files being written are on
+  top, with who writes each and *Release*, and marked in the tree. Saving over an agent that is
+  writing the file, or over a change made on disk since you opened it, asks first; a change on disk
+  with nothing unsaved here just shows. In branch mode what you save is committed to main at once,
+  so the agents take it in. Only text files up to 1 MB open; git's and agent-org's own folders are
+  not shown, and nothing outside the project is reached.
 - **Agents look too:** with `view_page` an agent opens a page in this browser, out of sight - a
   port, a local address or a file in its copy of the project, at desktop or phone size, after a
   few steps (click, type, press, scroll, wait) - and gets back what it says, the errors in its

@@ -382,6 +382,7 @@ function leaveTeam() {
   $('#drawer').hidden = true;
   resetActivity();
   browserLeave();
+  filesLeave();
 }
 
 /** Back in a team: what you were writing there when you left it. */
@@ -2053,11 +2054,11 @@ function renderLocks() {
   S.locksKey = key;
   $('#files-count').textContent = locks.length || '';
   $('#files-count').hidden = !locks.length;
-  $('#locks').replaceChildren(...(locks.length
-    ? locks.map((l) => h('tr', {},
-      h('td', { class: 'mono' }, l.path), h('td', {}, l.owner), h('td', { class: 'muted' }, fmtTime(l.claimed_at)),
-      h('td', {}, h('button', { class: 'small', onclick: () => release(l.path) }, 'Release'))))
-    : [h('tr', {}, h('td', { colspan: 4, class: 'empty' }, 'Nobody is writing any file.'))]));
+  $('#fs-writing').hidden = !locks.length; // above the project's tree, only while someone writes
+  $('#locks').replaceChildren(...locks.map((l) => h('tr', {},
+    h('td', { class: 'mono', title: l.reason || '' }, l.path), h('td', {}, l.owner), h('td', { class: 'muted' }, fmtTime(l.claimed_at)),
+    h('td', {}, h('button', { class: 'small', onclick: () => release(l.path) }, 'Release')))));
+  if (S.sideTab === 'files') fsRenderTree(); // the writers marked in it
 }
 
 // ---------- actions ----------
@@ -2159,6 +2160,7 @@ function showTab(t) {
   applyChrome(); // which icon is lit; the browser has its own, wider width
   if (t === 'messages') stickFeed();
   if (t === 'browser') browserShown();
+  if (t === 'files') filesShown();
 }
 
 /** A side panel's icon in the title bar: shows that panel, or - the one open - closes the side. */

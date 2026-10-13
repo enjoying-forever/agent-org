@@ -1153,3 +1153,41 @@ dialog.ask { width: min(460px, calc(100vw - 32px)); }
 #folder-card #start-team { margin-top: 10px; }
 #folder-card #create-go { margin-top: 14px; }
 .ask-check { display: flex; gap: 8px; align-items: center; margin: -4px 0 14px; font-size: 13.5px; }
+
+/* the Files tab: the project as a tree, and a file in it */
+.files .fs-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fs-bar { display: flex; gap: 2px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--edge); min-height: 41px; }
+.fs-bar .icon-btn { width: 26px; height: 26px; flex-shrink: 0; }
+.fs-root { font-weight: 600; font-size: 13px; padding-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding: 0 4px; }
+.fs-dirty { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); flex-shrink: 0; }
+.fs-bar #fs-save { margin-left: 4px; padding: 3px 12px; }
+.fs-bar #fs-save:disabled { opacity: 0.45; cursor: default; }
+.team-view.side-full #fs-wide { color: var(--accent-ink); background: var(--accent-wash); }
+.fs-writing { border-bottom: 1px solid var(--edge); max-height: 30%; overflow-y: auto; flex-shrink: 0; }
+.fs-writing .locks th, .fs-writing .locks td { padding: 5px 10px; font-size: 12.5px; }
+.fs-writing .locks th { font-weight: 600; }
+.fs-tree { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
+.fs-row { display: flex; align-items: center; gap: 4px; width: 100%; padding: 3px 10px 3px 8px; border: 0; border-radius: 0;
+  background: none; color: var(--ink); font: 13px/1.45 var(--font-ui); text-align: left; cursor: pointer; white-space: nowrap; }
+.fs-row:hover { background: var(--sheet-2); }
+.fs-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.fs-row.on { background: var(--accent-wash); }
+.fs-chev { width: 12px; flex-shrink: 0; color: var(--faint); font-size: 10px; text-align: center; }
+.fs-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fs-row.dir .fs-name { font-weight: 550; }
+.fs-writer { margin-left: auto; padding: 0 6px; border-radius: 8px; font-size: 11px; color: var(--signal); background: var(--signal-wash); flex-shrink: 0; }
+.fs-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); flex-shrink: 0; }
+.fs-more { padding: 3px 0; }
+.fs-note { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; font-size: 12.5px;
+  background: var(--signal-wash); border-bottom: 1px solid var(--edge); }
+.fs-code { flex: 1; min-height: 0; display: flex; background: var(--well); }
+.fs-lines, .fs-code textarea { margin: 0; padding: 8px 0; font: 12.5px/1.55 var(--font-code); tab-size: 4; }
+.fs-lines { overflow: hidden; padding-left: 10px; padding-right: 10px; min-width: 3ch; text-align: right; color: var(--faint);
+  user-select: none; border-right: 1px solid var(--edge); flex-shrink: 0; }
+.fs-code textarea { flex: 1; min-width: 0; padding-left: 10px; padding-right: 10px; border: 0; border-radius: 0; outline: none; resize: none;
+  background: transparent; color: var(--ink); white-space: pre; overflow: auto; }
+.fs-status { display: flex; gap: 12px; padding: 4px 12px; border-top: 1px solid var(--edge); min-height: 24px; align-items: center; }
+.fs-held { color: var(--signal); }
+.fs-bar .grow { flex: 1; }
+.fs-code textarea, .fs-code textarea:focus { box-shadow: none; width: auto; }
