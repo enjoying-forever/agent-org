@@ -116,3 +116,76 @@ export function write(root: string, rel: string, text: string, version: string, 
   const bytes = readFileSync(full);
   return { written: true, version: versionOf(bytes), path: now.path, size: bytes.length };
 }
+
+// finding a file: by part of its name, or as an agent wrote it (with :line)
+
+export const FIND_MAX = 50; // matches shown
+const WALK_MAX = 20000; // files looked through
+const SKIP = new Set(['node_modules', '.git', '.agent-org', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', '.cache']);
+
+/** Every file of the project, as the page names them: git's list (what is tracked, or new and not ignored) where
+ * the folder is its own repository; else a walk that leaves out what is installed or built. */
+export function allFiles(root: string, gitList: (() => string[] | null) | null = null): string[] {
+  const listed = gitList?.() ?? null;
+  if (listed !== null) return listed.filter((f) => !HIDDEN.has(f.split('/')[0].toLowerCase())).slice(0, WALK_MAX);
+  const out: string[] = [];
+  const walk = (dir: string, rel: string): void => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of entries) {
+      if (out.length >= WALK_MAX) return;
+      const p = rel ? `${rel}/${d.name}` : d.name;
+      if (d.isDirectory()) { if (!SKIP.has(d.name.toLowerCase())) walk(path.join(dir, d.name), p); } else if (d.isFile()) out.push(p);
+    }
+  };
+  walk(path.resolve(root), '');
+  return out;
+}
+
+/** The files whose path holds `query`'s letters in order, best first: in the name before in the folders, whole
+ * words before scattered letters, shorter paths first. */
+export function find(files: string[], query: string): string[] {
+  const q = query.trim().toLowerCase().replace(/\\/g, '/');
+  if (!q) return [];
+  const scored: [number, string][] = [];
+  for (const f of files) {
+    const p = f.toLowerCase();
+    const name = p.slice(p.lastIndexOf('/') + 1);
+    let score: number;
+    if (name === q) score = 0;
+    else if (name.split('.')[0] === q) score = 1; // the name without its extension
+    else if (name.startsWith(q)) score = 2;
+    else if (name.includes(q)) score = 3;
+    else if (p.includes(q)) score = 4;
+    else {
+      let at = 0;
+      for (const c of p) if (c === q[at]) at += 1;
+      if (at < q.length) continue;
+      score = 5;
+    }
+    scored.push([score * 10000 + p.length, f]);
+  }
+  const whole = scored.some(([s]) => s < 50000); // the text itself somewhere: letters scattered about are noise
+  return scored.filter(([s]) => !whole || s < 50000).sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+    .slice(0, FIND_MAX).map(([, f]) => f);
+}
+
+/** A path as an agent wrote it - relative to the project or to its own copy, or in full, maybe with :line or
+ * :line:column - as the project's file it names: [the path as the page shows it, the line], or null. */
+export function resolveLink(root: string, text: string): [string, number] | null {
+  const m = /^(.*?)(?::(\d+)(?::\d+)?)?$/.exec(String(text).trim());
+  if (!m || !m[1] || m[1].length > 500) return null;
+  let p = m[1].replace(/\\/g, '/');
+  const base = path.resolve(root).replace(/\\/g, '/');
+  if (/^[a-z]:\//i.test(p) || p.startsWith('/')) {
+    if (!p.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return null;
+    p = p.slice(base.length + 1);
+  }
+  p = p.replace(/^\.\//, '').replace(/^\.agent-org\/worktrees\/[^/]+\//i, ''); // in an agent's copy: the same file in the project
+  try {
+    const [full, shown] = inside(root, p);
+    return statSync(full).isFile() ? [shown, m[2] ? Number(m[2]) : 0] : null;
+  } catch {
+    return null;
+  }
+}

@@ -145,11 +145,17 @@ agent carries on where it stopped.
   with nothing unsaved here just shows. In branch mode what you save is committed to main at once,
   so the agents take it in. Only text files up to 1 MB open; git's and agent-org's own folders are
   not shown, and nothing outside the project is reached.
+  *Find a file* above the tree finds one by part of its name; Ctrl+F finds a word in the open
+  file (Enter: the next, Shift+Enter: the one before). A path to a project file in an agent's
+  terminal, a message or a task (`src/app.ts:42` too) is a link: it opens the file here, at that line.
+  So does a file in a task's list of changes.
 - **Agents look too:** with `view_page` an agent opens a page in this browser, out of sight - a
   port, a local address or a file in its copy of the project, at desktop or phone size, after a
   few steps (click, type, press, scroll, wait) - and gets back what it says, the errors in its
   console and, for Claude and Codex, a screenshot. *Activity* shows who looked at what. It needs
   agent-org's window open.
+- **Reviews:** a task waits for the review of whoever gave it. One the leader gave says so in its
+  window, and *Review it yourself* is there if you want to step in.
 - **Board:** every task in a column by stage - Waiting (for other tasks), To do, In
   progress, Blocked, Review, Finished. Click one to see its whole conversation, what
   "done" means, what it waits for, which files it changed (with the diff; click one to show it in File Explorer), whether the

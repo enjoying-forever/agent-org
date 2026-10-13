@@ -184,11 +184,11 @@ function linkText(text) {
   const out = [];
   let at = 0;
   for (const m of text.matchAll(/\bhttps?:\/\/[^\s"'<>`]*[^\s"'<>`.,;:!?)\]]/g)) {
-    out.push(text.slice(at, m.index), h('a', { href: m[0], class: 'msg-link',
+    out.push(fsFileBits(text.slice(at, m.index)), h('a', { href: m[0], class: 'msg-link',
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); openLink(m[0]); } }, m[0]));
     at = m.index + m[0].length;
   }
-  out.push(text.slice(at));
+  out.push(fsFileBits(text.slice(at))); // a path to a project file: opens it in the Files tab
   return out;
 }
 

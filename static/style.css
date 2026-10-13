@@ -1191,3 +1191,17 @@ dialog.ask { width: min(460px, calc(100vw - 32px)); }
 .fs-held { color: var(--signal); }
 .fs-bar .grow { flex: 1; }
 .fs-code textarea, .fs-code textarea:focus { box-shadow: none; width: auto; }
+.fs-find { margin: 6px 8px 2px; width: auto; padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+.fs-hit.active { background: var(--sheet-2); }
+.fs-hit .fs-dir { margin-left: 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fs-findbar { display: flex; align-items: center; gap: 2px; padding: 5px 8px; border-bottom: 1px solid var(--edge); }
+.fs-findbar input { flex: 1; padding: 4px 10px; font-size: 13px; border-radius: 8px; }
+.fs-findbar .icon-btn { width: 26px; height: 26px; flex-shrink: 0; }
+.fs-findbar #fs-count { padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.file-link { color: var(--accent-ink); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-ink) 40%, transparent);
+  text-underline-offset: 2px; cursor: pointer; }
+.file-link:hover { text-decoration-color: currentColor; }
+.review-by { padding: 10px 0 2px; }
+.fs-code { position: relative; overflow: hidden; }
+.fs-mark { position: absolute; z-index: 1; pointer-events: none; border-radius: 2px;
+  background: color-mix(in srgb, var(--signal) 35%, transparent); outline: 1px solid var(--signal); }

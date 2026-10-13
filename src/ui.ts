@@ -273,6 +273,7 @@ export class App {
   private readonly resumable = new Map<string, [string | null, boolean, number]>();
   private problemsCache: [number, watchdog.Problem[]] = [0, []];
   private historyCache: [number, boolean] = [0, false];
+  private fileList: [number, string, string[]] | null = null; // the project's files, for Find a file
   private readonly autostarted = new Map<string, number>();
   // Agents run in terminals inside the agent-org window when it can host them (Windows with node-pty);
   // otherwise, or with AGENT_ORG_TABS=1, each opens in a Windows Terminal tab.
@@ -489,6 +490,29 @@ export class App {
     const held_by = this.fileHolder(rel);
     if (version && projectfiles.versionNow(root, rel) === version) return { same: true, held_by };
     return { ...projectfiles.read(root, rel), held_by };
+  }
+
+  /** The project's files whose path matches `query` (Find a file, in the Files tab). The list is kept a few
+   * seconds: each letter typed looks again. */
+  findFiles(query: string): Json {
+    const root = this.hub.baseTeam.project_root;
+    if (this.fileList === null || this.fileList[1] !== root || Date.now() - this.fileList[0] > 5000) {
+      const gitList = (): string[] | null => (gitops.isOwnRepo(root)
+        ? gitops.git(root, ['ls-files', '-co', '--exclude-standard']).stdout.split(/\r?\n/).filter(Boolean) : null);
+      this.fileList = [Date.now(), root, projectfiles.allFiles(root, gitList)];
+    }
+    return { files: projectfiles.find(this.fileList[2], query.slice(0, 200)) };
+  }
+
+  /** Which of these paths, as agents wrote them in a terminal or a message, are the project's files. */
+  knownFiles(paths: string): Json {
+    let names: unknown;
+    try { names = JSON.parse(paths || '[]'); } catch { names = null; }
+    if (!Array.isArray(names) || names.length > 200) throw new ApiError('paths: a list of paths');
+    const root = this.hub.baseTeam.project_root;
+    const known: Record<string, Json> = {};
+    for (const p of names.map(String)) known[p] = projectfiles.resolveLink(root, p);
+    return { known };
   }
 
   /** Who other than the owner is writing `rel` now ('' for nobody). Branch mode has no leases: each agent writes
@@ -1344,6 +1368,8 @@ export const GET_ROUTES: Record<string, Route> = {
   '/api/folder': (app, query: Query) => app.folder(q(query, 'path', '')),
   '/api/files': (app, query: Query) => app.projectFolders(q(query, 'dirs', '')),
   '/api/file': (app, query: Query) => app.projectFile(q(query, 'path'), q(query, 'version', '')),
+  '/api/find-files': (app, query: Query) => app.findFiles(q(query, 'q')),
+  '/api/files-known': (app, query: Query) => app.knownFiles(q(query, 'paths')),
   '/api/team': (app) => app.teamConfig(),
   '/api/law': (app) => app.law(),
   '/api/checks': (app, query: Query) => app.checks(q(query, 'fresh', '0') === '1'),

@@ -6,7 +6,7 @@
 // unless you say so. Uses the helpers in app.js (h, api, ask, toast, S) and layout.js (L, applyChrome, saveLayout),
 // and fileUrl, PAGE_FILE and openInBrowser from browser.js.
 
-const FS = { team: '', open: new Set(['']), lists: new Map(), file: null, treeKey: '', ticking: false };
+const FS = { team: '', open: new Set(['']), lists: new Map(), file: null, treeKey: '', ticking: false, mark: null };
 const FS_KEPT = new Map(); // team file -> what the tab had when the page left that team: folders open, a file
 const FS_EVERY_MS = 4000; // how often the tab looks again while it shows
 
@@ -38,7 +38,11 @@ function filesLeave() {
     FS_KEPT.set(FS.team, { open: [...FS.open], file: FS.file, text: FS.file?.text !== undefined ? $('#fs-text').value : undefined });
   }
   Object.assign(FS, { team: '', open: new Set(['']), lists: new Map(), file: null, treeKey: '' });
+  FS_KNOWN.clear(); // another project: other files
+  $('#fs-find').value = '';
+  $('#fs-findbar').hidden = true;
   $('#fs-tree').replaceChildren();
+  fsFindFiles();
   fsShowTree();
 }
 
@@ -118,15 +122,134 @@ function fsToggle(p) {
 
 // ---------- a file ----------
 
-async function fsOpen(p) {
-  if (FS.file?.path === p && !$('#fs-editor').hidden) return;
+async function fsOpen(p, line = 0) {
+  if (FS.file?.path === p && !$('#fs-editor').hidden) { if (line) fsGoLine(line); return; }
   if (FS.file && FS.file.path !== p && fsDirty() && !(await fsDiscard())) return;
   const team = S.state?.team_file;
   try {
     const f = await api(`/api/file?path=${encodeURIComponent(p)}`);
     if (team !== S.state?.team_file) return;
     fsShowFile(f);
+    if (line) fsGoLine(line);
   } catch (e) { toast(e.message, true); }
+}
+
+/** Open a project file in the Files tab, at a line: from a path in a terminal, a message or a task. */
+function fsOpenAt(p, line = 0) {
+  if (S.mode !== 'team' || !S.state) return;
+  for (const id of ['#task-dialog']) if ($(id).open) $(id).close();
+  showView('team');
+  showTab('files');
+  fsOpen(p, line);
+}
+
+/** Select line `n` of the open file and bring it into view, a third of the way down. */
+function fsGoLine(n) {
+  const ta = $('#fs-text');
+  const lines = ta.value.split('\n');
+  const at = Math.min(Math.max(n, 1), lines.length);
+  const start = lines.slice(0, at - 1).reduce((sum, l) => sum + l.length + 1, 0);
+  fsSelect(start, start + lines[at - 1].length);
+}
+
+/** Select [from, to] in the text and scroll it into view (a textarea does not, while it lacks the focus). */
+function fsSelect(from, to, focus = true) {
+  const ta = $('#fs-text');
+  if (focus) ta.focus();
+  ta.setSelectionRange(from, to);
+  const line = ta.value.slice(0, from).split('\n').length;
+  const height = parseFloat(getComputedStyle(ta).lineHeight) || 19;
+  const y = (line - 1) * height;
+  if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - 2 * height) ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+  $('#fs-lines').scrollTop = ta.scrollTop;
+  FS.mark = focus ? null : [from, to]; // the text keeps no visible selection while the find bar has the focus
+  fsDrawMark();
+}
+
+/** The match the find bar is on, outlined over the text (where the selection would show, with the focus there). */
+function fsDrawMark() {
+  const m = $('#fs-mark');
+  const ta = $('#fs-text');
+  if (!FS.mark || $('#fs-findbar').hidden || document.activeElement === ta) { m.hidden = true; return; }
+  const [from, to] = FS.mark;
+  const start = ta.value.lastIndexOf('\n', from - 1) + 1;
+  const line = ta.value.slice(0, from).split('\n').length;
+  const style = getComputedStyle(ta);
+  const ctx = (fsDrawMark.ctx ||= document.createElement('canvas').getContext('2d'));
+  ctx.font = `${style.fontSize} ${style.fontFamily}`;
+  const tabs = (s) => s.replace(/\t/g, ' '.repeat(Number(style.tabSize) || 4));
+  const left = ctx.measureText(tabs(ta.value.slice(start, from))).width;
+  const width = Math.max(ctx.measureText(tabs(ta.value.slice(from, to))).width, 2);
+  const height = parseFloat(style.lineHeight) || 19;
+  Object.assign(m.style, {
+    left: `${ta.offsetLeft + parseFloat(style.paddingLeft) + left - ta.scrollLeft}px`,
+    top: `${ta.offsetTop + parseFloat(style.paddingTop) + (line - 1) * height - ta.scrollTop}px`,
+    width: `${width}px`, height: `${height}px`,
+  });
+  m.hidden = false;
+}
+
+// ---------- finding: a file by its name, a word in the open file ----------
+
+let fsFindSeq = 0;
+async function fsFindFiles() {
+  const q = $('#fs-find').value.trim();
+  const seq = ++fsFindSeq;
+  $('#fs-tree').hidden = Boolean(q);
+  $('#fs-found').hidden = !q;
+  if (!q) return;
+  let files;
+  try { ({ files } = await api(`/api/find-files?q=${encodeURIComponent(q)}`)); } catch (e) { toast(e.message, true); return; }
+  if (seq !== fsFindSeq) return; // an answer to an earlier query
+  $('#fs-found').replaceChildren(...(files.length ? files.map((f, i) => {
+    const cut = f.lastIndexOf('/');
+    return h('button', { class: `fs-row fs-hit${i === 0 ? ' active' : ''}`, type: 'button', 'data-path': f, title: f, onclick: () => fsOpen(f) },
+      h('span', { class: 'fs-name' }, f.slice(cut + 1)), cut > 0 && h('span', { class: 'fs-dir muted' }, f.slice(0, cut)));
+  }) : [h('div', { class: 'empty' }, `No file matches "${q}".`)]));
+}
+
+function fsFindKey(e) {
+  const hits = [...$('#fs-found').querySelectorAll('.fs-hit')];
+  const at = hits.findIndex((b) => b.classList.contains('active'));
+  if (e.key === 'Escape') { $('#fs-find').value = ''; fsFindFiles(); return; }
+  if (e.key === 'Enter') { e.preventDefault(); hits[Math.max(at, 0)]?.click(); return; }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' || !hits.length) return;
+  e.preventDefault();
+  const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length;
+  hits.forEach((b, i) => b.classList.toggle('active', i === next));
+  hits[next].scrollIntoView({ block: 'nearest' });
+}
+
+/** Ctrl+F in the open file: the bar, with the selected text to look for. */
+function fsFindIn() {
+  const ta = $('#fs-text');
+  const picked = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  $('#fs-findbar').hidden = false;
+  if (picked && !picked.includes('\n')) $('#fs-q').value = picked;
+  $('#fs-q').focus();
+  $('#fs-q').select();
+  fsFindNext(0);
+}
+
+/** The next (1), previous (-1) or nearest (0) place the bar's text is in the file; it is selected. */
+function fsFindNext(step) {
+  const ta = $('#fs-text');
+  const q = $('#fs-q').value.toLowerCase();
+  const text = ta.value.toLowerCase();
+  const all = [];
+  for (let i = q ? text.indexOf(q) : -1; i !== -1 && all.length < 10000; i = text.indexOf(q, i + Math.max(q.length, 1))) all.push(i);
+  if (!all.length) { $('#fs-count').textContent = q ? 'none' : ''; return; }
+  const from = step === 0 ? ta.selectionStart : step > 0 ? ta.selectionStart + 1 : ta.selectionStart - 1;
+  let k = step < 0 ? all.findLastIndex((i) => i <= from) : all.findIndex((i) => i >= from);
+  if (k === -1) k = step < 0 ? all.length - 1 : 0; // round again from the other end
+  $('#fs-count').textContent = `${k + 1} of ${all.length}`;
+  fsSelect(all[k], all[k] + q.length, false);
+}
+
+function fsFindClose() {
+  $('#fs-findbar').hidden = true;
+  fsDrawMark();
+  $('#fs-text').focus();
 }
 
 const fsDiscard = () => ask(`Your changes to ${FS.file.path} are not saved. Leave them?`, { ok: 'Leave them', no: 'Keep editing', danger: true });
@@ -308,9 +431,12 @@ function fsReveal() {
 {
   const ta = $('#fs-text');
   ta.addEventListener('input', () => { fsMarkDirty(); fsLines(); });
-  ta.addEventListener('scroll', () => { $('#fs-lines').scrollTop = ta.scrollTop; });
+  ta.addEventListener('scroll', () => { $('#fs-lines').scrollTop = ta.scrollTop; fsDrawMark(); });
+  ta.addEventListener('focus', fsDrawMark); // the selection shows again: no outline needed
   ta.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); fsSave(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); fsFindIn(); return; }
+    if (e.key === 'F3') { e.preventDefault(); fsFindNext(e.shiftKey ? -1 : 1); return; }
     if (e.key === 'Escape') { ta.blur(); return; } // then Tab moves on, as anywhere else
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Tab' && !e.shiftKey) {
@@ -339,5 +465,100 @@ function fsReveal() {
     L.filesWide = !L.filesWide;
     applyChrome();
     saveLayout();
+  });
+  let findTimer;
+  $('#fs-find').addEventListener('input', () => { clearTimeout(findTimer); findTimer = setTimeout(fsFindFiles, 120); });
+  $('#fs-find').addEventListener('keydown', fsFindKey);
+  $('#fs-q').addEventListener('input', () => fsFindNext(0));
+  $('#fs-q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'F3') { e.preventDefault(); fsFindNext(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') { e.preventDefault(); fsFindClose(); }
+  });
+  $('#fs-q-next').addEventListener('click', () => fsFindNext(1));
+  $('#fs-q-prev').addEventListener('click', () => fsFindNext(-1));
+  $('#fs-q-close').addEventListener('click', fsFindClose);
+}
+
+// ---------- paths in what agents write: a click opens the file here ----------
+
+// a file's name with its extension, maybe folders before it and :line after - and not a piece of a web address
+const FILE_TOKEN = /(?<![\w/\\.:@-])(?:[A-Za-z]:[\\/]|\.{1,2}[\\/])?(?:[\w@.-]+[\\/])*[\w@-][\w@.-]*\.[A-Za-z]\w{0,9}(?::\d+(?::\d+)?)?(?![\w/\\-])/g;
+const FS_KNOWN = new Map(); // a path as written -> { at, v: [the project's path, line] or null }
+const KNOWN_FOR_MS = 30000;
+
+/** Which of these paths are the project's files (asked once in a while each, in one request). */
+async function fsKnown(list) {
+  const now = Date.now();
+  const unknown = [...new Set(list)].filter((p) => !(FS_KNOWN.get(p)?.at > now - KNOWN_FOR_MS)).slice(0, 200);
+  if (unknown.length && S.state) {
+    const team = S.state.team_file;
+    try {
+      const { known } = await api(`/api/files-known?paths=${encodeURIComponent(JSON.stringify(unknown))}`);
+      if (team === S.state?.team_file) for (const [p, v] of Object.entries(known)) FS_KNOWN.set(p, { at: now, v });
+    } catch { /* no link this time */ }
+  }
+  return new Map(list.map((p) => [p, FS_KNOWN.get(p)?.v ?? null]));
+}
+
+/** Text with the paths in it marked; those that are the project's files become links a moment later. */
+let fsSpanTimer = 0;
+function fsFileBits(text) {
+  const out = [];
+  let at = 0;
+  for (const m of text.matchAll(FILE_TOKEN)) {
+    out.push(text.slice(at, m.index), h('span', { class: 'maybe-file', 'data-file': m[0] }, m[0]));
+    at = m.index + m[0].length;
+  }
+  out.push(text.slice(at));
+  if (out.length > 1) { clearTimeout(fsSpanTimer); fsSpanTimer = setTimeout(fsCheckSpans, 30); }
+  return out;
+}
+
+async function fsCheckSpans() {
+  const spans = [...document.querySelectorAll('.maybe-file:not(.checked)')];
+  if (!spans.length) return;
+  for (const s of spans) s.classList.add('checked');
+  const known = await fsKnown(spans.map((s) => s.dataset.file));
+  for (const s of spans) {
+    const v = known.get(s.dataset.file);
+    if (!v) continue;
+    const open = (e) => { e.preventDefault(); e.stopPropagation(); fsOpenAt(v[0], v[1]); };
+    Object.assign(s, { tabIndex: 0, title: `Open ${v[0]}${v[1] ? ` at line ${v[1]}` : ''} in Files` });
+    s.classList.add('file-link');
+    s.setAttribute('role', 'link');
+    s.addEventListener('click', open);
+    s.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(e); });
+  }
+}
+
+/** In an agent's terminal: a path to one of the project's files is a link to it (a web address keeps its own). */
+function fsTermLinks(term) {
+  if (typeof term.registerLinkProvider !== 'function') return;
+  term.registerLinkProvider({
+    provideLinks(y, done) {
+      const line = term.buffer.active.getLine(y - 1);
+      if (!line) { done(undefined); return; }
+      let text = '';
+      const col = []; // the cell each character of `text` is in (a wide character takes two)
+      for (let x = 0; x < line.length; x++) {
+        const cell = line.getCell(x);
+        if (!cell || cell.getWidth() === 0) continue;
+        const chars = cell.getChars() || ' ';
+        text += chars;
+        for (let k = 0; k < chars.length; k++) col.push(x);
+      }
+      const found = [...text.matchAll(FILE_TOKEN)];
+      if (!found.length) { done(undefined); return; }
+      fsKnown(found.map((m) => m[0])).then((known) => {
+        const links = found.filter((m) => known.get(m[0])).map((m) => {
+          const [p, ln] = known.get(m[0]);
+          return {
+            range: { start: { x: col[m.index] + 1, y }, end: { x: col[m.index + m[0].length - 1] + 1, y } },
+            text: m[0], decorations: { underline: true, pointerCursor: true },
+            activate: (e) => { e?.preventDefault?.(); fsOpenAt(p, ln); },
+          };
+        });
+        done(links.length ? links : undefined);
+      });
+    },
   });
 }

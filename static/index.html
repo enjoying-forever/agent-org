@@ -179,7 +179,9 @@
             <button type="button" id="fs-explorer" class="icon-btn" title="Open the project folder in File Explorer" aria-label="Open in File Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
           </div>
           <div id="fs-writing" class="fs-writing" hidden><table class="locks"><thead><tr><th>Being written</th><th>by</th><th>since</th><th></th></tr></thead><tbody id="locks"></tbody></table></div>
+          <input id="fs-find" class="fs-find" type="search" placeholder="Find a file by name" aria-label="Find a file by name" spellcheck="false" autocomplete="off">
           <div id="fs-tree" class="fs-tree"></div>
+          <div id="fs-found" class="fs-tree" hidden></div>
         </div>
         <div id="fs-editor" class="fs-view" hidden>
           <div class="fs-bar">
@@ -192,8 +194,15 @@
             <button type="button" id="fs-wide" class="icon-btn" title="Wide: the file over the agents' panes, or back" aria-label="Wide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
             <button type="button" id="fs-save" class="primary small" title="Save (Ctrl+S)" disabled>Save</button>
           </div>
+          <div id="fs-findbar" class="fs-findbar" hidden>
+            <input id="fs-q" type="search" placeholder="Find in this file" aria-label="Find in this file" spellcheck="false" autocomplete="off">
+            <span id="fs-count" class="muted small"></span>
+            <button type="button" id="fs-q-prev" class="icon-btn" title="Previous (Shift+Enter)" aria-label="Previous"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg></button>
+            <button type="button" id="fs-q-next" class="icon-btn" title="Next (Enter)" aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" id="fs-q-close" class="icon-btn" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
           <div id="fs-note" class="fs-note" hidden></div>
-          <div id="fs-code" class="fs-code"><pre id="fs-lines" class="fs-lines" aria-hidden="true"></pre><textarea id="fs-text" spellcheck="false" wrap="off" autocomplete="off" aria-label="The file's text"></textarea></div>
+          <div id="fs-code" class="fs-code"><div id="fs-mark" class="fs-mark" hidden></div><pre id="fs-lines" class="fs-lines" aria-hidden="true"></pre><textarea id="fs-text" spellcheck="false" wrap="off" autocomplete="off" aria-label="The file's text"></textarea></div>
           <div id="fs-status" class="fs-status muted small"></div>
         </div>
       </div>

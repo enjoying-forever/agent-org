@@ -1306,6 +1306,7 @@ function openTerm(p) {
   if (typeof WebLinksAddon !== 'undefined') { // links in the output open in your browser (a sign-in link, say)
     term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => { e.preventDefault(); openLink(uri); }));
   }
+  fsTermLinks(term); // a path to a project file opens it in the Files tab
   term.attachCustomKeyEventHandler((e) => termKey(p, e));
   host.addEventListener('contextmenu', (e) => { e.preventDefault(); rightClick(p); });
   host.addEventListener('wheel', (e) => { // Ctrl+wheel: bigger or smaller text, in every terminal

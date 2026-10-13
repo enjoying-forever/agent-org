@@ -121,3 +121,44 @@ test('branch mode: what the owner saves is committed to main, so the agents take
   assert.equal(execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), '');
   assert.match(execFileSync('git', ['-C', root, 'log', '-1', '--format=%s'], { encoding: 'utf8' }), /you: edit app\.py/);
 });
+
+test('finding a file: in its name first, then in its folders, then letters in order', () => {
+  const files = ['src/app.ts', 'src/lib/apple.ts', 'docs/app-notes.md', 'README.md', 'src/api/paths.ts', 'tests/app.test.ts'];
+  assert.deepEqual(pf.find(files, 'app.ts'), ['src/app.ts']);
+  assert.deepEqual(pf.find(files, 'app').slice(0, 2), ['src/app.ts', 'tests/app.test.ts']);
+  assert.ok(pf.find(files, 'sapt').includes('src/api/paths.ts'), 'letters in order');
+  assert.deepEqual(pf.find(files, 'zzz'), []);
+  assert.deepEqual(pf.find(files, ''), []);
+});
+
+test("the project's files: git's list where there is one, else a walk past what is installed or built", (t) => {
+  const root = project(t);
+  mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true });
+  writeFileSync(path.join(root, 'node_modules', 'x', 'index.js'), '');
+  const walked = pf.allFiles(root);
+  assert.ok(walked.includes('src/app.ts') && !walked.some((f) => f.startsWith('node_modules') || f.startsWith('.agent-org')), walked.join());
+  assert.deepEqual(pf.allFiles(root, () => ['a.ts', '.agent-org/x', 'b.ts']), ['a.ts', 'b.ts']);
+});
+
+test('a path as an agent wrote it names the project file: relative, in full, in its own copy, with a line', (t) => {
+  const root = project(t);
+  const full = path.join(root, 'src', 'app.ts');
+  assert.deepEqual(pf.resolveLink(root, 'src/app.ts'), ['src/app.ts', 0]);
+  assert.deepEqual(pf.resolveLink(root, './src/app.ts:12'), ['src/app.ts', 12]);
+  assert.deepEqual(pf.resolveLink(root, `${full}:3:9`), ['src/app.ts', 3]);
+  assert.deepEqual(pf.resolveLink(root, full.replace(/\\/g, '/')), ['src/app.ts', 0]);
+  assert.deepEqual(pf.resolveLink(root, '.agent-org/worktrees/coder/src/app.ts:4'), ['src/app.ts', 4]);
+  for (const no of ['missing.ts', 'src', 'e.g', 'example.com', '../outside.txt', 'C:/Windows/win.ini', '.git/config']) {
+    assert.equal(pf.resolveLink(root, no), null, no);
+  }
+});
+
+test('the page: find a file, and which written paths are files', async (t) => {
+  const server = await startServer(t);
+  const root = server.hub.baseTeam.project_root;
+  mkdirSync(path.join(root, 'src'), { recursive: true });
+  writeFileSync(path.join(root, 'src', 'shop.js'), 'x\n');
+  assert.deepEqual((await server.ok('/api/find-files?q=shop')).files, ['src/shop.js']);
+  const { known } = await server.ok(`/api/files-known?paths=${encodeURIComponent(JSON.stringify(['src/shop.js:2', 'nope.js']))}`);
+  assert.deepEqual(known, { 'src/shop.js:2': ['src/shop.js', 2], 'nope.js': null });
+});
