@@ -117,17 +117,34 @@ function identity(root: string): Record<string, string> {
   return found;
 }
 
-/** Turn on history: a repository in the project folder with everything so far as its first commit. */
-export function init(root: string): string {
-  if (isOwnRepo(root)) return 'already on';
+/**
+ * Turn on history: a repository in the project folder with everything so far as its first commit - also for a
+ * repository made already with no commit yet (seen: git could make no branch from it, "invalid reference").
+ * `secrets`: what finds secrets in a diff (when the team scans for them). A file holding one is left out of that
+ * first commit and ignored from then on, so the secret never reaches history (seen: a .env's key went into it);
+ * its paths are added to `leftOut`.
+ */
+export function init(root: string, secrets: ((diff: string) => string[]) | null = null, leftOut: string[] = []): string {
+  const repo = isOwnRepo(root);
+  if (repo && hasCommits(root)) return 'already on';
   ownRepo.delete(key(root));
-  git(root, ['init'], { check: true });
+  if (!repo) git(root, ['init'], { check: true });
   const ignore = path.join(root, '.gitignore');
   const have = existsSync(ignore) ? readFileSync(ignore, 'utf8').split(/\r?\n/) : [];
   while (have.length && have[have.length - 1] === '') have.pop();
   const missing = IGNORE.filter((p) => !have.includes(p));
   if (missing.length) writeFileSync(ignore, `${[...have, ...missing].join('\n')}\n`, 'utf8');
   git(root, ['add', '-A'], { check: true });
+  if (secrets !== null) {
+    const files = [...new Set(secrets(git(root, ['diff', '--cached']).stdout).map((x) => /^(.*):\d+ \(/.exec(x)?.[1] ?? '').filter(Boolean))];
+    if (files.length) {
+      git(root, ['rm', '-q', '--cached', '--', ...files], { check: true });
+      const now = readFileSync(ignore, 'utf8').replace(/\n*$/, '\n');
+      writeFileSync(ignore, `${now}# they hold secrets: kept out of history (agent-org)\n${files.map((x) => `/${x}`).join('\n')}\n`, 'utf8');
+      git(root, ['add', '.gitignore'], { check: true });
+      leftOut.push(...files);
+    }
+  }
   git(root, ['commit', '-m', 'agent-org: starting point', '--allow-empty'], { check: true, env: identity(root) });
   ownRepo.delete(key(root));
   return 'on';
@@ -357,6 +374,36 @@ export function changedFiles(wt: string, range: string): string[] {
 export function flatten(wt: string, main: string, message: string): void {
   git(wt, ['reset', '--soft', main], { check: true });
   git(wt, ['commit', '--no-edit', '-m', message], { check: true, env: identity(wt) });
+}
+
+/**
+ * Branch mode: a task moved to another agent takes the files it changed along - into the new agent's copy as the
+ * old one left them, and out of the old one's (back to main's), so the old one's next landing does not bring them
+ * too (seen: the new agent's copy had none of it, and the task's changes seemed gone). A file the new copy
+ * changed itself is not written over. Returns [files carried, files left because the new copy has its own].
+ */
+export function handOver(fromWt: string, toWt: string, main: string, files: string[], message: string): [string[], string[]] {
+  commitAll(fromWt, message); // what it had not committed yet goes too
+  const from = head(fromWt);
+  const has = (wt: string, rev: string, f: string): boolean => git(wt, ['cat-file', '-e', `${rev}:${f}`]).returncode === 0;
+  const carried: string[] = [];
+  const kept: string[] = [];
+  for (const f of files) {
+    if (!has(fromWt, from, f) && !has(fromWt, main, f)) continue; // not there on either side: nothing to carry
+    const same = git(fromWt, ['diff', '--quiet', main, from, '--', f]).returncode === 0;
+    if (same) continue; // it did not change it after all
+    const own = git(toWt, ['diff', '--quiet', main, '--', f]).returncode !== 0 || lines(git(toWt, ['ls-files', '--others', '--exclude-standard', '--', f]).stdout).length > 0;
+    if (own) { kept.push(f); continue; }
+    if (has(fromWt, from, f)) git(toWt, ['checkout', from, '--', f], { check: true });
+    else git(toWt, ['rm', '-q', '-f', '--', f], { check: true }); // it deleted the file: so does the new copy
+    carried.push(f);
+  }
+  for (const f of carried) { // out of the old copy: back as main has it
+    if (has(fromWt, main, f)) git(fromWt, ['checkout', main, '--', f], { check: true });
+    else git(fromWt, ['rm', '-q', '-f', '--', f], { check: true });
+  }
+  if (carried.length) commitAll(fromWt, `${message}: handed over ${carried.join(', ')}`);
+  return [carried, kept];
 }
 
 /** Commit everything in the worktree (also concludes a merge whose conflicts were resolved). */

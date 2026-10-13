@@ -765,7 +765,7 @@ export function prepare(hub: Hub, teamFile: string, roles: string[], ownerTab: b
       skipped.push(`${role}: already running`);
       continue;
     }
-    if (opts.limit && running + tabs.length >= opts.limit) {
+    if (opts.limit && running + tabs.length - (ownerTab ? 1 : 0) >= opts.limit) { // agents only: the owner's tab is none
       skipped.push(`${role}: ${opts.limit} agents are running already (the team's limit)`);
       continue;
     }
@@ -931,7 +931,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 2;
     }
     [tabs, skipped] = prepare(hub, teamFile, roles.length ? roles : Object.keys(hub.baseTeam.roles), !flags.has('--no-owner'),
-      { force: flags.has('--force'), fresh: flags.has('--fresh') });
+      { force: flags.has('--force'), fresh: flags.has('--fresh'), limit: hub.baseTeam.settings.max_running }); // as the window starts them
   } finally {
     hub.close();
   }

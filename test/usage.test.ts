@@ -41,8 +41,24 @@ test('Codex usage and subscription limits', (t) => {
   writeFileSync(path.join(day, `rollout-2026-09-28T17-17-06-${SID}.jsonl`), lines({ type: 'session_meta', payload: { id: SID } },
     { type: 'turn_context', payload: { model: 'gpt-6-luna' } }, count));
   const u = usage.usage('codex', SID)!;
-  assert.deepEqual([u.tokens_in, u.tokens_cached, u.tokens_out, u.model], [400, 600, 50, 'gpt-6-luna']);
+  // its reasoning is part of its output (Codex's own data: input 120 + output 30 = 150, reasoning 10 within)
+  assert.deepEqual([u.tokens_in, u.tokens_cached, u.tokens_out, u.model], [400, 600, 40, 'gpt-6-luna']);
   assert.deepEqual(u.limits, ['5h limit: 23% used', '7d limit: 61% used']);
+});
+
+test('a Codex update with only its limits, or only its tokens, keeps the other', (t) => {
+  // reported: the last token_count was taken whole - a limits-only one zeroed the tokens, a tokens-only one the limits
+  const day = path.join(home(t), '.codex', 'sessions', '2026', '09', '29');
+  mkdirSync(day, { recursive: true });
+  const tokens = (out: number) => ({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 120, cached_input_tokens: 0, output_tokens: out } }, rate_limits: null } });
+  const limits = { type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: { primary: { used_percent: 40, window_minutes: 300 } } } };
+  const file = path.join(day, `rollout-2026-09-29T10-00-00-${SID}.jsonl`);
+  writeFileSync(file, lines({ type: 'session_meta', payload: { id: SID } }, tokens(30), limits));
+  let u = usage.usage('codex', SID)!;
+  assert.deepEqual([u.tokens_in, u.tokens_out, u.limits, u.messages], [120, 30, ['5h limit: 40% used'], 1]);
+  writeFileSync(file, lines({ type: 'session_meta', payload: { id: SID } }, tokens(30), limits, tokens(45)));
+  u = usage.usage('codex', SID)!;
+  assert.deepEqual([u.tokens_out, u.limits, u.messages], [45, ['5h limit: 40% used'], 2]);
 });
 
 function grokFolder(t: TestContext): string {

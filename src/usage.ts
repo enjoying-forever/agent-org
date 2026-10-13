@@ -170,10 +170,12 @@ function readClaude(file: string): Usage {
   return { ...count.u, messages: count.seen.size, limits: [...count.u.limits] };
 }
 
-interface CodexCount { last: Json | null; messages: number; model: string }
+// The token counts and the rate limits each from the last token_count that had them: an update may bring only one
+// (both are optional in Codex's protocol), and taking the last record whole emptied the other (seen).
+interface CodexCount { info: Json | null; limits: Json | null; messages: number; model: string }
 
 function readCodex(file: string): Usage {
-  const count = readGrowing<CodexCount>(file, () => ({ last: null, messages: 0, model: '' }), (c, line) => {
+  const count = readGrowing<CodexCount>(file, () => ({ info: null, limits: null, messages: 0, model: '' }), (c, line) => {
     if (!line.includes('"token_count"') && !line.includes('"turn_context"')) return;
     let record: Json;
     try {
@@ -183,8 +185,11 @@ function readCodex(file: string): Usage {
     }
     const payload = obj(record.payload);
     if (payload.type === 'token_count') {
-      c.last = payload;
-      c.messages += 1;
+      if (payload.info && typeof payload.info === 'object') {
+        c.info = obj(payload.info);
+        c.messages += 1; // a model call's count; a limits-only update is not one
+      }
+      if (payload.rate_limits && typeof payload.rate_limits === 'object') c.limits = obj(payload.rate_limits);
     } else if (record.type === 'turn_context') {
       c.model = (payload.model as string) || c.model;
     }
@@ -192,15 +197,16 @@ function readCodex(file: string): Usage {
   const u = emptyUsage();
   u.messages = count.messages;
   u.model = count.model;
-  const last = count.last;
-  if (last) {
-    const total = obj(obj(last.info).total_token_usage);
+  if (count.info) {
+    const total = obj(count.info.total_token_usage);
     const cached = int(total.cached_input_tokens);
     u.tokens_in = int(total.input_tokens) - cached;
     u.tokens_cached = cached;
-    u.tokens_out = int(total.output_tokens) + int(total.reasoning_output_tokens);
+    u.tokens_out = int(total.output_tokens); // its reasoning is part of it already (input 120 + output 30 = total 150)
+  }
+  if (count.limits) {
     for (const name of ['primary', 'secondary']) {
-      const window = obj(last.rate_limits)[name];
+      const window = count.limits[name];
       if (typeof window !== 'object' || window === null) continue;
       const w = obj(window);
       if (w.used_percent === null || w.used_percent === undefined) continue;

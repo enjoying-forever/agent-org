@@ -226,7 +226,7 @@ function diffEl(text) {
 async function turnOnHistory(id) {
   if (!(await ask('Turn on history? This creates a git repository in the project folder and saves everything '
     + 'as a starting point. From then on each accepted task becomes a commit.'))) return;
-  if (await act(api('/api/history', {}), () => 'History is on.')) loadChanges(id);
+  if (await act(api('/api/history', {}), (r) => `History is on.${r.left_out?.length ? ` ${r.left_out.join(', ')} hold secrets: they stay out of it (added to .gitignore).` : ''}`)) loadChanges(id);
 }
 
 async function review(t, accept, feedback = '') {
@@ -312,12 +312,18 @@ function renderProblems() {
 // ---------- activity ----------
 
 const ACT_ICON = { task: '▣', file: '✎', watch: '⚑', consultant: '★', agent: '●' };
-const A = { last: 0, events: [] };
+const A = { last: 0, events: [], team: '' }; // the team they are of: another one's never mix in
 
 async function refreshActivity() {
-  if (!S.state || S.state.last_event <= A.last) return;
+  if (!S.state) return;
+  const team = S.state.team_file;
+  if (A.team !== team) Object.assign(A, { last: 0, events: [], team });
+  if (S.state.last_event <= A.last) return;
   try {
     const { events } = await api(`/api/events?after=${A.last}`);
+    // the answer came for a team no longer open: dropped (seen: A's event 99 shown in B, which has 1, and B's
+    // never asked for again)
+    if (S.state?.team_file !== team || A.team !== team) return;
     for (const e of events) { A.events.push(e); A.last = Math.max(A.last, e.id); }
     A.events = A.events.slice(-400);
     renderActivity();
@@ -337,4 +343,5 @@ function renderActivity() {
 function resetActivity() {
   A.last = 0;
   A.events = [];
+  A.team = '';
 }

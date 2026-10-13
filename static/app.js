@@ -242,6 +242,7 @@ async function refresh() {
     enterTeam();
     applyState(state);
     if (fresh.messages.length) addMessages(fresh.messages);
+    S.loaded = true; // the team's messages so far are in: what comes now is new
     refreshOpenTask();
   } catch (e) {
     if (e instanceof NoTeam) enterHome();
@@ -376,7 +377,7 @@ function leaveTeam() {
   searchSeq += 1; // an answer still coming is for the last team
   $('#search').value = '';
   Object.assign(S, { state: null, stateKey: '', messages: [], lastId: 0, selected: null, notified: 0, focus: null, drafts: {},
-    taskShown: null, boardKey: '', problemsSeen: undefined });
+    taskShown: null, boardKey: '', problemsSeen: undefined, loaded: false });
   clearPanes();
   $('#drawer').hidden = true;
   resetActivity();
@@ -1499,14 +1500,23 @@ async function sendKeys(p, data) {
   p.pending += data;
   if (p.sending) return;
   p.sending = true;
+  // the team and the terminal it was typed into: a part goes only there (seen: a team switched while a paste
+  // went, and its rest and its Enter reached the other team's terminal of the same name)
+  const team = S.state?.team_file;
+  const termId = p.termId;
   while (p.pending) {
+    if (S.state?.team_file !== team || PANES.get(p.name) !== p || p.termId !== termId) {
+      if (PANES.get(p.name) !== p || S.state?.team_file !== team) toast(`The rest of what you pasted into ${p.name} was not sent: another team or terminal is open now.`, true);
+      p.pending = '';
+      break;
+    }
     let cut = Math.min(p.pending.length, KEYS_PART);
     const high = p.pending.charCodeAt(cut - 1);
     if (cut < p.pending.length && high >= 0xd800 && high <= 0xdbff) cut -= 1; // not between the halves of a character
     const chunk = p.pending.slice(0, cut);
     p.pending = p.pending.slice(cut);
     try {
-      await api('/api/term-input', { role: p.name, data: chunk });
+      await api('/api/term-input', { role: p.name, data: chunk, team, terminal: termId || undefined }); // 0: not known yet
     } catch (e) {
       const left = p.pending.length;
       p.pending = '';
@@ -1786,7 +1796,8 @@ function ring(title, body, onclick) {
 function notifyOwner(list) {
   const mine = list.filter((m) => m.recipient === S.state?.owner && !m.read && m.id > S.notified);
   if (!mine.length) return;
-  const first = S.notified === 0;
+  const first = !S.loaded; // what was there when the page loaded the team rings nothing - not "none so far" (seen: with an
+  // empty inbox at load, the first question afterwards was taken for an old one)
   S.notified = Math.max(...mine.map((m) => m.id));
   if (first || !document.hidden) return; // don't ring for what was there at load, or while you are looking
   // what needs you: a question, a result to review - not every report

@@ -279,9 +279,11 @@ export class Hub {
     const root = this.baseTeam.project_root;
     if (!this.branches || role === this.baseTeam.owner) return root;
     try {
-      if (!gitops.isOwnRepo(root)) {
-        gitops.init(root);
-        this.event('git', this.baseTeam.owner, 'turned history on: each agent works on its own branch');
+      if (!gitops.isOwnRepo(root) || !gitops.hasCommits(root)) {
+        const left: string[] = [];
+        gitops.init(root, this.baseTeam.settings.scan_secrets ? safety.findSecrets : null, left);
+        this.event('git', this.baseTeam.owner, 'turned history on: each agent works on its own branch'
+          + (left.length ? `; ${left.join(', ')} hold secrets and stay out of it (in .gitignore)` : ''));
       }
       const [wt, fromMain] = gitops.ensureWorktree(root, this.branchRole(role));
       // a copy just made from main has main already: its first task needs no merge (it cost eight git calls)
@@ -998,6 +1000,26 @@ export class RoleSession {
     return task;
   }
 
+  /** Branch mode: a moved task's work so far goes from the old assignee's copy to the new one's (see gitops.handOver). */
+  private handOverWork(task: Task, before: string, to: string, files: string[]): [string[], string[]] {
+    if (!this.hub.branches || !files.length || !(before in this.team.roles)) return [[], []];
+    const fromWt = this.hub.rootOf(before);
+    if (!existsSync(path.join(fromWt, '.git'))) return [[], []];
+    try {
+      const toWt = this.hub.prepareRoot(to);
+      const main = gitops.mainBranch(this.hub.baseTeam.project_root);
+      const done = gitops.handOver(fromWt, toWt, main, files, `${this.hub.branchRole(before)}: #${task.id} so far, moved to ${to}`);
+      if (done[0].length) this.hub.event('git', this.name, `handed #${task.id}'s work on ${done[0].join(', ')} from ${before} to ${to}`, task.id);
+      return done;
+    } catch (e) {
+      if (isGitError(e) || e instanceof HubError) {
+        this.hub.event('git', this.name, `could not hand #${task.id}'s work from ${before} to ${to}: ${(e as Error).message.slice(0, 200)}`, task.id);
+        return [[], []];
+      }
+      throw e;
+    }
+  }
+
   /** A task going into main right now is not cancelled or moved under it: that waits for the landing to end. */
   private notLanding(taskId: number, what: string): void {
     const at = Number(this.store.getSetting(landingKey(taskId)) || 0);
@@ -1060,6 +1082,7 @@ export class RoleSession {
       this.notLanding(taskId, 'move');
       return this.store.updateTask(taskId, { assignee: to, started_at: null, nudged_at: null });
     });
+    const [carried, kept] = this.handOverWork(task, before, to, files);
     // The parts it gave out of this task go with it: whoever has the task now reviews, cancels and sees them
     // through (seen: moved to a peer, it could not finish the task, nor settle the parts that held it back).
     const parts = this.store.parts(taskId).filter((p) => p.assigner === before && !(CLOSED as readonly string[]).includes(p.state));
@@ -1077,6 +1100,8 @@ export class RoleSession {
       }
       if (task.result) notes.push(`${before}'s last word on it: ${task.result.slice(0, 1500)}`);
       if (files.length) notes.push(`Files it changed so far: ${files.join(', ')}.`);
+      if (carried.length) notes.push(`They are in your copy as ${before} left them: ${carried.join(', ')}. Carry on from there.`);
+      if (kept.length) notes.push(`Your copy had its own changes to ${kept.join(', ')}: ${before}'s are in its branch (${gitops.BRANCH_PREFIX}${this.hub.branchRole(before)}).`);
       if (moved.length) notes.push(`You now hold its leases on: ${moved.join(', ')}.`);
       notes.push(`Its whole history: task_details(${task.id}).`);
       task = this.hub.deliverTask(task, notes.join('\n'));

@@ -267,8 +267,10 @@ async function doStep(contents: Electron.WebContents, text: string): Promise<str
     if (!step.target) return 'click what? give a CSS selector';
     const where = await locate(js, `document.querySelector(${JSON.stringify(step.target)})`, JSON.stringify(step.target));
     if (typeof where === 'string') return where;
+    // what lies over it would take the click: nothing is done (seen: the button above it was pressed instead)
+    if (where.covered) return `did not click ${where.what}: ${where.covered} lies over it - close or move that first`;
     await press(contents, where);
-    return `clicked ${where.what}${where.all > 1 ? ` (the first of ${where.all})` : ''}${where.covered ? `, but ${where.covered} lies over it there` : ''}`;
+    return `clicked ${where.what}${where.all > 1 ? ` (the first of ${where.all})` : ''}`;
   }
   if (step.verb !== 'type') return 'not a step';
   // type: the selector quoted, or the longest run of its first words that names a field
@@ -281,12 +283,14 @@ async function doStep(contents: Electron.WebContents, text: string): Promise<str
   const [selector, value] = found;
   const where = await locate(js, `document.querySelector(${JSON.stringify(selector)})`, JSON.stringify(selector));
   if (typeof where === 'string') return where;
+  const field = where.what.replace(/ "[^"]*"$/, ''); // the field by its name: what it held before is not what it holds
+  if (where.covered) return `did not type into ${field}: ${where.covered} lies over it - close or move that first`; // before any key
   await press(contents, where); // a person's click: the field takes the focus (seen: focus() alone left keys going nowhere)
+  const focused = await js(`const e = document.querySelector(${JSON.stringify(selector)}); return String(Boolean(e) && (document.activeElement === e || e.contains(document.activeElement)));`);
+  if (focused !== 'true') return `did not type into ${field}: it did not take the focus when clicked`; // the keys would go elsewhere
   contents.selectAll(); // what was in it is replaced
   await contents.insertText(value);
   const shows = await js(`const e = document.activeElement; return e ? String(e.value ?? e.textContent ?? '') : '';`);
-  const field = where.what.replace(/ "[^"]*"$/, ''); // the field by its name: what it held before is not what it holds
-  if (where.covered) return `could not type into ${field}: ${where.covered} lies over it`;
   return shows === value ? `typed "${value}" into ${field}` : `typed "${value}" into ${field}, but it shows "${shows.slice(0, 80)}"`;
 }
 

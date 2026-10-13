@@ -26,6 +26,7 @@ import { BRANCH_RULE, describeStuck, Hub, HubError, LAW } from './hub.ts';
 import { aboutKey } from './teamtree.ts';
 import * as launch from './launch.ts';
 import * as presets from './presets.ts';
+import * as safety from './safety.ts';
 import { CODE_DIR, inTest, keepRunningOnFaults, which } from './runtime.ts';
 import type { Lock, Message, Task } from './store.ts';
 import { dumpYaml, HARNESSES, parseYaml, Team, TeamError } from './team.ts';
@@ -431,6 +432,9 @@ export class App {
     const term = this.terminals.get(str(body, 'role'));
     const data = body.data;
     if (term === undefined) throw new ApiError('That agent has no terminal here.');
+    // typed for one team's terminal: not for another's of the same name, nor a later one in its place
+    if (body.team !== undefined && body.team !== this.teamFile) throw new ApiError('That terminal belongs to a team that is not open now.', 409);
+    if (body.terminal !== undefined && body.terminal !== term.id) throw new ApiError("That agent's terminal was started again: what was typed for the old one is not sent.", 409);
     if (typeof data !== 'string') throw new ApiError('send the keys as text');
     if (data.length > TERM_INPUT_MAX) throw new ApiError(`At most ${TERM_INPUT_MAX} characters at a time (the page sends a long paste in parts).`);
     term.typed(data);
@@ -545,10 +549,12 @@ export class App {
   }
 
   enableHistory(): Json {
-    const state = gitops.init(this.hub.baseTeam.project_root);
+    const left: string[] = [];
+    const state = gitops.init(this.hub.baseTeam.project_root, this.hub.baseTeam.settings.scan_secrets ? safety.findSecrets : null, left);
     this.historyCache = [0, false];
-    this.hub.event('git', this.hub.baseTeam.owner, 'turned history on');
-    return { history: state };
+    this.hub.event('git', this.hub.baseTeam.owner, 'turned history on'
+      + (left.length ? `; ${left.join(', ')} hold secrets and stay out of it (in .gitignore)` : ''));
+    return { history: state, left_out: left };
   }
 
   taskChanges(taskId: number): Json {
