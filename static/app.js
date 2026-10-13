@@ -163,7 +163,10 @@ function showBlocker() {
  * (seen: Cancel task, Move task and "Save as my team" did nothing there), and confirm() is a system box that
  * stops the whole page. Resolves to true or false; with `input` (its starting text), to the text, or null.
  */
+let answerAsk = null; // how the open question is answered: its buttons, Enter, Esc or the dialog closing
+
 function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger = false } = {}) {
+  answerAsk?.(false); // a question still open: the new one takes its place
   return new Promise((resolve) => {
     const d = $('#ask');
     const field = $('#ask-input');
@@ -176,17 +179,26 @@ function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger 
     $('#ask-cancel').textContent = no;
     $('#ask-ok').classList.toggle('danger', danger);
     $('#ask-ok').classList.toggle('primary', !danger);
-    d.returnValue = '';
-    d.addEventListener('close', () => {
-      const yes = d.returnValue === 'ok';
+    // Answered by what was done, not by the dialog's close event alone: a page out of sight does not fire it
+    // (seen: OK in a hidden window, and the question never answered). Once, whichever comes first.
+    answerAsk = (yes) => {
+      answerAsk = null;
+      if (d.open) d.close(yes ? 'ok' : '');
       resolve(input === null ? yes : yes ? field.value : null);
-    }, { once: true });
-    d.showModal();
+    };
+    d.returnValue = '';
+    if (!d.open) d.showModal();
     if (input === null) $('#ask-ok').focus(); else { field.focus(); field.select(); }
   });
 }
+$('#ask-ok').addEventListener('click', (e) => { e.preventDefault(); answerAsk?.(true); });
+$('#ask-cancel').addEventListener('click', (e) => { e.preventDefault(); answerAsk?.(false); });
+$('#ask').addEventListener('cancel', (e) => { e.preventDefault(); answerAsk?.(false); }); // Esc
+// closed some other way - but not the close of a question just answered, which comes after the next one opened
+// (seen: "Save as my team" asked its second question, and the first one's close answered it at once)
+$('#ask').addEventListener('close', () => { if (!$('#ask').open) answerAsk?.($('#ask').returnValue === 'ok'); });
 // Enter in the text is OK (a form's Enter would take its first button, Cancel)
-$('#ask-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#ask').close('ok'); } });
+$('#ask-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); answerAsk?.(true); } });
 
 function showInfo(title, ...body) {
   $('#info-title').textContent = title;

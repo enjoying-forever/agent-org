@@ -192,6 +192,11 @@ function closeCard() {
 }
 
 async function removeTeammate(name) {
+  const open = S.state.tasks.filter((t) => t.assignee === name && ['waiting', 'open', 'working', 'blocked'].includes(t.state));
+  if (open.length) { // it would be refused: say why first, without asking
+    toast(`${name} still has unfinished tasks (${open.map((t) => `#${t.id}`).join(', ')}): move or cancel them on the Board first.`, true);
+    return;
+  }
   const subs = rolesUnder(name).map((x) => x.name);
   const sup = findRole(name)?.superior;
   if (!(await ask(`Remove ${name} from the team?${subs.length ? ` ${subs.join(', ')} will report to ${sup}.` : ''} `

@@ -469,7 +469,11 @@ function askClose() {
   $('#close-dialog').showModal();
 }
 
-$('#close-dialog').addEventListener('close', () => {
-  const choice = $('#close-dialog').returnValue;
-  if (choice === 'hide' || choice === 'quit') api('/api/window', { action: choice }).catch((e) => toast(e.message, true));
-});
+// Its buttons act themselves (a dialog's close event does not come while the page is out of sight)
+for (const b of document.querySelectorAll('#close-dialog button')) {
+  b.addEventListener('click', (e) => {
+    e.preventDefault();
+    $('#close-dialog').close(b.value);
+    if (b.value === 'hide' || b.value === 'quit') api('/api/window', { action: b.value }).catch((err) => toast(err.message, true));
+  });
+}

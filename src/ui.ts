@@ -1216,7 +1216,7 @@ export class App {
     const busy = this.hub.store.tasks({ assignee: name, openOnly: true });
     if (busy.length) {
       throw new ApiError(`${name} still has unfinished tasks (${busy.map((t) => `#${t.id}`).join(', ')}): move them to someone else or `
-        + 'cancel them first (Tasks).');
+        + 'cancel them first, on the Board.');
     }
     const superior = team.roles[name].superior;
     try {
