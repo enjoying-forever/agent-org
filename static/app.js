@@ -165,7 +165,7 @@ function showBlocker() {
  */
 let answerAsk = null; // how the open question is answered: its buttons, Enter, Esc or the dialog closing
 
-function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger = false } = {}) {
+function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger = false, check = null } = {}) {
   answerAsk?.(false); // a question still open: the new one takes its place
   return new Promise((resolve) => {
     const d = $('#ask');
@@ -177,6 +177,9 @@ function ask(text, { title = '', input = null, ok = 'OK', no = 'Cancel', danger 
     field.value = input ?? '';
     $('#ask-ok').textContent = ok;
     $('#ask-cancel').textContent = no;
+    $('#ask-check-row').hidden = check === null; // a choice that goes with it, read from #ask-check after
+    $('#ask-check-label').textContent = check ?? '';
+    $('#ask-check').checked = false;
     $('#ask-ok').classList.toggle('danger', danger);
     $('#ask-ok').classList.toggle('primary', !danger);
     // Answered by what was done, not by the dialog's close event alone: a page out of sight does not fire it
@@ -558,9 +561,9 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#team-s
 $('#save-template').addEventListener('click', async () => {
   $('#more-menu').open = false;
   const name = await ask('A name for this team. It is offered whenever you create a project.',
-    { title: 'Save as my team', input: 'My team', ok: 'Save' });
+    { title: 'Save as my team', input: 'My team', ok: 'Save', check: 'Use it as the default for new projects' });
   if (name === null || !name.trim()) return;
-  const makeDefault = await ask(`Use "${name.trim()}" as the default for new projects?`, { ok: 'Make it the default' });
+  const makeDefault = $('#ask-check').checked;
   await act(api('/api/save-template', { name: name.trim(), default: makeDefault }),
     () => `Saved "${name.trim()}"${makeDefault ? ' as your default team' : ''}. Choose it when you create a team.`);
 });
@@ -1762,20 +1765,36 @@ function addMessages(list) {
   if (S.selected) renderDrawer();
 }
 
+const NOTIFY_GAP = 120; // seconds: at most one desktop notification in this time; what came meanwhile is counted in the next
+const RING = { last: 0, held: 0 };
+
+/** A desktop notification while the window is away - seldom: one in two minutes at most, saying how many more
+ * there were (seen: a notification for every report, which the owner found too frequent). */
+function ring(title, body, onclick) {
+  const now = Date.now() / 1000;
+  if (now - RING.last < NOTIFY_GAP) { RING.held += 1; return; }
+  const more = RING.held ? ` (and ${plural(RING.held, 'more thing')} since the last)` : '';
+  RING.last = now;
+  RING.held = 0;
+  try {
+    if (Notification.permission !== 'granted') return;
+    const n = new Notification(`${title}${more}`, { body: body.slice(0, 180) });
+    n.onclick = onclick;
+  } catch { /* notifications unavailable */ }
+}
+
 function notifyOwner(list) {
   const mine = list.filter((m) => m.recipient === S.state?.owner && !m.read && m.id > S.notified);
   if (!mine.length) return;
   const first = S.notified === 0;
   S.notified = Math.max(...mine.map((m) => m.id));
   if (first || !document.hidden) return; // don't ring for what was there at load, or while you are looking
-  try {
-    if (Notification.permission === 'granted') {
-      const m = mine[mine.length - 1];
-      const n = new Notification(`agent-org: ${m.kind === 'help' ? 'question' : 'message'} from ${m.sender}`,
-        { body: m.text.slice(0, 180) });
-      n.onclick = () => { comeBack(); jumpTo(m.id); };
-    }
-  } catch { /* notifications unavailable */ }
+  // what needs you: a question, a result to review - not every report
+  const needs = mine.filter((m) => m.kind === 'help' || m.kind === 'result' || m.urgent);
+  if (!needs.length) return;
+  const m = needs[needs.length - 1];
+  ring(`agent-org: ${m.kind === 'help' ? 'a question' : m.kind === 'result' ? 'a result' : 'a message'} from ${m.sender}`, m.text,
+    () => { comeBack(); jumpTo(m.id); });
 }
 
 /** A notification was clicked: the window comes to the front. */
@@ -2039,34 +2058,34 @@ function launchRoles(roles, force = false, fresh = false) {
     + (r.skipped.length ? `\nSkipped: ${r.skipped.join('; ')}` : ''));
 }
 
-async function startRole(r) {
-  if (r.stuck?.kind === 'limit' && r.stuck.until > Date.now() / 1000
-    && !(await ask(`${r.name} is ${r.stuck.describe}; it will fail again until then. Start it anyway?`))) return;
+// Asked first only where it cannot be undone or reaches far (Stop all, Start fresh, deleting, removing): an agent
+// stopped resumes with Start, a restart carries on, a file released is taken again - a question each time was
+// one too many (seen: the owner found them too frequent).
+
+function startRole(r) {
+  if (r.stuck?.kind === 'limit' && r.stuck.until > Date.now() / 1000) toast(`${r.name} is ${r.stuck.describe}: it may stop again at once.`, true);
   launchRoles([r.name]);
 }
 
-async function restartRole(name) {
-  if (!(await ask(`Restart ${name}? Its program is stopped and started again on the same conversation, `
-    + 'and it carries on with its work.'))) return;
+function restartRole(name) {
   act(api('/api/restart', { role: name }), (r) => (r.opening.length ? `Restarting ${name}.` : `Could not start ${name}: ${r.skipped.join('; ')}`));
 }
 
 async function stopRoles(role) {
-  const what = role === '@all' ? 'every running agent' : role;
-  if (!(await ask(`Stop ${what}? Its conversation is kept: "Start" resumes it later.`, { ok: 'Stop', danger: true }))) return;
+  if (role === '@all' && !(await ask('Stop every running agent? Their conversations are kept: Start resumes them.',
+    { ok: 'Stop all', danger: true }))) return;
   act(api('/api/stop', { role }), (r) => {
     const n = Object.values(r.stopped).reduce((a, b) => a + b, 0);
-    return n ? `Stopped ${plural(n, 'agent')}.` : 'Nothing was running.';
+    if (!n) return 'Nothing was running.';
+    return role === '@all' ? `Stopped ${plural(n, 'agent')}.` : `Stopped ${role}: Start resumes its conversation.`;
   });
 }
 
-async function release(path) {
-  if (!(await ask(`Release ${path}? Whoever holds it can no longer write it.`, { ok: 'Release' }))) return;
-  act(api('/api/release', { path }), (l) => `Released ${l.path}.`);
+function release(path) {
+  act(api('/api/release', { path }), (l) => `Released ${l.path}: others may write it now.`);
 }
 
-async function dismiss(name) {
-  if (!(await ask(`Dismiss ${name}? Its files go back to the agent it helps.`, { ok: 'Dismiss' }))) return;
+function dismiss(name) {
   act(api('/api/dismiss', { name }), (r) =>
     `Dismissed ${r.name}.` + (r.returned.length ? ` Files returned: ${r.returned.join(', ')}` : ''));
 }

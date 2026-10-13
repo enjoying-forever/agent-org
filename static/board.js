@@ -301,12 +301,7 @@ function notifyProblems(list) {
   const first = !S.problemsSeen;
   S.problemsSeen = new Set(list.map((p) => `${p.kind}:${p.role}`));
   if (first || !fresh.length || !document.hidden) return;  // not for what was there at load, or while you look
-  try {
-    if (Notification.permission === 'granted') {
-      const n = new Notification('agent-org needs you', { body: fresh[0].text.slice(0, 180) });
-      n.onclick = () => { comeBack(); if (fresh[0].role && findRole(fresh[0].role)) focusPane(fresh[0].role); };
-    }
-  } catch { /* notifications unavailable */ }
+  ring('agent-org needs you', fresh[0].text, () => { comeBack(); if (fresh[0].role && findRole(fresh[0].role)) focusPane(fresh[0].role); });
 }
 
 /** Problems show where they are (a pane's title and outline); this only notifies you while away. */

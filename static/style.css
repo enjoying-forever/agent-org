@@ -1152,3 +1152,4 @@ dialog.ask { width: min(460px, calc(100vw - 32px)); }
 .folder-status.has-team { color: var(--working); font-weight: 600; }
 #folder-card #start-team { margin-top: 10px; }
 #folder-card #create-go { margin-top: 14px; }
+.ask-check { display: flex; gap: 8px; align-items: center; margin: -4px 0 14px; font-size: 13.5px; }
